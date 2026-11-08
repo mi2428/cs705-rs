@@ -581,14 +581,15 @@ impl Icf<'_> {
             GpsAltitude::TenthsOfFoot(raw)
         }))
     }
-    /// Store Unknown or -328080..328080 tenths of a foot, without unit rounding.
+    /// Store Unknown or -328084..=328084 tenths of a foot, without unit rounding.
     /// # Errors
     /// Rejects invalid new altitude or slot/order. Unknown current bits may be replaced.
     pub fn set_physical_gps_altitude(&mut self, p: usize, value: GpsAltitude) -> Result<(), Error> {
         let at = self.gps_target(p)? + 14;
         let raw = match value {
             GpsAltitude::Unknown => i32::MAX,
-            GpsAltitude::TenthsOfFoot(n) if (-328080..=328080).contains(&n) => n,
+            // BAF74 matches the integer-meter endpoints converted through D512C.
+            GpsAltitude::TenthsOfFoot(n) if (-328084..=328084).contains(&n) => n,
             _ => return Err(invalid(at, "GPS new altitude outside tenths-foot range")),
         };
         self.memory[at..at + 4].copy_from_slice(&raw.to_le_bytes());

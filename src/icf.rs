@@ -5878,10 +5878,32 @@ mod tests {
                 })
             );
         }
-        for value in [-328081, 328081, i32::MAX] {
+        for value in [i32::MIN, -328085, 328085, i32::MAX] {
             message_rejected(&mut image, (true, 5 + (at + 14) / 32), |i| {
                 i.set_physical_gps_altitude(p, GpsAltitude::TenthsOfFoot(value))
             });
+        }
+        let before = image.memory().to_vec();
+        for value in [
+            -328084_i32,
+            -328083,
+            -328082,
+            -328081,
+            328081,
+            328082,
+            328083,
+            328084,
+        ] {
+            image
+                .set_physical_gps_altitude(p, GpsAltitude::TenthsOfFoot(value))
+                .unwrap();
+            let mut expected = before.clone();
+            expected[at + 14..at + 18].copy_from_slice(&value.to_le_bytes());
+            assert_eq!(image.memory(), expected);
+            assert_eq!(
+                image.physical_gps_altitude(p).unwrap(),
+                Some(GpsAltitude::TenthsOfFoot(value))
+            );
         }
         image
             .set_physical_gps_altitude(p, GpsAltitude::TenthsOfFoot(-328080))
