@@ -628,6 +628,7 @@ fn digit(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     mod scope;
+    mod scope_ref;
     use super::*;
 
     fn rev5_memory() -> Vec<u8> {

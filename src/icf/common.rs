@@ -1623,3 +1623,50 @@ stored_enum!(ScopeWaterfallSpeed, scope_waterfall_speed, set_scope_waterfall_spe
 stored_enum!(ScopeWaterfallSize, scope_waterfall_size_expand, set_scope_waterfall_size_expand, 0x39738, "Spectrum waterfall size (Expand Screen)", {Small = 0, Mid = 1, Large = 2});
 stored_enum!(ScopeWaterfallPeak, scope_waterfall_peak_color_level, set_scope_waterfall_peak_color_level, 0x39729, "Spectrum waterfall peak color level", {Grid1 = 0, Grid2 = 1, Grid3 = 2, Grid4 = 3, Grid5 = 4, Grid6 = 5, Grid7 = 6, Grid8 = 7});
 stored_setting!(scope_waterfall_marker_autohide, set_scope_waterfall_marker_autohide, bool, 0x39739, "Spectrum waterfall marker auto-hide", {0 => false, 1 => true});
+
+// Key 0x362: RVA 0x7b025..0x7b0c0 loads/stores a biased LE16 word per physical slot.
+fn scope_reference_offset(slot: usize) -> Result<usize, Error> {
+    if slot >= 17 {
+        return Err(Error::Unsupported {
+            line: 5,
+            reason: "Scope REF physical slot outside 0..=16",
+        });
+    }
+    Ok(0x377db + 2 * slot)
+}
+
+impl Icf<'_> {
+    /// Read a physical slot's stored REF level in tenths of a dB, without repair.
+    /// All raw LE16 words are returned after subtracting 200 (-200..=65335),
+    /// including unknown old values: raw FFFF returns 65335, not a default.
+    /// Physical slots 0..=16 imply no band/model mapping or GUI visibility claim.
+    /// # Errors
+    /// Rejects an invalid slot before offset arithmetic.
+    pub fn scope_reference_level_tenths_db(&self, slot: usize) -> Result<i32, Error> {
+        let at = scope_reference_offset(slot)?;
+        let raw = u16::from_le_bytes([self.memory[at], self.memory[at + 1]]);
+        Ok(i32::from(raw) - 200)
+    }
+
+    /// Replace only one REF word with -200..=200 tenths dB in steps of 5 (0.5 dB).
+    /// A valid new value explicitly replaces any old raw word. No current-value
+    /// guard, rounding, clamp, GUI text parser/quantizer or device I/O is applied.
+    /// All other bytes, metadata, source and prior successful edits are preserved.
+    /// # Errors
+    /// Slot bounds take priority; invalid new values leave all state unchanged.
+    pub fn set_scope_reference_level_tenths_db(
+        &mut self,
+        slot: usize,
+        value: i32,
+    ) -> Result<(), Error> {
+        let at = scope_reference_offset(slot)?;
+        if !(-200..=200).contains(&value) || value % 5 != 0 {
+            return Err(Error::Invalid {
+                line: 5 + at / RECORD_BYTES,
+                reason: "new Scope REF level requires -200..=200 tenths dB in steps of 5",
+            });
+        }
+        self.memory[at..at + 2].copy_from_slice(&((value + 200) as u16).to_le_bytes());
+        Ok(())
+    }
+}
