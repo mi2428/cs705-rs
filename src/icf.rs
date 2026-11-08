@@ -4906,6 +4906,214 @@ mod tests {
         );
     }
 
+    fn layout_test_memory(count: usize, canonical: bool) -> Vec<u8> {
+        // Independent literal model, Python oracle.py verifies all four complete
+        // files. Not derived from canonicalize_memory_layout or its output.
+        let mut m: Vec<u8> = (0..IMAGE_BYTES)
+            .map(|i| (71 * i + (i >> 6) + 29) as u8)
+            .collect();
+        m[0x355a1] = 6;
+        m[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        let mut rows = [[None; 100]; 100];
+        if count == 6 {
+            for (g, r, p) in [
+                (0, 0, 499),
+                (0, 7, 3),
+                (0, 99, 200),
+                (2, 2, 17),
+                (2, 50, 450),
+                (98, 99, 0),
+            ] {
+                rows[g][r] = Some(p);
+            }
+        } else {
+            for i in 0..count {
+                rows[i / 100][i % 100] = Some((137 * i + 299) % 500);
+            }
+        }
+        let order: Vec<_> = (0..100)
+            .map(|g| if canonical { g } else { (37 * g + 19) % 100 })
+            .collect();
+        let mut used = [false; 500];
+        for (g, &d) in order.iter().enumerate() {
+            let at = 0x355c0 + 19 * d;
+            m[at] = if g == 99 { 255 } else { order[g + 1] as u8 };
+            let slots: Vec<_> = rows[g].iter().flatten().copied().collect();
+            m[at + 1..at + 3]
+                .copy_from_slice(&slots.first().map_or(65535_u16, |&p| p as u16).to_le_bytes());
+            m[at + 3..at + 19].fill(b' ');
+            if [0, 5, 98].contains(&g) {
+                m[at + 3..at + 19].fill(128 + (g % 64) as u8);
+                m[at + 3..at + 6].copy_from_slice(&[0, 255, b'A']);
+            }
+            m[0x36114 + 13 * g..0x36114 + 13 * g + 13].fill(255);
+            m[0x36114 + 13 * g + 12] = (((g * 7) & 15) as u8) << 4 | 15;
+            for (r, p) in rows[g].iter().enumerate() {
+                if p.is_some() {
+                    m[0x36114 + 13 * g + r / 8] &= !(1 << (r % 8));
+                }
+            }
+            for (n, &p) in slots.iter().enumerate() {
+                used[p] = true;
+                let next = slots.get(n + 1).map_or(65535_u16, |&q| q as u16);
+                m[0x35d2c + 2 * p..0x35d2e + 2 * p].copy_from_slice(&next.to_le_bytes());
+            }
+        }
+        let mut free: Vec<_> = (0..500).filter(|&p| !used[p]).collect();
+        if !canonical {
+            free.reverse();
+        }
+        for (n, &p) in free.iter().enumerate() {
+            let next = free.get(n + 1).map_or(65535_u16, |&q| q as u16);
+            m[0x35d2c + 2 * p..0x35d2e + 2 * p].copy_from_slice(&next.to_le_bytes());
+        }
+        m[0x36628] = order[0] as u8;
+        m[0x36629..0x3662b]
+            .copy_from_slice(&free.first().map_or(65535_u16, |&p| p as u16).to_le_bytes());
+        m[0x3662b..0x3662d]
+            .copy_from_slice(&free.last().map_or(65535_u16, |&p| p as u16).to_le_bytes());
+        for p in 0..500 {
+            m[0x3662d + p] = ((14 * p + 128) as u8 & 254) | u8::from(!used[p]);
+        }
+        m
+    }
+
+    #[test]
+    fn canonical_memory_layout_preserves_rows_names_records_and_is_idempotent() {
+        for (count, initial_cd, initial_hash, final_cd, final_hash) in [
+            (
+                6,
+                "0FDF570CC55087C777AFE0EB7C680F05",
+                "FAD6B6006B717BD2612E55CF40EEC18A",
+                "9086BA500D533FF8C2931276345EFBA3",
+                "662E7E86C7012DFB6AF7B6DA04BA6CF3",
+            ),
+            (
+                0,
+                "DAD134E72B7D71FE0CAD5BDF50689399",
+                "F69BC2F9724C8BB9AEC48216BD2E5B3C",
+                "84A95A1B3A82D97375FC42E29C08AE9B",
+                "9036214FBB4D382DD596368DDDBE5FBA",
+            ),
+            (
+                499,
+                "FAD8AC3DA16DF5DF632C04F773462859",
+                "8E28FC9312A3EB303B98A0CAEB28EA86",
+                "1921C26320001BE5486000ACD9765F26",
+                "EA752D3F294479E1DD1636F36F5407F6",
+            ),
+            (
+                500,
+                "73154DFEDEBE690F012A00F16349A859",
+                "69A09222BC037C356FD421EA23146CDC",
+                "3A686CF654C07E7318100EDAB990F1DC",
+                "14B9B3F4D98E2705E062A5E3C61F7ABF",
+            ),
+        ] {
+            let initial = layout_test_memory(count, false);
+            let expected = layout_test_memory(count, true);
+            let source = fixture_with_memory(&initial, initial_cd);
+            assert_eq!(format!("{:X}", md5::compute(&source)), initial_hash);
+            let mut image = Icf::parse(&source).unwrap();
+            assert_eq!(image.to_bytes(), source);
+            let semantic: Vec<_> = image
+                .memory_groups()
+                .unwrap()
+                .iter()
+                .map(|g| (g.name_bytes().to_vec(), *g.slots()))
+                .collect();
+            image.canonicalize_memory_layout().unwrap();
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(
+                image.raw_memory_group_order().unwrap(),
+                std::array::from_fn(|n| n)
+            );
+            let after: Vec<_> = image
+                .memory_groups()
+                .unwrap()
+                .iter()
+                .map(|g| (g.name_bytes().to_vec(), *g.slots()))
+                .collect();
+            assert_eq!(after, semantic);
+            // Verify the three allowed write windows; all mask padding/flags,
+            // Home/global references and all 83-byte records remain byte-identical.
+            for (at, (&before, &after)) in initial.iter().zip(&expected).enumerate() {
+                if !(0x355c0..0x36114).contains(&at) && !(0x36628..0x3662d).contains(&at) {
+                    assert_eq!(before, after, "offset {at:x}");
+                }
+            }
+            let output = image.to_bytes();
+            assert!(output.ends_with(format!("#CD={final_cd}\r\n").as_bytes()));
+            assert_eq!(format!("{:X}", md5::compute(&output)), final_hash);
+            image.canonicalize_memory_layout().unwrap();
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.to_bytes(), output);
+            let mut parsed = Icf::parse(&output).unwrap();
+            assert_setting_state(&parsed, &output, &expected);
+            parsed.canonicalize_memory_layout().unwrap();
+            assert_eq!(parsed.to_bytes(), output);
+        }
+    }
+
+    #[test]
+    fn canonical_memory_layout_rejects_inconsistent_maps_flags_and_free_lists_atomically() {
+        let initial = layout_test_memory(6, false);
+        let source = fixture_with_memory(&initial, "0FDF570CC55087C777AFE0EB7C680F05");
+        let first = 0x355c0 + 19 * 19;
+        let last = 0x355c0 + 19 * ((37 * 99 + 19) % 100);
+        let g2 = 0x355c0 + 19 * 93;
+        let cases: Vec<(usize, Vec<u8>)> = vec![
+            (0x36628, vec![100]),
+            (first, vec![19]),
+            (last, vec![0]),
+            (first + 1, vec![244, 1]),
+            (0x35d2c + 2 * 3, vec![244, 1]),
+            (g2 + 1, vec![243, 1]), // duplicate occupied p499
+            (0x3662d + 499, vec![initial[0x3662d + 499] | 1]),
+            (first + 1, vec![255, 255]), // head ends before a required row
+            (0x35d2c + 2 * 3, vec![255, 255]), // late required row99 missing
+            (
+                0x36114 + 13 * 99 + 12,
+                vec![initial[0x36114 + 13 * 99 + 12] & !8],
+            ),
+            (0x3662d + 498, vec![initial[0x3662d + 498] & !1]), // orphan used
+            (0x36629, vec![244, 1]),
+            (0x3662b, vec![244, 1]),
+            (0x36629, vec![255, 255]),
+            (0x3662b, vec![255, 255]),
+            (0x36629, vec![243, 1]),           // used head
+            (0x36629, vec![241, 1]),           // missing free498
+            (0x3662b, vec![2, 0]),             // wrong actual tail
+            (0x35d2c + 2 * 498, vec![240, 1]), // missing free497
+            (0x35d2c + 2, vec![244, 1]),       // invalid free next after full traversal
+            (0x35d2c + 2, vec![1, 0]),         // late free cycle
+        ];
+        for (at, bytes) in cases {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[at..at + bytes.len()].copy_from_slice(&bytes);
+            let before = image.memory().to_vec();
+            let serialized = image.to_bytes();
+            assert!(
+                matches!(
+                    image.canonicalize_memory_layout(),
+                    Err(Error::Unsupported { .. })
+                ),
+                "case {at:x}"
+            );
+            assert_setting_state(&image, &source, &before);
+            assert_eq!(image.to_bytes(), serialized);
+        }
+        let initial = layout_test_memory(0, false);
+        let source = fixture_with_memory(&initial, "DAD134E72B7D71FE0CAD5BDF50689399");
+        let mut image = Icf::parse(&source).unwrap();
+        image.memory[0x35d2c..0x35d2e].copy_from_slice(&[243, 1]);
+        let before = image.memory().to_vec();
+        let output = image.to_bytes();
+        assert!(image.canonicalize_memory_layout().is_err());
+        assert_setting_state(&image, &source, &before);
+        assert_eq!(image.to_bytes(), output);
+    }
+
     fn gps_fixture() -> Vec<u8> {
         // Independent Python struct/hashlib, never product output: sparse
         // order [299,7,0], starts g0=0/g2=1/g26=2, zero/FF/known raw records.
