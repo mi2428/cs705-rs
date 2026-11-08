@@ -12,6 +12,8 @@
 //! places using integer division/remainder, not the original float/locale codec.
 //! Named enum/UTC setters edit one raw column only; they do not reproduce source
 //! row-export coupling, clear companion cells or certify radio suitability.
+//! Group Name/callsign edits are local ASCII replacements, not group renames,
+//! ICF gateway allocation/unlink or original-OS character normalization.
 //! Sub Name, Hz, enum and UTC edits have not been compared with the original GUI.
 //! No source application normalization, truncation, padding or defaulting is performed.
 //! Successful parsing establishes structure only, not general CS-705
@@ -435,6 +437,91 @@ impl<'a> Csv<'a> {
         Ok(())
     }
 
+    /// Replace only this row's Group Name (column 1) with 0..=16 safe ASCII bytes.
+    ///
+    /// Leading/interior spaces and case are retained; trailing space, comma,
+    /// semicolon and quote are unsupported. No trim/clip/pad/OS conversion occurs.
+    /// This is a local raw edit, not a group rename or original-GUI compatibility:
+    /// Group No, ICF groups and other rows with the same Group No remain unchanged.
+    /// Unknown/overlength old cells may be explicitly replaced.
+    /// # Errors
+    /// Row bounds take priority over new input validation. Errors change no cells.
+    pub fn set_group_name(&mut self, index: usize, name: &[u8]) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if name.len() > 16
+            || name
+                .iter()
+                .any(|b| !(b' '..=b'~').contains(b) || b",;\"".contains(b))
+            || name.ends_with(b" ")
+        {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "Group Name requires at most 16 safe ASCII bytes without trailing spaces",
+            });
+        }
+        row.cells[1] = Cow::Owned(name.to_vec());
+        Ok(())
+    }
+
+    /// Replace only Repeater Call Sign (column 4) with 0..=8 canonical ASCII bytes.
+    ///
+    /// Accepts space, slash, digits and A-Z, without trailing spaces. No uppercase,
+    /// trim/clip/pad or OS character correction occurs. This raw text edit does
+    /// not validate radio references, change mode or allocate ICF gateway links.
+    /// Unknown/overlength old cells may be explicitly replaced.
+    /// # Errors
+    /// Row bounds take priority; unsupported new bytes/length leave all cells intact.
+    pub fn set_repeater_call_sign(&mut self, index: usize, value: &[u8]) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if value.len() > 8
+            || !value
+                .iter()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || matches!(b, b' ' | b'/'))
+            || value.ends_with(b" ")
+        {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "Repeater Call Sign requires at most 8 canonical ASCII bytes without trailing spaces",
+            });
+        }
+        row.cells[4] = Cow::Owned(value.to_vec());
+        Ok(())
+    }
+
+    /// Replace only Gateway Call Sign (column 5) with 0..=8 canonical ASCII bytes.
+    ///
+    /// Accepts space, slash, digits and A-Z, without trailing spaces. Empty text
+    /// clears this CSV cell only, not an ICF shared link. No allocation/unlink,
+    /// companion mutation, trim/clip/pad/uppercase or original-OS mapping occurs.
+    /// This local raw subset is not full GUI input or gateway-reference validation.
+    /// # Errors
+    /// Row bounds take priority; unsupported new bytes/length leave all cells intact.
+    pub fn set_gateway_call_sign(&mut self, index: usize, value: &[u8]) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if value.len() > 8
+            || !value
+                .iter()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || matches!(b, b' ' | b'/'))
+            || value.ends_with(b" ")
+        {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "Gateway Call Sign requires at most 8 canonical ASCII bytes without trailing spaces",
+            });
+        }
+        row.cells[5] = Cow::Owned(value.to_vec());
+        Ok(())
+    }
+
     /// Serialize without normalization, preserving every unedited byte and order.
     ///
     /// No file or device is accessed. The result has the same limited syntax as
@@ -474,6 +561,225 @@ mod tests {
         "1,GROUP1,FM test,FM,,,145.000000,DUP-,0.600000,FM,TONE,88.5Hz,NO,Approximate,-35.500000,139.750000,0:00\r\n",
         "50,GROUP50,DV test,DV,TEST01 B,TEST01 G,439.000000,DUP-,5.000000,DV,,,YES,Exact,35.500000,139.750000,+9:00\r\n",
     ).as_bytes();
+
+    fn text_csv_literal(change: Option<(usize, &[u8])>) -> Vec<u8> {
+        // Independent cell literals, including overlength/opaque old text and
+        // a second row with the same Group No. No product row/setter is an oracle.
+        let cells: [&[u8]; 17] = [
+            b"1",
+            b"\x83\x5c-opaque-group-over16",
+            b"\x82\xa2",
+            b"opaque-long",
+            b"\x82\xa0-old-repeater-long",
+            b"\x81\x40-old-gateway-long",
+            b"freq",
+            b"dup",
+            b"offset",
+            b"mode",
+            b"tone",
+            b"rtone",
+            b"use",
+            b"pos",
+            b"lat",
+            b"lon",
+            b"utc",
+        ];
+        let mut text = HEADER.to_vec();
+        for (c, &cell) in cells.iter().enumerate() {
+            if c != 0 {
+                text.push(b',');
+            }
+            text.extend_from_slice(match change {
+                Some((column, value)) if column == c => value,
+                _ => cell,
+            });
+        }
+        text.extend_from_slice(b"\r\n1,Keep Group,Keep Name,Keep Sub,OLD CALL,OLD GATE,oldfreq,olddup,oldoffset,oldmode,oldtone,oldrtone,olduse,oldpos,oldlat,oldlon,oldutc\r\n");
+        text
+    }
+
+    #[test]
+    fn csv_ascii_text_edits_preserve_other_cells_rows_and_raw_borrows() {
+        let source = text_csv_literal(None);
+        let original = source.clone();
+        assert_eq!(Csv::parse(&source).unwrap().to_bytes(), source);
+        macro_rules! check {
+            ($column:literal,$method:ident,$values:expr) => {
+                for value in $values {
+                    let mut csv = Csv::parse(&source).unwrap();
+                    let pointers: Vec<_> = csv
+                        .rows()
+                        .iter()
+                        .map(|r| r.cells().map(|c| c.as_ptr()))
+                        .collect();
+                    csv.$method(0, value).unwrap();
+                    let expected = text_csv_literal(Some(($column, value)));
+                    assert_eq!(csv.to_bytes(), expected);
+                    assert_eq!(csv.rows()[0].cells()[$column], value);
+                    for (r, row) in csv.rows().iter().enumerate() {
+                        for (c, cell) in row.cells().iter().enumerate() {
+                            if (r, c) != (0, $column) {
+                                assert_eq!(cell.as_ptr(), pointers[r][c]);
+                            }
+                        }
+                    }
+                    let parsed = Csv::parse(&expected).unwrap();
+                    assert_eq!(parsed.to_bytes(), expected);
+                }
+            };
+        }
+        check!(
+            1,
+            set_group_name,
+            [
+                b"".as_slice(),
+                b"0123456789AbCdEf",
+                b" a B",
+                b"!#$%&'()*+-./:<?"
+            ]
+        );
+        check!(
+            4,
+            set_repeater_call_sign,
+            [b"".as_slice(), b"A0/B1C2D", b" A/B0Z", b" A B"]
+        );
+        check!(
+            5,
+            set_gateway_call_sign,
+            [b"".as_slice(), b"A0/B1C2G", b" A/B0Z", b" A B"]
+        );
+        for byte in 0..=255_u8 {
+            let value = [byte, b'Z'];
+            let group_ok = (32..=126).contains(&byte) && !b",;\"".contains(&byte);
+            let call_ok =
+                byte.is_ascii_uppercase() || byte.is_ascii_digit() || b" /".contains(&byte);
+            for column in [1, 4, 5] {
+                let mut csv = Csv::parse(&source).unwrap();
+                let result = match column {
+                    1 => csv.set_group_name(0, &value),
+                    4 => csv.set_repeater_call_sign(0, &value),
+                    _ => csv.set_gateway_call_sign(0, &value),
+                };
+                if if column == 1 { group_ok } else { call_ok } {
+                    result.unwrap();
+                    assert_eq!(csv.to_bytes(), text_csv_literal(Some((column, &value))));
+                } else {
+                    assert!(matches!(result, Err(Error::Unsupported { line: 2, .. })));
+                    assert_eq!(csv.to_bytes(), source);
+                }
+            }
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_group_name(0, b"Local Group").unwrap();
+        csv.set_repeater_call_sign(0, b" CALL/1").unwrap();
+        csv.set_gateway_call_sign(0, b" GATE/2").unwrap();
+        csv.set_name(0, b"Name").unwrap();
+        csv.set_sub_name(0, b"Sub").unwrap();
+        csv.set_frequency_hz(0, 30000).unwrap();
+        csv.set_offset_hz(0, 100).unwrap();
+        csv.set_mode(0, RepeaterMode::Dv).unwrap();
+        csv.set_duplex(0, RepeaterDuplex::Off).unwrap();
+        csv.set_tone(0, RepeaterTone::ToneSquelch).unwrap();
+        csv.set_rpt1_use(0, true).unwrap();
+        csv.set_position(0, RepeaterPosition::None).unwrap();
+        csv.set_utc_offset_minutes(0, -330).unwrap();
+        let expected=[HEADER,b"1,Local Group,Name,Sub, CALL/1, GATE/2,0.030000,OFF,0.000100,DV,TSQL,rtone,YES,None,lat,lon,-5:30\r\n",b"1,Keep Group,Keep Name,Keep Sub,OLD CALL,OLD GATE,oldfreq,olddup,oldoffset,oldmode,oldtone,oldrtone,olduse,oldpos,oldlat,oldlon,oldutc\r\n"].concat();
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        assert_eq!(source, original);
+    }
+
+    #[test]
+    fn csv_ascii_text_bounds_late_errors_and_last_row_are_atomic() {
+        let row=b"1,OLD-GROUP-LONG-OPAQUE,Name,Sub,OLD-REPEATER-LONG,OLD-GATEWAY-LONG,f,d,o,m,t,r,u,p,lat,lon,utc\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        let pointers: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        csv.set_group_name(2499, b"0123456789ABCDEF").unwrap();
+        csv.set_repeater_call_sign(2499, b"A0/B1C2D").unwrap();
+        csv.set_gateway_call_sign(2499, b"A0/B1C2G").unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(
+            b"1,0123456789ABCDEF,Name,Sub,A0/B1C2D,A0/B1C2G,f,d,o,m,t,r,u,p,lat,lon,utc\r\n",
+        );
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        for (r, row) in csv.rows().iter().enumerate() {
+            for (c, cell) in row.cells().iter().enumerate() {
+                if r != 2499 || ![1, 4, 5].contains(&c) {
+                    assert_eq!(cell.as_ptr(), pointers[r][c]);
+                }
+            }
+        }
+        for index in [0, 2499] {
+            for value in [
+                b"0123456789ABCDEFG".as_slice(),
+                b"GOOD ",
+                b" GOOD ",
+                b"GOOD,",
+                b"GOOD;",
+                b"GOOD\"",
+                b"GOOD\0",
+                b"GOOD\x7f",
+                b"GOOD\xff",
+            ] {
+                assert!(
+                    matches!(csv.set_group_name(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+            for value in [
+                b"ABCDEFGHI".as_slice(),
+                b"CALL ",
+                b" CALL ",
+                b"CALLa",
+                b"CALL_",
+                b"CALL*",
+                b"CALL#",
+                b"CALL,",
+                b"CALL;",
+                b"CALL\"",
+                b"CALL\0",
+                b"CALL\x7f",
+                b"CALL\xff",
+            ] {
+                assert!(
+                    matches!(csv.set_repeater_call_sign(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+                assert!(
+                    matches!(csv.set_gateway_call_sign(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+        }
+        for index in [2500, usize::MAX] {
+            let error = Err(Error::RowIndexOutOfBounds { index });
+            assert_eq!(csv.set_group_name(index, b"\xffinvalid-overlength"), error);
+            assert_eq!(
+                csv.set_repeater_call_sign(index, b"\xffinvalid-long"),
+                error
+            );
+            assert_eq!(csv.set_gateway_call_sign(index, b"\xffinvalid-long"), error);
+            assert_eq!(csv.to_bytes(), expected);
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        let error = Err(Error::RowIndexOutOfBounds { index: 0 });
+        assert_eq!(empty.set_group_name(0, b"\0"), error);
+        assert_eq!(empty.set_repeater_call_sign(0, b"a"), error);
+        assert_eq!(empty.set_gateway_call_sign(0, b"a"), error);
+        assert_eq!(empty.to_bytes(), HEADER);
+    }
 
     fn enum_csv_literal(change: Option<(usize, &[u8])>) -> Vec<u8> {
         // Independent raw cell literals; never built from a product setter/row.
