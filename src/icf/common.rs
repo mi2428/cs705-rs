@@ -1271,3 +1271,162 @@ impl Icf<'_> {
         Ok(())
     }
 }
+
+// Canonical stored CW/RTTY/DTMF scalars, not GUI correction or transmission.
+
+// Exactly three COLORREF-order bytes, never the following USOS/log byte.
+macro_rules! stored_color {
+    ($get:ident, $set:ident, $at:literal) => {
+        impl Icf<'_> {
+            /// Read three raw COLORREF-order components (each 0..=255). No I/O.
+            pub fn $get(&self) -> Result<[u8; 3], Error> {
+                Ok(self.memory[$at..$at + 3]
+                    .try_into()
+                    .expect("three color bytes"))
+            }
+            /// Change only three COLORREF-order bytes; preserve all other state.
+            pub fn $set(&mut self, value: [u8; 3]) -> Result<(), Error> {
+                self.$get()?;
+                self.memory[$at..$at + 3].copy_from_slice(&value);
+                Ok(())
+            }
+        }
+    };
+}
+// Raw byte units only: speed, not WPM.
+// Key 0x2c1: handler RVA 76da4..76e97, store RVA 76de6 (A2-H56068-01).
+raw_level!(cw_speed_raw, set_cw_speed_raw, 0x3999d);
+// Key 0x2c2: handler RVA 76e9c..76f0c, store RVA 76f05 (A2-H56068-02).
+bounded_word!(
+    cw_pitch_hz,
+    set_cw_pitch_hz,
+    u16,
+    0x3999e,
+    300,
+    900,
+    "CW pitch in integer Hz (300..=900, step 5)",
+    5
+);
+// Key 0x2c3: handler RVA 76f11..76f5b, store RVA 76f55 (A2-H56068-03).
+stored_enum!(CwNumberStyle, cw_number_style, set_cw_number_style, 0x3996d, "cw number style", {Normal = 0, Digits190Ano = 1, Digits190Ant = 2, Digits90No = 3, Digits90Nt = 4});
+// Key 0x2c4: handler RVA 76f60..76faa, store RVA 76fa4 (A2-H56068-04).
+bounded_byte!(
+    cw_count_up_trigger_channel,
+    set_cw_count_up_trigger_channel,
+    0x3996e,
+    1,
+    8,
+    0,
+    "CW one-based trigger channel M1..M8, not a zero-based memory index"
+);
+// Key 0x2c5: handler RVA 76faf..76ffe, store RVA 76ff7 (A2-H56068-05).
+bounded_word!(
+    cw_contest_number,
+    set_cw_contest_number,
+    u16,
+    0x3996f,
+    1,
+    9999,
+    "CW contest integer counter (1..=9999), not BCD"
+);
+// Raw byte units only: side tone, not percent.
+// Key 0x2c6: handler RVA 77003..77186, store RVA 77161 (A2-H56068-06).
+raw_level!(cw_side_tone_level_raw, set_cw_side_tone_level_raw, 0x39722);
+// Key 0x2c7: handler RVA 7718b..771d5, store RVA 771cf (A2-H56068-07).
+stored_setting!(cw_side_tone_limiter, set_cw_side_tone_limiter, bool, 0x39723, "cw side tone limiter", {0 => false, 1 => true});
+// Key 0x2c8: handler RVA 771da..77270, store RVA 0x7725f->0xa4870 (A2-H56068-08).
+bounded_byte!(
+    cw_repeat_seconds,
+    set_cw_repeat_seconds,
+    0x39971,
+    1,
+    60,
+    0,
+    "cw repeat seconds (1..=60)"
+);
+// Key 0x2c9: handler RVA 77275..772db, store RVA 772d5 (A2-H56068-09).
+bounded_byte!(
+    cw_dot_dash_ratio_tenths,
+    set_cw_dot_dash_ratio_tenths,
+    0x39972,
+    28,
+    45,
+    0,
+    "cw dot dash ratio tenths (28..=45)"
+);
+// Key 0x2ca: handler RVA 772e0..77363, store/encode RVA 77347..7735d (A2-H56068-10).
+stored_enum!(CwRiseTime, cw_rise_time, set_cw_rise_time, 0x39973, "cw rise time", {Ms2 = 0, Ms4 = 1, Ms6 = 2, Ms8 = 3});
+// Key 0x2cb: handler RVA 77368..773b2, store RVA 773ac (A2-H56068-11).
+stored_enum!(KeyPolarity, cw_paddle_polarity, set_cw_paddle_polarity, 0x39974, "cw paddle polarity", {Normal = 0, Reverse = 1});
+// Key 0x2cc: handler RVA 773b7..77401, store RVA 773fb (A2-H56068-12).
+stored_enum!(CwKeyType, cw_key_type, set_cw_key_type, 0x39975, "cw key type", {Straight = 0, Bug = 1, Paddle = 2});
+// Key 0x2cd: handler RVA 77406..77450, store RVA 7744a (A2-H56068-13).
+stored_enum!(CwMicKeyer, cw_mic_up_down_keyer, set_cw_mic_up_down_keyer, 0x39976, "cw mic up down keyer", {Off = 0, UpDown = 1, AB = 2});
+// Key 0x2ce: handler RVA 77455..7749e, store RVA 77498 (A2-H56068-14).
+stored_enum!(CwBreakIn, cw_break_in, set_cw_break_in, 0x37787, "cw break in", {Off = 0, Semi = 1, Full = 2});
+// Key 0x2cf: handler RVA 774a3..7751c, store RVA 77516 (A2-H56068-15).
+bounded_byte!(
+    cw_break_in_delay_tenths,
+    set_cw_break_in_delay_tenths,
+    0x399af,
+    20,
+    130,
+    0,
+    "CW break-in delay in dot tenths (20..=130), not milliseconds"
+);
+// Key 0x2d2: handler RVA 77619..77663, store RVA 7765d (A2-H56207-01).
+stored_setting!(rtty_decode_log, set_rtty_decode_log, bool, 0x39987, "rtty decode log", {0 => false, 1 => true});
+// Key 0x2d3: handler RVA 77668..776b2, store RVA 776ac (A2-H56207-02).
+stored_enum!(RttyLogFormat, rtty_log_format, set_rtty_log_format, 0x39988, "rtty log format", {Text = 0, Html = 1});
+// Key 0x2d4: handler RVA 776b7..77701, store RVA 776fb (A2-H56207-03).
+stored_setting!(rtty_log_timestamp, set_rtty_log_timestamp, bool, 0x3997e, "rtty log timestamp", {0 => false, 1 => true});
+// Key 0x2d5: handler RVA 77706..77750, store RVA 7774a (A2-H56207-04).
+stored_enum!(RttyLogTime, rtty_log_time, set_rtty_log_time, 0x3997f, "rtty log time", {Local = 0, Utc = 1});
+// Key 0x2d6: handler RVA 77755..7779f, store RVA 77799 (A2-H56207-05).
+stored_setting!(rtty_log_frequency, set_rtty_log_frequency, bool, 0x39980, "rtty log frequency", {0 => false, 1 => true});
+// Key 0x2d7: handler RVA 777a4..777ee, store RVA 777e8 (A2-H56207-06).
+stored_enum!(RttyFftAveraging, rtty_fft_averaging, set_rtty_fft_averaging, 0x39977, "rtty fft averaging", {Off = 0, Two = 1, Three = 2, Four = 3});
+// Key 0x2d8: handler RVA 777f3..77810->9d308, store RVA 9d3d3/9d3d5/9d3df (A2-H56207-07).
+stored_color!(
+    rtty_waveform_color_raw,
+    set_rtty_waveform_color_raw,
+    0x39978
+);
+// Key 0x2d9: handler RVA 77815..7785f, store RVA 77859 (A2-H56207-08).
+stored_setting!(rtty_decode_usos, set_rtty_decode_usos, bool, 0x3997b, "rtty decode usos", {0 => false, 1 => true});
+// Key 0x2da: handler RVA 77864..778ae, store RVA 778a8 (A2-H56207-09).
+stored_enum!(RttyLinefeed, rtty_linefeed, set_rtty_linefeed, 0x3997c, "rtty linefeed", {CrOrLfOrCrLf = 0, CrLf = 1});
+// Key 0x2db: handler RVA 778b3..7790d, store RVA 77907 (A2-H56207-10).
+bounded_byte!(
+    rtty_threshold,
+    set_rtty_threshold,
+    0x37817,
+    0,
+    15,
+    0,
+    "rtty threshold (0..=15)"
+);
+// Key 0x2dc: handler RVA 77912..7795c, store RVA 77956 (A2-H56207-11).
+stored_setting!(rtty_transmit_usos, set_rtty_transmit_usos, bool, 0x3997d, "rtty transmit usos", {0 => false, 1 => true});
+// Key 0x2de: handler RVA 77961..7797e->9d308, store RVA 9d3d3/9d3d5/9d3df (A2-H56207-12).
+stored_color!(
+    rtty_receive_font_color_raw,
+    set_rtty_receive_font_color_raw,
+    0x39981
+);
+// Key 0x2df: handler RVA 77983..7799f->9d308, store RVA 9d3d3/9d3d5/9d3df (A2-H56207-13).
+stored_color!(
+    rtty_transmit_font_color_raw,
+    set_rtty_transmit_font_color_raw,
+    0x39984
+);
+// Key 0x2e0: handler RVA 779a4..77a5d, store RVA 77a04 (A2-H56207-14).
+stored_setting!(rtty_twin_peak, set_rtty_twin_peak, bool, 0x399a0, "RTTY TwinPeak stored preference, independent of active effect or GUI enable conditions", {0 => false, 1 => true});
+// Key 0x2e1: handler RVA 77a62..77aad, store RVA 77aa3 (A2-H56207-15).
+stored_enum!(RttyMark, rtty_mark, set_rtty_mark, 0x39313, "rtty mark", {Hz1275 = 0, Hz1615 = 1, Hz2125 = 2});
+// Key 0x2e2: handler RVA 77ab2..77afd, store RVA 77af3 (A2-H56207-16).
+stored_enum!(RttyShift, rtty_shift, set_rtty_shift, 0x39314, "rtty shift", {Hz170 = 0, Hz200 = 1, Hz425 = 2});
+// Key 0x2e3: handler RVA 77b02..77b46, store RVA 77b43 (A2-H56207-17).
+stored_setting!(rtty_key_polarity, set_rtty_key_polarity, KeyPolarity, 0x39315, "rtty key polarity", {0 => KeyPolarity::Normal, 1 => KeyPolarity::Reverse});
+// Key 0x120: handler RVA 6ac88..6acd2, store RVA 6accc (A2-H56361-02).
+stored_enum!(DtmfSpeed, dtmf_speed, set_dtmf_speed, 0x399f4, "dtmf speed", {Ms100 = 0, Ms200 = 1, Ms300 = 2, Ms500 = 3});

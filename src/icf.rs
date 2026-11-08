@@ -11,6 +11,7 @@ mod common;
 mod dsp;
 mod groups;
 mod memory;
+mod messages;
 mod repeaters;
 
 pub use common::{
@@ -26,6 +27,10 @@ pub use common::{
     SpeechAlphabet, SpeechLanguage, SpeechLockKey, SpeechSpeed, SpeedUnit, TemperatureUnit,
     TemporarySkipTime, TransmitBandwidth, TransmitMeter, TransmitTimeout, TunerSelection,
     TxRecordingAudio, VoxBreakInKeyFunction, VoxVoiceDelay, WindSpeedUnit,
+};
+pub use common::{
+    CwBreakIn, CwKeyType, CwMicKeyer, CwNumberStyle, CwRiseTime, DtmfSpeed, KeyPolarity,
+    RttyFftAveraging, RttyLinefeed, RttyLogFormat, RttyLogTime, RttyMark, RttyShift,
 };
 pub use dsp::{
     Agc, FilterBandGroup, FilterMode, FilterShape, FilterShapeSlot, FilterSlot, PbtSide, Preamp,
@@ -4897,6 +4902,782 @@ mod tests {
             reparsed.compressor_on_transmit_bandwidth(),
             Ok(TransmitBandwidth::Narrow)
         );
+    }
+
+    fn message_fixture() -> Vec<u8> {
+        // Independent Python struct/hashlib: (31*i+(i>>3)+101)%256,
+        // literal revision/signature, keyer first NUL and DTMF first FF.
+        let mut memory: Vec<u8> = (0..IMAGE_BYTES)
+            .map(|i| (31 * i + (i >> 3) + 101) as u8)
+            .collect();
+        memory[0x355a1] = 6;
+        memory[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        for channel in 0..8 {
+            memory[0x37158 + 70 * channel] = 0;
+        }
+        for channel in 0..16 {
+            memory[0x375b8 + 24 * channel] = 255;
+        }
+        fixture_with_memory(&memory, "CAE4CA97417ABFE6F33F1A91A8B92BD0")
+    }
+
+    fn message_rejected(
+        image: &mut Icf<'_>,
+        error: (bool, usize),
+        call: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
+    ) {
+        let source = image.source;
+        let expected = image.memory().to_vec();
+        let serialized = image.to_bytes();
+        match call(image).unwrap_err() {
+            Error::Invalid { line, .. } if error.0 => assert_eq!(line, error.1),
+            Error::Unsupported { line, .. } if !error.0 => assert_eq!(line, error.1),
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_setting_state(image, source, &expected);
+        assert_eq!(image.to_bytes(), serialized);
+    }
+
+    #[test]
+    fn message_records_all_channels_match_independent_full_image() {
+        let source = message_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "3FD460CB19DF4A5BD86339325DDCF502"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        let mut expected = image.memory().to_vec();
+        for channel in 0..8 {
+            for (at, raw) in [
+                (
+                    0x37158 + 70 * channel,
+                    image.keyer_memory_raw(channel).unwrap(),
+                ),
+                (
+                    0x37388 + 70 * channel,
+                    image.rtty_memory_raw(channel).unwrap(),
+                ),
+            ] {
+                assert_eq!(raw, &expected[at..at + 70]);
+                assert_eq!(raw.as_ptr(), image.memory()[at..].as_ptr());
+            }
+            let at = 0x37158 + 70 * channel;
+            let value: &[u8] = if channel % 2 == 0 {
+                &[b'K'; 70]
+            } else {
+                b" A /?@^,. "
+            };
+            image.set_keyer_memory(channel, value).unwrap();
+            expected[at..at + 70].fill(b' ');
+            expected[at..at + value.len()].copy_from_slice(value);
+            assert_setting_state(&image, &source, &expected);
+            let at = 0x37388 + 70 * channel;
+            let value: &[u8] = if channel % 2 == 0 {
+                &[13; 70]
+            } else {
+                b"RTTY !$&?\"'-/.,:;()\r"
+            };
+            image.set_rtty_memory(channel, value).unwrap();
+            expected[at..at + 70].fill(b' ');
+            expected[at..at + value.len()].copy_from_slice(value);
+            assert_setting_state(&image, &source, &expected);
+        }
+        for channel in 0..16 {
+            let at = 0x375b8 + 24 * channel;
+            let raw = image.dtmf_memory_raw(channel).unwrap();
+            assert_eq!(raw, &expected[at..at + 24]);
+            assert_eq!(raw.as_ptr(), image.memory()[at..].as_ptr());
+            assert_eq!(raw[0], 255); // Unknown post-FF tail is still returned.
+            let (text, codes): (&[u8], &[u8]) = if channel == 0 {
+                (b"", &[])
+            } else if channel % 2 == 1 {
+                (
+                    b"0123456789ABCD*#01234567",
+                    &[
+                        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6,
+                        7,
+                    ],
+                )
+            } else {
+                (b"0*#", &[0, 14, 15])
+            };
+            image.set_dtmf_memory(channel, text).unwrap();
+            expected[at..at + 24].fill(255);
+            expected[at..at + codes.len()].copy_from_slice(codes);
+            assert_setting_state(&image, &source, &expected);
+        }
+        let output = image.to_bytes();
+        assert!(output.ends_with(b"#CD=5FD62B81E1E89546A8EF230FB70561CD\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "3D89CF50BB33BF345FA955BAA1DD8A4D"
+        );
+        let parsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&parsed, &output, &expected);
+        assert_eq!(parsed.to_bytes(), output);
+    }
+
+    #[test]
+    fn keyer_message_alphabet_and_bounded_sibling_asterisks() {
+        let source = message_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let mut expected = image.memory().to_vec();
+        for byte in 0..=255_u8 {
+            if byte.is_ascii_uppercase() || byte.is_ascii_digit() || b" *,./?@^".contains(&byte) {
+                image.set_keyer_memory(0, &[byte]).unwrap();
+                expected[0x37158..0x3719e].fill(b' ');
+                expected[0x37158] = byte;
+                assert_setting_state(&image, &source, &expected);
+            } else {
+                message_rejected(&mut image, (true, 5 + 0x37158 / 32), |i| {
+                    i.set_keyer_memory(0, &[byte])
+                });
+            }
+        }
+        for value in [b"**".as_slice(), &[b'K'; 71], b"OK\0"] {
+            message_rejected(&mut image, (true, 5 + 0x37158 / 32), |i| {
+                i.set_keyer_memory(0, value)
+            });
+        }
+        image.set_keyer_memory(0, b"").unwrap();
+        expected[0x37158..0x3719e].fill(b' ');
+        assert_setting_state(&image, &source, &expected);
+        for selected in 0..8 {
+            for sibling in 0..8 {
+                if sibling == selected {
+                    continue;
+                }
+                for position in [0, 69] {
+                    let mut image = Icf::parse(&source).unwrap();
+                    let at = 0x37158 + 70 * sibling;
+                    image.memory[at..at + 70].fill(0xfe);
+                    image.memory[at + position] = b'*';
+                    message_rejected(
+                        &mut image,
+                        (true, 5 + (0x37158 + 70 * selected) / 32),
+                        |i| i.set_keyer_memory(selected, b"A*B"),
+                    );
+                    let mut expected = image.memory().to_vec();
+                    let target = 0x37158 + 70 * selected;
+                    image.set_keyer_memory(selected, b"SAFE").unwrap();
+                    expected[target..target + 70].fill(b' ');
+                    expected[target..target + 4].copy_from_slice(b"SAFE");
+                    assert_setting_state(&image, &source, &expected);
+                    // A NUL before the star bounds the sibling prefix, even with unknown bytes.
+                    image.memory[at] = 0;
+                    image.memory[at + 69] = b'*';
+                    expected = image.memory().to_vec();
+                    image.set_keyer_memory(selected, b" * ").unwrap();
+                    expected[target..target + 70].fill(b' ');
+                    expected[target..target + 3].copy_from_slice(b" * ");
+                    assert_setting_state(&image, &source, &expected);
+                }
+            }
+            let mut image = Icf::parse(&source).unwrap();
+            let at = 0x37158 + 70 * selected;
+            image.memory[at..at + 70].fill(b'*');
+            let mut expected = image.memory().to_vec();
+            image.set_keyer_memory(selected, b"*").unwrap();
+            expected[at..at + 70].fill(b' ');
+            expected[at] = b'*';
+            assert_setting_state(&image, &source, &expected);
+        }
+    }
+
+    #[test]
+    fn rtty_dtmf_message_domains_padding_and_channel_guards() {
+        let source = message_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let mut expected = image.memory().to_vec();
+        for byte in 0..=255_u8 {
+            if byte.is_ascii_uppercase()
+                || byte.is_ascii_digit()
+                || b" !$&?\"'-/.,:;()\r".contains(&byte)
+            {
+                image.set_rtty_memory(7, &[byte]).unwrap();
+                let at = 0x37388 + 70 * 7;
+                expected[at..at + 70].fill(b' ');
+                expected[at] = byte;
+                assert_setting_state(&image, &source, &expected);
+            } else {
+                message_rejected(&mut image, (true, 5 + (0x37388 + 70 * 7) / 32), |i| {
+                    i.set_rtty_memory(7, &[byte])
+                });
+            }
+            if let Some(code) = b"0123456789ABCD*#".iter().position(|&b| b == byte) {
+                image.set_dtmf_memory(15, &[byte]).unwrap();
+                let at = 0x375b8 + 24 * 15;
+                expected[at..at + 24].fill(255);
+                expected[at] = code as u8;
+                assert_setting_state(&image, &source, &expected);
+            } else {
+                message_rejected(&mut image, (true, 5 + (0x375b8 + 24 * 15) / 32), |i| {
+                    i.set_dtmf_memory(15, &[byte])
+                });
+            }
+        }
+        for value in [b"".as_slice(), &[13; 70], b"ABC\r"] {
+            image.set_rtty_memory(7, value).unwrap();
+            let at = 0x37388 + 70 * 7;
+            expected[at..at + 70].fill(b' ');
+            expected[at..at + value.len()].copy_from_slice(value);
+            assert_setting_state(&image, &source, &expected);
+        }
+        for value in [b"".as_slice(), &[b'#'; 24], &[b'0'; 24]] {
+            image.set_dtmf_memory(14, value).unwrap();
+            let at = 0x375b8 + 24 * 14;
+            expected[at..at + 24].fill(255);
+            expected[at..at + value.len()].fill(if value.first() == Some(&b'#') { 15 } else { 0 });
+            assert_setting_state(&image, &source, &expected);
+        }
+        for value in [
+            b"GOOD\n".as_slice(),
+            b"GOOD\\",
+            b"GOOD\0",
+            &[13; 71],
+            b"GOOD\xff",
+        ] {
+            message_rejected(&mut image, (true, 5 + (0x37388 + 70 * 7) / 32), |i| {
+                i.set_rtty_memory(7, value)
+            });
+        }
+        for value in [
+            b"01234F".as_slice(),
+            b"01234E",
+            b"01234P",
+            b"01234,",
+            b"01234 ",
+            b"01234a",
+            &[b'0'; 25],
+            b"01234\0",
+        ] {
+            message_rejected(&mut image, (true, 5 + (0x375b8 + 24 * 15) / 32), |i| {
+                i.set_dtmf_memory(15, value)
+            });
+        }
+        for channel in [8, 16, usize::MAX] {
+            assert!(matches!(
+                image.keyer_memory_raw(channel),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            assert!(matches!(
+                image.rtty_memory_raw(channel),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            message_rejected(&mut image, (false, 5), |i| {
+                i.set_keyer_memory(channel, b"OK")
+            });
+            message_rejected(&mut image, (false, 5), |i| {
+                i.set_rtty_memory(channel, b"OK")
+            });
+        }
+        for channel in [16, usize::MAX] {
+            assert!(matches!(
+                image.dtmf_memory_raw(channel),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            message_rejected(&mut image, (false, 5), |i| i.set_dtmf_memory(channel, b"0"));
+        }
+        let output = image.to_bytes();
+        let parsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&parsed, &output, &expected);
+    }
+
+    fn keyer_scalar_fixture() -> (Vec<u8>, Vec<u8>) {
+        // Independent Python struct/hashlib: (47*i+(i>>5)+61)%256,
+        // internal revision 6, exact signature, these literal field windows.
+        let mut memory: Vec<u8> = (0..IMAGE_BYTES)
+            .map(|i| (47 * i + (i >> 5) + 61) as u8)
+            .collect();
+        memory[0x355a1] = 6;
+        memory[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        let fields: &[(usize, &[u8])] = &[
+            (0x3999d, &[0]),
+            (0x3999e, &[44, 1]),
+            (0x3996d, &[0]),
+            (0x3996e, &[1]),
+            (0x3996f, &[1, 0]),
+            (0x39722, &[0]),
+            (0x39723, &[0]),
+            (0x39971, &[1]),
+            (0x39972, &[28]),
+            (0x39973, &[0]),
+            (0x39974, &[0]),
+            (0x39975, &[0]),
+            (0x39976, &[0]),
+            (0x37787, &[0]),
+            (0x399af, &[20]),
+            (0x39987, &[0]),
+            (0x39988, &[0]),
+            (0x3997e, &[0]),
+            (0x3997f, &[0]),
+            (0x39980, &[0]),
+            (0x39977, &[0]),
+            (0x39978, &[0, 0, 0]),
+            (0x3997b, &[0]),
+            (0x3997c, &[0]),
+            (0x37817, &[0]),
+            (0x3997d, &[0]),
+            (0x39981, &[0, 0, 0]),
+            (0x39984, &[0, 0, 0]),
+            (0x399a0, &[0]),
+            (0x39313, &[0]),
+            (0x39314, &[0]),
+            (0x39315, &[0]),
+            (0x399f4, &[0]),
+        ];
+        for &(at, bytes) in fields {
+            memory[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        let source = fixture_with_memory(&memory, "53F365426D11C441F67AA4C77C86C303");
+        (source, memory)
+    }
+    #[test]
+    fn edits_all_33_keyer_scalars_and_preserves_every_other_byte() {
+        let (source, mut expected) = keyer_scalar_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "D3637AE3503724E99540FA31E16FC60A"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        let values: Vec<(u8, [u8; 1])> = (0..=255).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x3999d,
+            &values,
+            |i| i.cw_speed_raw(),
+            |i, v| i.set_cw_speed_raw(v),
+        );
+        let values: Vec<(u16, [u8; 2])> = (300_u16..=900)
+            .step_by(5)
+            .map(|v| (v, v.to_le_bytes()))
+            .collect();
+        check_numeric_values(
+            &mut image,
+            0x3999e,
+            &values,
+            |i| i.cw_pitch_hz(),
+            |i, v| i.set_cw_pitch_hz(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3996d,
+            &[
+                CwNumberStyle::Normal,
+                CwNumberStyle::Digits190Ano,
+                CwNumberStyle::Digits190Ant,
+                CwNumberStyle::Digits90No,
+                CwNumberStyle::Digits90Nt,
+            ],
+            |i| i.cw_number_style(),
+            |i, v| i.set_cw_number_style(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (1..=8).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x3996e,
+            &values,
+            |i| i.cw_count_up_trigger_channel(),
+            |i, v| i.set_cw_count_up_trigger_channel(v),
+        );
+        let values: Vec<(u16, [u8; 2])> = (1_u16..=9999)
+            .step_by(1)
+            .map(|v| (v, v.to_le_bytes()))
+            .collect();
+        check_numeric_values(
+            &mut image,
+            0x3996f,
+            &values,
+            |i| i.cw_contest_number(),
+            |i, v| i.set_cw_contest_number(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (0..=255).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x39722,
+            &values,
+            |i| i.cw_side_tone_level_raw(),
+            |i, v| i.set_cw_side_tone_level_raw(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39723,
+            &[false, true],
+            |i| i.cw_side_tone_limiter(),
+            |i, v| i.set_cw_side_tone_limiter(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (1..=60).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x39971,
+            &values,
+            |i| i.cw_repeat_seconds(),
+            |i, v| i.set_cw_repeat_seconds(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (28..=45).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x39972,
+            &values,
+            |i| i.cw_dot_dash_ratio_tenths(),
+            |i, v| i.set_cw_dot_dash_ratio_tenths(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39973,
+            &[
+                CwRiseTime::Ms2,
+                CwRiseTime::Ms4,
+                CwRiseTime::Ms6,
+                CwRiseTime::Ms8,
+            ],
+            |i| i.cw_rise_time(),
+            |i, v| i.set_cw_rise_time(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39974,
+            &[KeyPolarity::Normal, KeyPolarity::Reverse],
+            |i| i.cw_paddle_polarity(),
+            |i, v| i.set_cw_paddle_polarity(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39975,
+            &[CwKeyType::Straight, CwKeyType::Bug, CwKeyType::Paddle],
+            |i| i.cw_key_type(),
+            |i, v| i.set_cw_key_type(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39976,
+            &[CwMicKeyer::Off, CwMicKeyer::UpDown, CwMicKeyer::AB],
+            |i| i.cw_mic_up_down_keyer(),
+            |i, v| i.set_cw_mic_up_down_keyer(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x37787,
+            &[CwBreakIn::Off, CwBreakIn::Semi, CwBreakIn::Full],
+            |i| i.cw_break_in(),
+            |i, v| i.set_cw_break_in(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (20..=130).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x399af,
+            &values,
+            |i| i.cw_break_in_delay_tenths(),
+            |i, v| i.set_cw_break_in_delay_tenths(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39987,
+            &[false, true],
+            |i| i.rtty_decode_log(),
+            |i, v| i.set_rtty_decode_log(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39988,
+            &[RttyLogFormat::Text, RttyLogFormat::Html],
+            |i| i.rtty_log_format(),
+            |i, v| i.set_rtty_log_format(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3997e,
+            &[false, true],
+            |i| i.rtty_log_timestamp(),
+            |i, v| i.set_rtty_log_timestamp(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3997f,
+            &[RttyLogTime::Local, RttyLogTime::Utc],
+            |i| i.rtty_log_time(),
+            |i, v| i.set_rtty_log_time(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39980,
+            &[false, true],
+            |i| i.rtty_log_frequency(),
+            |i, v| i.set_rtty_log_frequency(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39977,
+            &[
+                RttyFftAveraging::Off,
+                RttyFftAveraging::Two,
+                RttyFftAveraging::Three,
+                RttyFftAveraging::Four,
+            ],
+            |i| i.rtty_fft_averaging(),
+            |i, v| i.set_rtty_fft_averaging(v),
+        );
+        let colors: Vec<_> = (0_u8..=255)
+            .map(|v| [v, v.wrapping_add(83), 255 - v])
+            .chain([[0; 3], [255; 3], [0x12, 0x34, 0x56]])
+            .map(|v| (v, v))
+            .collect();
+        check_numeric_values(
+            &mut image,
+            0x39978,
+            &colors,
+            |i| i.rtty_waveform_color_raw(),
+            |i, v| i.set_rtty_waveform_color_raw(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3997b,
+            &[false, true],
+            |i| i.rtty_decode_usos(),
+            |i, v| i.set_rtty_decode_usos(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3997c,
+            &[RttyLinefeed::CrOrLfOrCrLf, RttyLinefeed::CrLf],
+            |i| i.rtty_linefeed(),
+            |i, v| i.set_rtty_linefeed(v),
+        );
+        let values: Vec<(u8, [u8; 1])> = (0..=15).map(|v| (v, [v])).collect();
+        check_numeric_values(
+            &mut image,
+            0x37817,
+            &values,
+            |i| i.rtty_threshold(),
+            |i, v| i.set_rtty_threshold(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x3997d,
+            &[false, true],
+            |i| i.rtty_transmit_usos(),
+            |i, v| i.set_rtty_transmit_usos(v),
+        );
+        check_numeric_values(
+            &mut image,
+            0x39981,
+            &colors,
+            |i| i.rtty_receive_font_color_raw(),
+            |i, v| i.set_rtty_receive_font_color_raw(v),
+        );
+        check_numeric_values(
+            &mut image,
+            0x39984,
+            &colors,
+            |i| i.rtty_transmit_font_color_raw(),
+            |i, v| i.set_rtty_transmit_font_color_raw(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x399a0,
+            &[false, true],
+            |i| i.rtty_twin_peak(),
+            |i, v| i.set_rtty_twin_peak(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39313,
+            &[RttyMark::Hz1275, RttyMark::Hz1615, RttyMark::Hz2125],
+            |i| i.rtty_mark(),
+            |i, v| i.set_rtty_mark(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39314,
+            &[RttyShift::Hz170, RttyShift::Hz200, RttyShift::Hz425],
+            |i| i.rtty_shift(),
+            |i, v| i.set_rtty_shift(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x39315,
+            &[KeyPolarity::Normal, KeyPolarity::Reverse],
+            |i| i.rtty_key_polarity(),
+            |i, v| i.set_rtty_key_polarity(v),
+        );
+        check_expanded_setting(
+            &mut image,
+            0x399f4,
+            &[
+                DtmfSpeed::Ms100,
+                DtmfSpeed::Ms200,
+                DtmfSpeed::Ms300,
+                DtmfSpeed::Ms500,
+            ],
+            |i| i.dtmf_speed(),
+            |i, v| i.set_dtmf_speed(v),
+        );
+        let fields: &[(usize, &[u8])] = &[
+            (0x3999d, &[255]),
+            (0x3999e, &[132, 3]),
+            (0x3996d, &[4]),
+            (0x3996e, &[8]),
+            (0x3996f, &[15, 39]),
+            (0x39722, &[255]),
+            (0x39723, &[1]),
+            (0x39971, &[60]),
+            (0x39972, &[45]),
+            (0x39973, &[3]),
+            (0x39974, &[1]),
+            (0x39975, &[2]),
+            (0x39976, &[2]),
+            (0x37787, &[2]),
+            (0x399af, &[130]),
+            (0x39987, &[1]),
+            (0x39988, &[1]),
+            (0x3997e, &[1]),
+            (0x3997f, &[1]),
+            (0x39980, &[1]),
+            (0x39977, &[3]),
+            (0x39978, &[18, 52, 86]),
+            (0x3997b, &[1]),
+            (0x3997c, &[1]),
+            (0x37817, &[15]),
+            (0x3997d, &[1]),
+            (0x39981, &[18, 52, 86]),
+            (0x39984, &[18, 52, 86]),
+            (0x399a0, &[1]),
+            (0x39313, &[2]),
+            (0x39314, &[2]),
+            (0x39315, &[1]),
+            (0x399f4, &[3]),
+        ];
+        for &(at, bytes) in fields {
+            expected[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(&image.memory()[0x39978..0x3997c], &[0x12, 0x34, 0x56, 1]);
+        assert_eq!(&image.memory()[0x39984..0x39988], &[0x12, 0x34, 0x56, 1]);
+        let output = image.to_bytes();
+        assert!(output.ends_with(b"#CD=787A1A448E36A27F7B95415D2DE05E97\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "7460725AF358260F42F63B69F89C87C9"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+        assert_eq!(reparsed.cw_pitch_hz(), Ok(900));
+        assert_eq!(reparsed.cw_contest_number(), Ok(9999));
+        assert_eq!(reparsed.cw_count_up_trigger_channel(), Ok(8));
+        assert_eq!(reparsed.dtmf_speed(), Ok(DtmfSpeed::Ms500));
+    }
+    #[test]
+    fn rejects_keyer_numeric_errors_and_keeps_inactive_preferences() {
+        let (source, mut expected) = keyer_scalar_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        check_numeric_errors(
+            &mut image,
+            0x3999e,
+            300_u16,
+            &[299, 301, 901, 65535],
+            &[
+                299_u16.to_le_bytes(),
+                301_u16.to_le_bytes(),
+                901_u16.to_le_bytes(),
+                65535_u16.to_le_bytes(),
+            ],
+            |i| i.cw_pitch_hz(),
+            |i, v| i.set_cw_pitch_hz(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x3996e,
+            1_u8,
+            &[0, 9, 255],
+            &[0_u8.to_le_bytes(), 9_u8.to_le_bytes(), 255_u8.to_le_bytes()],
+            |i| i.cw_count_up_trigger_channel(),
+            |i, v| i.set_cw_count_up_trigger_channel(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x3996f,
+            1_u16,
+            &[0, 10000, 65535],
+            &[
+                0_u16.to_le_bytes(),
+                10000_u16.to_le_bytes(),
+                65535_u16.to_le_bytes(),
+            ],
+            |i| i.cw_contest_number(),
+            |i, v| i.set_cw_contest_number(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x39971,
+            1_u8,
+            &[0, 61, 255],
+            &[
+                0_u8.to_le_bytes(),
+                61_u8.to_le_bytes(),
+                255_u8.to_le_bytes(),
+            ],
+            |i| i.cw_repeat_seconds(),
+            |i, v| i.set_cw_repeat_seconds(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x39972,
+            28_u8,
+            &[27, 46, 255],
+            &[
+                27_u8.to_le_bytes(),
+                46_u8.to_le_bytes(),
+                255_u8.to_le_bytes(),
+            ],
+            |i| i.cw_dot_dash_ratio_tenths(),
+            |i, v| i.set_cw_dot_dash_ratio_tenths(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x399af,
+            20_u8,
+            &[19, 131, 255],
+            &[
+                19_u8.to_le_bytes(),
+                131_u8.to_le_bytes(),
+                255_u8.to_le_bytes(),
+            ],
+            |i| i.cw_break_in_delay_tenths(),
+            |i, v| i.set_cw_break_in_delay_tenths(v),
+        );
+        check_numeric_errors(
+            &mut image,
+            0x37817,
+            0_u8,
+            &[16, 255],
+            &[16_u8.to_le_bytes(), 255_u8.to_le_bytes()],
+            |i| i.rtty_threshold(),
+            |i, v| i.set_rtty_threshold(v),
+        );
+        image.set_rtty_twin_peak(true).unwrap();
+        expected[0x399a0] = 1;
+        image.set_rtty_mark(RttyMark::Hz1275).unwrap();
+        expected[0x39313] = 0;
+        image.set_rtty_shift(RttyShift::Hz425).unwrap();
+        expected[0x39314] = 2;
+        image.set_cw_pitch_hz(305).unwrap();
+        expected[0x3999e..0x399a0].copy_from_slice(&[0x31, 1]);
+        image.set_rtty_log_timestamp(true).unwrap();
+        expected[0x3997e] = 1;
+        image.set_rtty_log_format(RttyLogFormat::Html).unwrap();
+        expected[0x39988] = 1;
+        assert_eq!(image.rtty_decode_log(), Ok(false));
+        assert_eq!(image.rtty_twin_peak(), Ok(true));
+        assert_setting_state(&image, &source, &expected);
+        // All CW/RTTY/DTMF message records and every non-target byte stay opaque.
+        assert_eq!(
+            &image.memory()[0x37158..0x37738],
+            &expected[0x37158..0x37738]
+        );
+        let output = image.to_bytes();
+        let parsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&parsed, &output, &expected);
     }
 
     fn check_common_setting<T: Copy + fmt::Debug + PartialEq>(
