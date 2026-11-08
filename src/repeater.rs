@@ -1,4 +1,4 @@
-//! Lossless raw Name and Sub Name editing of a limited repeater CSV format.
+//! Local Name/Sub Name and canonical integer-Hz edits of a limited repeater CSV.
 //!
 //! Only the exact 17-column export header, comma separators, unquoted cells and
 //! CRLF-terminated physical lines are supported. BOMs, quotes, semicolons, ASCII
@@ -6,9 +6,11 @@
 //! Name must fit in 16 bytes, and there may be at most 2500 data rows.
 //!
 //! Existing cell bytes are opaque, not decoded as UTF-8 or validated as CP932.
-//! Numeric formats, modes, groups, units and radio suitability are not checked.
+//! Parsing does not check numeric formats, modes, groups, units or radio suitability.
 //! New Name/Sub Name values use narrower ASCII-only limits of 16/8 bytes.
-//! Sub Name edits have not been compared with the original GUI. No source
+//! Frequency/Offset edits accept integer Hz and emit exactly six decimal MHz
+//! places using integer division/remainder, not the original float/locale codec.
+//! Sub Name and Hz edits have not been compared with the original GUI. No source
 //! application normalization, truncation, padding or defaulting is performed.
 //! Successful parsing establishes structure only, not general CS-705
 //! compatibility. For one fixed native export, DV/FM Name edits matched native
@@ -100,10 +102,11 @@ impl Row<'_> {
     }
 }
 
-/// A CSV document borrowing unchanged cells and owning only edited names.
+/// A CSV document borrowing unchanged cells and owning only explicitly edited cells.
 ///
 /// Rows cannot be added, removed or reordered through this API. All bytes other
-/// than an explicitly edited Name/Sub Name, including empty cells and CRLFs, are retained.
+/// than an explicitly edited Name/Sub Name/Frequency/Offset, including empty cells
+/// and CRLFs, are retained.
 pub struct Csv<'a> {
     rows: Vec<Row<'a>>,
 }
@@ -257,6 +260,53 @@ impl<'a> Csv<'a> {
         Ok(())
     }
 
+    /// Replace only Frequency (zero-based column 6) with canonical six-place MHz.
+    ///
+    /// Accepts integer Hz in 30000..=1399999999. Empty/unknown old numeric cells
+    /// may be replaced. No float parsing, locale, rounding or companion correction
+    /// occurs; this is not a claim of original-GUI float-formatter compatibility.
+    ///
+    /// # Errors
+    /// Row bounds take priority over value validation. Unsupported Hz leave every
+    /// cell unchanged. This edit has not been compared with the original GUI.
+    pub fn set_frequency_hz(&mut self, index: usize, hz: u32) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if !(30_000..=1_399_999_999).contains(&hz) {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "Frequency requires 30000..=1399999999 integer Hz",
+            });
+        }
+        row.cells[6] = Cow::Owned(format!("{}.{:06}", hz / 1_000_000, hz % 1_000_000).into_bytes());
+        Ok(())
+    }
+
+    /// Replace only Offset (zero-based column 8) with canonical six-place MHz.
+    ///
+    /// Accepts 0..=9999900 integer Hz in steps of 100. Empty/unknown old cells may
+    /// be replaced. No band inference, default, quantization or float codec is used.
+    ///
+    /// # Errors
+    /// Row bounds take priority over value validation. Unsupported Hz leave every
+    /// cell unchanged. This edit has not been compared with the original GUI.
+    pub fn set_offset_hz(&mut self, index: usize, hz: u32) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if hz > 9_999_900 || !hz.is_multiple_of(100) {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "Offset requires 0..=9999900 integer Hz in steps of 100",
+            });
+        }
+        row.cells[8] = Cow::Owned(format!("{}.{:06}", hz / 1_000_000, hz % 1_000_000).into_bytes());
+        Ok(())
+    }
+
     /// Serialize without normalization, preserving every unedited byte and order.
     ///
     /// No file or device is accessed. The result has the same limited syntax as
@@ -296,6 +346,143 @@ mod tests {
         "1,GROUP1,FM test,FM,,,145.000000,DUP-,0.600000,FM,TONE,88.5Hz,NO,Approximate,-35.500000,139.750000,0:00\r\n",
         "50,GROUP50,DV test,DV,TEST01 B,TEST01 G,439.000000,DUP-,5.000000,DV,,,YES,Exact,35.500000,139.750000,+9:00\r\n",
     ).as_bytes();
+
+    #[test]
+    fn integer_hz_edits_match_literal_csv_and_keep_other_cells_borrowed() {
+        let source = [HEADER,
+            b"1,\x83\x5c,\x82\xa0,opaque-long,,,,dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+            b"2,G,Keep,Sub,TEST01 B,TEST01 G,unknown,dup,,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+        ].concat();
+        let original = source.clone();
+        // Independent decimal literals, not output from a product formatter.
+        for (frequency, frequency_text, offset, offset_text) in [
+            (30_000, b"0.030000".as_slice(), 0, b"0.000000".as_slice()),
+            (145_125_000, b"145.125000", 100, b"0.000100"),
+            (1_399_999_999, b"1399.999999", 9_999_900, b"9.999900"),
+        ] {
+            let mut csv = Csv::parse(&source).unwrap();
+            let borrowed: Vec<_> = csv
+                .rows()
+                .iter()
+                .map(|row| row.cells().map(|cell| cell.as_ptr()))
+                .collect();
+            csv.set_frequency_hz(0, frequency).unwrap();
+            let frequency_only = [HEADER,
+                b"1,\x83\x5c,\x82\xa0,opaque-long,,,", frequency_text,
+                b",dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+                b"2,G,Keep,Sub,TEST01 B,TEST01 G,unknown,dup,,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+            ].concat();
+            assert_eq!(csv.to_bytes(), frequency_only);
+            csv.set_offset_hz(1, offset).unwrap();
+            let expected = [
+                HEADER,
+                b"1,\x83\x5c,\x82\xa0,opaque-long,,,",
+                frequency_text,
+                b",dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+                b"2,G,Keep,Sub,TEST01 B,TEST01 G,unknown,dup,",
+                offset_text,
+                b",mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+            ]
+            .concat();
+            assert_eq!(csv.to_bytes(), expected);
+            for (r, row) in csv.rows().iter().enumerate() {
+                for (c, cell) in row.cells().iter().enumerate() {
+                    if (r, c) != (0, 6) && (r, c) != (1, 8) {
+                        assert_eq!(cell.as_ptr(), borrowed[r][c]);
+                    }
+                }
+            }
+            let parsed = Csv::parse(&expected).unwrap();
+            assert_eq!(parsed.rows()[0].cells()[6], frequency_text);
+            assert_eq!(parsed.rows()[1].cells()[8], offset_text);
+            assert_eq!(parsed.to_bytes(), expected);
+            csv.set_name(0, b"New Name").unwrap();
+            csv.set_sub_name(0, b"New Sub").unwrap();
+            let mixed = [
+                HEADER,
+                b"1,\x83\x5c,New Name,New Sub,,,",
+                frequency_text,
+                b",dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+                b"2,G,Keep,Sub,TEST01 B,TEST01 G,unknown,dup,",
+                offset_text,
+                b",mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+            ]
+            .concat();
+            assert_eq!(csv.to_bytes(), mixed);
+            assert_eq!(Csv::parse(&mixed).unwrap().to_bytes(), mixed);
+            assert_eq!(source, original);
+        }
+    }
+
+    #[test]
+    fn integer_hz_last_row_errors_and_bounds_preserve_all_state() {
+        let row = b"1,G,\x82\xa0,LONG-NAME,,,f,dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let original = source.clone();
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_frequency_hz(2499, 1_399_999_999).unwrap();
+        csv.set_offset_hz(2499, 9_999_900).unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(b"1,G,\x82\xa0,LONG-NAME,,,1399.999999,dup,9.999900,mode,tone,rtone,use,pos,lat,lon,utc\r\n");
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        fn pointers(csv: &Csv<'_>) -> Vec<(*const u8, bool)> {
+            csv.rows
+                .iter()
+                .flat_map(|row| {
+                    row.cells
+                        .iter()
+                        .map(|cell| (cell.as_ptr(), matches!(cell, Cow::Borrowed(_))))
+                })
+                .collect()
+        }
+        let before_pointers = pointers(&csv);
+        for index in [0, 2499] {
+            for hz in [0, 1, 29_999, 1_400_000_000, u32::MAX] {
+                assert!(matches!(csv.set_frequency_hz(index, hz),
+                    Err(Error::Unsupported { line, .. }) if line == index + 2));
+                assert_eq!(csv.to_bytes(), expected);
+                assert_eq!(pointers(&csv), before_pointers);
+                assert_eq!(source, original);
+            }
+            for hz in [1, 99, 101, 9_999_901, 10_000_000, u32::MAX] {
+                assert!(matches!(csv.set_offset_hz(index, hz),
+                    Err(Error::Unsupported { line, .. }) if line == index + 2));
+                assert_eq!(csv.to_bytes(), expected);
+                assert_eq!(pointers(&csv), before_pointers);
+                assert_eq!(source, original);
+            }
+        }
+        for index in [2500, usize::MAX] {
+            assert_eq!(
+                csv.set_frequency_hz(index, 0),
+                Err(Error::RowIndexOutOfBounds { index })
+            );
+            assert_eq!(
+                csv.set_offset_hz(index, 1),
+                Err(Error::RowIndexOutOfBounds { index })
+            );
+            assert_eq!(csv.to_bytes(), expected);
+            assert_eq!(pointers(&csv), before_pointers);
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        assert_eq!(
+            empty.set_frequency_hz(0, 0),
+            Err(Error::RowIndexOutOfBounds { index: 0 })
+        );
+        assert_eq!(
+            empty.set_offset_hz(0, 1),
+            Err(Error::RowIndexOutOfBounds { index: 0 })
+        );
+        assert_eq!(empty.to_bytes(), HEADER);
+        assert_eq!(source, original);
+    }
 
     #[test]
     fn raw_sub_name_edits_preserve_every_other_csv_byte() {
