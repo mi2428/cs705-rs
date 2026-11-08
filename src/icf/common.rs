@@ -1518,3 +1518,108 @@ impl Icf<'_> {
         Ok(())
     }
 }
+
+// Spectrum Scope stored preferences only. No GUI enable/correction, REF/FIX/G
+// generation, drawing, FFT/DSP/RF operation or whole-document save is reproduced.
+// Key 0x35e: read 0x7aac9/0x7aad7, store 0x7ab30/0x7ab1c in two separate bytes.
+/// Stored Spectrum mode, split across fixed/scroll bytes rather than one index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeMode {
+    /// Select CENTER.
+    Center,
+    /// Select FIX.
+    Fixed,
+    /// Select SCROLL (CENTER).
+    ScrollCenter,
+    /// Select SCROLL (FIX).
+    ScrollFixed,
+}
+
+impl Icf<'_> {
+    /// Read the two canonical stored Spectrum mode bytes without masking them.
+    /// This is storage only, not GUI mode coupling, FIX edge or REF calculation.
+    /// # Errors
+    /// Rejects an unknown byte, checking the fixed byte before the scroll byte.
+    pub fn scope_mode(&self) -> Result<ScopeMode, Error> {
+        let fixed = self.memory[0x377c6];
+        if fixed > 1 {
+            return Err(Error::Unsupported {
+                line: 5 + 0x377c6 / RECORD_BYTES,
+                reason: "scope_mode fixed byte outside 0..=1",
+            });
+        }
+        let scroll = self.memory[0x3808a];
+        if scroll > 1 {
+            return Err(Error::Unsupported {
+                line: 5 + 0x3808a / RECORD_BYTES,
+                reason: "scope_mode scroll byte outside 0..=1",
+            });
+        }
+        Ok(match (fixed, scroll) {
+            (0, 0) => ScopeMode::Center,
+            (1, 0) => ScopeMode::Fixed,
+            (0, 1) => ScopeMode::ScrollCenter,
+            (1, 1) => ScopeMode::ScrollFixed,
+            _ => unreachable!("both mode bytes were checked"),
+        })
+    }
+
+    /// Change only the two stored mode bytes, preserving Span and every other byte.
+    /// No UI refresh flag, defaulting, parent normalization or I/O occurs.
+    /// # Errors
+    /// Validates both current bytes before either write; unknown current codes
+    /// leave the entire state, including prior successful edits, unchanged.
+    pub fn set_scope_mode(&mut self, value: ScopeMode) -> Result<(), Error> {
+        self.scope_mode()?;
+        let (fixed, scroll) = match value {
+            ScopeMode::Center => (0, 0),
+            ScopeMode::Fixed => (1, 0),
+            ScopeMode::ScrollCenter => (0, 1),
+            ScopeMode::ScrollFixed => (1, 1),
+        };
+        self.memory[0x377c6] = fixed;
+        self.memory[0x3808a] = scroll;
+        Ok(())
+    }
+}
+
+// Keys 0x35f/0x361: read/store 0x7ab4a/0x7ab93 and 0x7abc6/0x7ac01.
+stored_enum!(ScopeSpan, scope_span, set_scope_span, 0x377c7, "Spectrum span caption (not Hz)", {K2p5 = 0, K5 = 1, K10 = 2, K25 = 3, K50 = 4, K100 = 5, K250 = 6, K500 = 7});
+stored_enum!(ScopeSweepSpeed, scope_sweep_speed, set_scope_sweep_speed, 0x377d9, "Spectrum sweep speed", {Fast = 0, Mid = 1, Slow = 2});
+// Keys 0x363/0x364: read/store 0x7ac14/0x7ac50 and 0x7ac63/0x7ac9f.
+stored_setting!(scope_during_tx_center, set_scope_during_tx_center, bool, 0x39725, "Spectrum during TX (CENTER Type) preference", {0 => false, 1 => true});
+stored_enum!(ScopeMaxHold, scope_max_hold, set_scope_max_hold, 0x39726, "Spectrum max hold", {Off = 0, Hold10Seconds = 1, On = 2});
+// Keys 0x365/0x366: read/store 0x7acb2/0x7acee and 0x7ad01/0x7ad3d.
+stored_enum!(ScopeCenterDisplay, scope_center_display, set_scope_center_display, 0x3972b, "Spectrum CENTER type display", {FilterCenter = 0, CarrierPoint = 1, CarrierPointAbsolute = 2});
+stored_enum!(ScopeMarkerPosition, scope_marker_position, set_scope_marker_position, 0x3972c, "Spectrum marker position", {FilterCenter = 0, CarrierPoint = 1});
+// Keys 0x367/0x368/0x369: read/store 0x7ad50/0x7ad8c,
+// 0x7ad9f/0x7addb and 0x7adee/0x7ae2a. All selectors use full-byte codes.
+stored_enum!(ScopeVbw, scope_vbw, set_scope_vbw, 0x39736, "Spectrum VBW", {Narrow = 0, Wide = 1});
+stored_enum!(ScopeAveraging, scope_averaging, set_scope_averaging, 0x39737, "Spectrum averaging", {Off = 0, Two = 1, Three = 2, Four = 3});
+stored_enum!(ScopeWaveform, scope_waveform, set_scope_waveform, 0x39727, "Spectrum waveform", {Fill = 0, FillAndLine = 1});
+// Keys 0x36a/0x36b/0x36c: callers 0x7ae4a/0x7ae6c/0x7ae8d -> 0x9d308.
+// Exactly R,G,B bytes (COLORREF 0x00BBGGRR), no alpha or following VBW byte.
+stored_color!(
+    scope_waveform_color_current,
+    set_scope_waveform_color_current,
+    0x3972d
+);
+stored_color!(
+    scope_waveform_color_line,
+    set_scope_waveform_color_line,
+    0x39730
+);
+stored_color!(
+    scope_waveform_color_max_hold,
+    set_scope_waveform_color_max_hold,
+    0x39733
+);
+// Keys 0x36d/0x36e: read/store 0x7aea2/0x7aede and 0x7aef1/0x7af2d.
+// Waterfall speed order is the reverse of sweep speed; do not share their enum.
+stored_setting!(scope_waterfall_display, set_scope_waterfall_display, bool, 0x39728, "Spectrum waterfall display", {0 => false, 1 => true});
+stored_enum!(ScopeWaterfallSpeed, scope_waterfall_speed, set_scope_waterfall_speed, 0x3972a, "Spectrum waterfall speed", {Slow = 0, Mid = 1, Fast = 2});
+// Keys 0x36f/0x370/0x371: read/store 0x7af40/0x7af7c,
+// 0x7af8f/0x7afcb and 0x7afde/0x7b01a. Grid captions are not raw grid numbers.
+stored_enum!(ScopeWaterfallSize, scope_waterfall_size_expand, set_scope_waterfall_size_expand, 0x39738, "Spectrum waterfall size (Expand Screen)", {Small = 0, Mid = 1, Large = 2});
+stored_enum!(ScopeWaterfallPeak, scope_waterfall_peak_color_level, set_scope_waterfall_peak_color_level, 0x39729, "Spectrum waterfall peak color level", {Grid1 = 0, Grid2 = 1, Grid3 = 2, Grid4 = 3, Grid5 = 4, Grid6 = 5, Grid7 = 6, Grid8 = 7});
+stored_setting!(scope_waterfall_marker_autohide, set_scope_waterfall_marker_autohide, bool, 0x39739, "Spectrum waterfall marker auto-hide", {0 => false, 1 => true});

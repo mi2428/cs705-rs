@@ -34,6 +34,11 @@ pub use common::{
     CwBreakIn, CwKeyType, CwMicKeyer, CwNumberStyle, CwRiseTime, DtmfSpeed, KeyPolarity,
     RttyFftAveraging, RttyLinefeed, RttyLogFormat, RttyLogTime, RttyMark, RttyShift,
 };
+pub use common::{
+    ScopeAveraging, ScopeCenterDisplay, ScopeMarkerPosition, ScopeMaxHold, ScopeMode, ScopeSpan,
+    ScopeSweepSpeed, ScopeVbw, ScopeWaterfallPeak, ScopeWaterfallSize, ScopeWaterfallSpeed,
+    ScopeWaveform,
+};
 pub use dsp::{
     Agc, FilterBandGroup, FilterMode, FilterShape, FilterShapeSlot, FilterSlot, PbtSide, Preamp,
     StepAgcMode, ToneMode, TransmitBandwidthPreset, TransmitHigh, TransmitLow,
@@ -622,6 +627,7 @@ fn digit(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    mod scope;
     use super::*;
 
     fn rev5_memory() -> Vec<u8> {
