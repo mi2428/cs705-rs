@@ -88,11 +88,18 @@ fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 5, reason }
 }
 
-fn unpack_callsign(bytes: &[u8]) -> [u8; 8] {
+pub(super) fn unpack_callsign(bytes: &[u8]) -> [u8; 8] {
     let bits = bytes
         .iter()
         .fold(0_u64, |value, byte| value << 8 | u64::from(*byte));
     std::array::from_fn(|i| ((bits >> (7 * (7 - i))) & 0x7f) as u8)
+}
+
+pub(super) fn pack_callsign(value: &[u8; 8]) -> [u8; 7] {
+    let bits = value
+        .iter()
+        .fold(0_u64, |bits, byte| bits << 7 | u64::from(*byte));
+    bits.to_be_bytes()[1..].try_into().unwrap()
 }
 
 macro_rules! overlay_enum {
@@ -522,10 +529,7 @@ impl Icf<'_> {
                 reason: "physical memory nonblank RPT2 conflicts with RPT1 ending in G",
             });
         }
-        let bits = value
-            .iter()
-            .fold(0_u64, |bits, byte| bits << 7 | u64::from(*byte));
-        self.memory[at..at + 7].copy_from_slice(&bits.to_be_bytes()[1..]);
+        self.memory[at..at + 7].copy_from_slice(&pack_callsign(&value));
         Ok(())
     }
 }

@@ -31,7 +31,10 @@ pub use memory::{
     MemoryCallsign, MemoryDigitalSquelch, MemoryDuplex, MemoryFilter, MemoryMode, MemorySelection,
     MemorySide, MemoryTone,
 };
-pub use repeaters::RepeaterGroup;
+pub use repeaters::{
+    RepeaterCoordinate, RepeaterDuplex, RepeaterGroup, RepeaterMode, RepeaterPosition,
+    RepeaterRecord, RepeaterTone,
+};
 
 // CS-705 1.30 CS705.exe SHA-256:
 // e9439e1413e1258be77e6ef2188b72276dd714642e3858f4690e5d45653aeca3.
@@ -1740,6 +1743,448 @@ mod tests {
                 .all(|g| g.physical_slots().is_empty())
         );
         assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    fn typed_repeater_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory: Vec<u8> = (0..IMAGE_BYTES).map(|i| (91 * i + 7) as u8).collect();
+        memory[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        memory[INTERNAL_MAP_REV] = 6;
+        memory[0x3bf0a..0x3bf6e].fill(255);
+        memory[0x3bf0a..0x3bf0c].fill(0);
+        memory[0x3bf6e..0x3bf6e + 313].fill(0xa5);
+        for p in 0..2500 {
+            let r = 0xaa0f + 52 * p;
+            let k = (p + 17) % 2500;
+            memory[0x3ab82 + 2 * p..0x3ab84 + 2 * p]
+                .copy_from_slice(&(((p + 37) % 2500) as u16).to_le_bytes());
+            memory[r..r + 4].copy_from_slice(&(144_000_000 + p as u32).to_le_bytes());
+            memory[r + 4..r + 8].copy_from_slice(&600_000_u32.to_le_bytes());
+            memory[r + 8..r + 10].copy_from_slice(&(k as u16).to_le_bytes());
+            memory[r + 10] = 0x5a;
+            memory[r + 11..r + 18].copy_from_slice(&[0x83, 0x0a, 0x1c, 0x48, 0xb1, 0xa3, 0xc8]);
+            memory[r + 18..r + 42].copy_from_slice(b"ABCDEFGHIJKLMNOPQRSTUVWX");
+            memory[r + 42..r + 52]
+                .copy_from_slice(&[35, 0xea, 0x5f, 139, 0x30, 0x39, 49, 0x1c, 2, p as u8]);
+            let a = 0x2a5df + 7 * k;
+            memory[a..a + 7].copy_from_slice(&[0xa9, 0x16, 0x9d, 0x46, 0x0c, 0x50, 0x47]);
+        }
+        // Independent Python struct/hashlib, pattern (91*i+7)%256; rotated
+        // order p=j+37 and gateway k=p+17, not identity maps. No setter oracle.
+        let source = fixture_with_memory(&memory, "3D2470724F92F088E0CF43FCBF288C7D");
+        (source, memory)
+    }
+
+    fn typed_repeater_value() -> RepeaterRecord {
+        RepeaterRecord {
+            name: *b"ZYXWVUTSRQPONMLK",
+            sub_name: *b"jihgfedc",
+            repeater_call: *b"TEST01 B",
+            gateway_call: *b"ABCDEF G",
+            frequency_hz: 30_000,
+            offset_hz: 0,
+            mode: RepeaterMode::Dv,
+            duplex: RepeaterDuplex::Plus,
+            tone: RepeaterTone::Tone,
+            tone_index: None,
+            use_repeater: true,
+            position: RepeaterPosition::Approximate,
+            latitude: RepeaterCoordinate {
+                degrees: 89,
+                thousandths_of_minute: 59_999,
+                negative: true,
+            },
+            longitude: RepeaterCoordinate {
+                degrees: 180,
+                thousandths_of_minute: 0,
+                negative: false,
+            },
+            utc_offset_minutes: -840,
+        }
+    }
+
+    #[test]
+    fn typed_repeater_all_2500_fields_match_independent_windows_and_digests() {
+        let (source, mut expected) = typed_repeater_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "D3BD90DDD8254630913D8FEEF38F5C7F"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        assert_eq!(image.repeater_groups().unwrap()[0].physical_slots()[0], 37);
+        for p in 0..2500 {
+            let row = image.physical_repeater(p).unwrap().unwrap();
+            assert_eq!(
+                row,
+                RepeaterRecord {
+                    name: *b"ABCDEFGHIJKLMNOP",
+                    sub_name: *b"QRSTUVWX",
+                    repeater_call: *b"ABCDEFGH",
+                    gateway_call: *b"TEST01 G",
+                    frequency_hz: 144_000_000 + p as u32,
+                    offset_hz: 600_000,
+                    mode: RepeaterMode::Fm,
+                    duplex: RepeaterDuplex::Minus,
+                    tone: RepeaterTone::ToneSquelch,
+                    tone_index: Some(49),
+                    use_repeater: 0xa5 & (1 << (p & 7)) != 0,
+                    position: RepeaterPosition::Exact,
+                    latitude: RepeaterCoordinate {
+                        degrees: 35,
+                        thousandths_of_minute: 59_999,
+                        negative: p & 128 != 0
+                    },
+                    longitude: RepeaterCoordinate {
+                        degrees: 139,
+                        thousandths_of_minute: 12_345,
+                        negative: p & 64 != 0
+                    },
+                    utc_offset_minutes: 540,
+                }
+            );
+            let mut value = typed_repeater_value();
+            value.frequency_hz += p as u32;
+            value.offset_hz = p as u32 * 100;
+            value.use_repeater = p % 2 == 0;
+            image.set_physical_repeater(p, &value).unwrap();
+            assert_eq!(image.physical_repeater(p).unwrap(), Some(value));
+            let r = 0xaa0f + 52 * p;
+            expected[r..r + 4].copy_from_slice(&(30_000 + p as u32).to_le_bytes());
+            expected[r + 4..r + 8].copy_from_slice(&(p as u32 * 100).to_le_bytes());
+            expected[r + 10..r + 18]
+                .copy_from_slice(&[0x25, 0xa9, 0x16, 0x9d, 0x46, 0x0c, 0x50, 0x42]);
+            expected[r + 18..r + 42].copy_from_slice(b"ZYXWVUTSRQPONMLKjihgfedc");
+            expected[r + 42..r + 48].copy_from_slice(&[89, 0xea, 0x5f, 180, 0, 0]);
+            // DV keeps the old FM tone byte (49); sign low six bits survive.
+            expected[r + 49..r + 52].copy_from_slice(&[0xb8, 0xfc, (p as u8 & 63) | 128]);
+            let a = 0x2a5df + 7 * ((p + 17) % 2500);
+            expected[a..a + 7].copy_from_slice(&[0x83, 0x0a, 0x1c, 0x48, 0xb1, 0x90, 0x47]);
+            let u = 0x3bf6e + p / 8;
+            let mask = 1 << (p & 7);
+            expected[u] = expected[u] & !mask | if p % 2 == 0 { mask } else { 0 };
+        }
+        assert_setting_state(&image, &source, &expected);
+        let output = image.to_bytes();
+        assert_eq!(
+            output,
+            fixture_with_memory(&expected, "E385553EB7A7E2C3A14CC063E564B557")
+        );
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "B5B66A66A9479BBDBC7B134898C657FE"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    #[test]
+    fn typed_repeater_gateway_aliases_and_errors_are_atomic() {
+        let (source, baseline) = typed_repeater_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let p = 2499;
+        let r = 0xaa0f + 52 * p;
+        let other = 0xaa0f + 52 * 2;
+        // An unused physical row still aliases k=16; logical j=2462 maps p2499.
+        image.memory[0x3ab82..0x3bf0a].fill(255);
+        image.memory[0x3ab82..0x3ab84].copy_from_slice(&2499_u16.to_le_bytes());
+        image.memory[other + 8..other + 10].copy_from_slice(&16_u16.to_le_bytes());
+        assert_eq!(image.physical_repeater(2).unwrap(), None);
+        let mut value = image.physical_repeater(p).unwrap().unwrap();
+        let before = image.memory.clone();
+        image.set_physical_repeater(p, &value).unwrap();
+        assert_setting_state(&image, &source, &before);
+        value.gateway_call = *b"ABCDEF G";
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+        // Restore full occupancy: an occupied alias must also reject changes.
+        image.memory[0x3ab82..0x3bf0a].copy_from_slice(&baseline[0x3ab82..0x3bf0a]);
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+        value.gateway_call = [b' '; 8];
+        let mut expected = image.memory.clone();
+        expected[r + 8..r + 10].fill(255);
+        image.set_physical_repeater(p, &value).unwrap();
+        assert_setting_state(&image, &source, &expected);
+        image.set_physical_repeater(p, &value).unwrap();
+        assert_setting_state(&image, &source, &expected);
+        value.gateway_call = *b"ABCDEF G";
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+        // Invalid current links cannot be hidden by a new blank gateway.
+        for k in [2500_u16, 65534] {
+            image.memory[r + 8..r + 10].copy_from_slice(&k.to_le_bytes());
+            assert!(matches!(
+                image.physical_repeater(p),
+                Err(Error::Unsupported { .. })
+            ));
+            value.gateway_call = [b' '; 8];
+            scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+        }
+        image.memory.copy_from_slice(&baseline);
+        // Packed blank at a real k is not automatically unlinked.
+        let a = 0x2a5df + 7 * 16;
+        image.memory[a..a + 7].copy_from_slice(&[0x40, 0x81, 2, 4, 8, 0x10, 0x20]);
+        value = image.physical_repeater(p).unwrap().unwrap();
+        let before = image.memory.clone();
+        image.set_physical_repeater(p, &value).unwrap();
+        assert_setting_state(&image, &source, &before);
+        // Later invalid fields must not partially write a unique aux or unlink.
+        for gateway_call in [*b"ABCDEF G", [b' '; 8]] {
+            let mut bad = typed_repeater_value();
+            bad.gateway_call = gateway_call;
+            bad.utc_offset_minutes = 7;
+            scalar_error(&mut image, true, |i| i.set_physical_repeater(p, &bad));
+        }
+        for slot in [2500, usize::MAX] {
+            assert!(matches!(
+                image.physical_repeater(slot),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            let error = scalar_error(&mut image, false, |i| i.set_physical_repeater(slot, &value));
+            assert!(matches!(error, Error::Unsupported { line: 5, .. }));
+        }
+        image.memory[0x3ab82..0x3bf0a].fill(255);
+        assert_eq!(image.physical_repeater(p).unwrap(), None);
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+        image.memory[0x3ab84..0x3ab86].copy_from_slice(&2499_u16.to_le_bytes());
+        assert!(image.physical_repeater(p).is_err());
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(p, &value));
+    }
+
+    #[test]
+    fn typed_repeater_raw_domains_canonical_limits_and_shared_seven_bit_codec() {
+        let (source, baseline) = typed_repeater_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let r = 0xaa0f;
+        let good = typed_repeater_value();
+        // Raw views retain all integer/text widths and all stored mode/duplex codes.
+        image.memory[r..r + 8].fill(255);
+        image.memory[r + 11..r + 48].fill(255);
+        image.memory[0x2a5df + 7 * 17..0x2a5df + 7 * 18].fill(255);
+        image.memory[r + 48..r + 52].copy_from_slice(&[255, 255, 127, 255]);
+        for (code, mode) in [
+            RepeaterMode::Dv,
+            RepeaterMode::Fm,
+            RepeaterMode::FmNarrow,
+            RepeaterMode::Dd,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (dup, duplex) in [
+                RepeaterDuplex::Off,
+                RepeaterDuplex::Minus,
+                RepeaterDuplex::Plus,
+                RepeaterDuplex::Rps,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                image.memory[r + 10] = ((code as u8) << 6) | ((dup as u8) << 4);
+                let raw = image.physical_repeater(0).unwrap().unwrap();
+                assert_eq!((raw.mode, raw.duplex), (mode, duplex));
+                assert_eq!((raw.frequency_hz, raw.offset_hz), (u32::MAX, u32::MAX));
+                assert_eq!(raw.name, [255; 16]);
+                assert_eq!(raw.sub_name, [255; 8]);
+                assert_eq!(raw.repeater_call, [127; 8]);
+                assert_eq!(raw.gateway_call, [127; 8]);
+                assert_eq!(
+                    raw.latitude,
+                    RepeaterCoordinate {
+                        degrees: 255,
+                        thousandths_of_minute: 65535,
+                        negative: true
+                    }
+                );
+                assert_eq!(raw.longitude, raw.latitude);
+                assert_eq!(raw.utc_offset_minutes, 32767);
+                assert_eq!(
+                    raw.tone_index,
+                    if code == 1 || code == 2 {
+                        Some(255)
+                    } else {
+                        None
+                    }
+                );
+            }
+        }
+        for flags in [0x4c, 0x43] {
+            image.memory[r + 10] = flags;
+            assert!(matches!(
+                image.physical_repeater(0),
+                Err(Error::Unsupported { .. })
+            ));
+        }
+        // Replacing all fields does not require decoding obsolete raw fields.
+        image.set_physical_repeater(0, &good).unwrap();
+        assert_eq!(image.physical_repeater(0).unwrap(), Some(good.clone()));
+        assert_eq!(image.memory[r + 48], 255);
+        image.memory.copy_from_slice(&baseline);
+        for frequency_hz in [30_000, 1_399_999_999] {
+            for (offset_hz, utc_offset_minutes, tone_index) in [(0, -840, 0), (9_999_900, 840, 49)]
+            {
+                let mut v = good.clone();
+                v.frequency_hz = frequency_hz;
+                v.offset_hz = offset_hz;
+                v.utc_offset_minutes = utc_offset_minutes;
+                v.mode = RepeaterMode::Fm;
+                v.tone_index = Some(tone_index);
+                v.tone = RepeaterTone::Off;
+                v.position = RepeaterPosition::None;
+                v.latitude = RepeaterCoordinate {
+                    degrees: 0,
+                    thousandths_of_minute: 0,
+                    negative: true,
+                };
+                v.longitude = v.latitude;
+                image.set_physical_repeater(0, &v).unwrap();
+                assert_eq!(image.physical_repeater(0).unwrap(), Some(v));
+                assert_eq!(image.memory[r + 51], 0xc0);
+            }
+        }
+        let mut pole = good.clone();
+        pole.name[0] = b' ';
+        pole.name[15] = b'~';
+        pole.sub_name[0] = b' ';
+        pole.sub_name[7] = b'~';
+        pole.repeater_call = *b"/0123 AZ";
+        pole.gateway_call = *b"/0123 A ";
+        pole.latitude.degrees = 90;
+        pole.latitude.thousandths_of_minute = 0;
+        pole.longitude.degrees = 179;
+        pole.longitude.thousandths_of_minute = 59_999;
+        image.set_physical_repeater(0, &pole).unwrap();
+        assert_eq!(image.physical_repeater(0).unwrap(), Some(pole));
+        for mode in [RepeaterMode::FmNarrow, RepeaterMode::Dd] {
+            let mut v = good.clone();
+            v.mode = mode;
+            scalar_error(&mut image, false, |i| i.set_physical_repeater(0, &v));
+        }
+        let mut v = good.clone();
+        v.duplex = RepeaterDuplex::Rps;
+        scalar_error(&mut image, false, |i| i.set_physical_repeater(0, &v));
+        let mut invalid_values = Vec::new();
+        for n in [0, 29_999, 1_400_000_000, u32::MAX] {
+            let mut v = good.clone();
+            v.frequency_hz = n;
+            invalid_values.push(v);
+        }
+        for n in [1, 9_999_901, 10_000_000, u32::MAX] {
+            let mut v = good.clone();
+            v.offset_hz = n;
+            invalid_values.push(v);
+        }
+        for n in [-841, 841, 7, 32767] {
+            let mut v = good.clone();
+            v.utc_offset_minutes = n;
+            invalid_values.push(v);
+        }
+        for n in [0, 31, 127, 128, 255] {
+            let mut v = good.clone();
+            v.name[15] = n;
+            invalid_values.push(v);
+            let mut v = good.clone();
+            v.sub_name[7] = n;
+            invalid_values.push(v);
+        }
+        for n in [b'a', b'@', 0, 127, 128, 255] {
+            let mut v = good.clone();
+            v.repeater_call[7] = n;
+            invalid_values.push(v);
+            let mut v = good.clone();
+            v.gateway_call[0] = n;
+            invalid_values.push(v);
+        }
+        let mut v = good.clone();
+        v.gateway_call[7] = b'B';
+        invalid_values.push(v);
+        for (mode, tone_index) in [
+            (RepeaterMode::Fm, None),
+            (RepeaterMode::Fm, Some(50)),
+            (RepeaterMode::Fm, Some(255)),
+            (RepeaterMode::Dv, Some(0)),
+        ] {
+            let mut v = good.clone();
+            v.mode = mode;
+            v.tone_index = tone_index;
+            invalid_values.push(v);
+        }
+        for (lat, degrees, minutes) in [
+            (true, 91, 0),
+            (true, 90, 1),
+            (true, 0, 60_000),
+            (false, 181, 0),
+            (false, 180, 1),
+            (false, 0, 60_000),
+        ] {
+            let mut v = good.clone();
+            v.position = RepeaterPosition::None;
+            let c = if lat {
+                &mut v.latitude
+            } else {
+                &mut v.longitude
+            };
+            c.degrees = degrees;
+            c.thousandths_of_minute = minutes;
+            invalid_values.push(v);
+        }
+        let mut v = good.clone();
+        v.mode = RepeaterMode::Fm;
+        v.tone_index = Some(0);
+        v.duplex = RepeaterDuplex::Off;
+        invalid_values.push(v.clone());
+        v.repeater_call = [b' '; 8];
+        invalid_values.push(v);
+        let mut v = good.clone();
+        v.repeater_call = [b' '; 8];
+        invalid_values.push(v.clone());
+        v.gateway_call = [b' '; 8];
+        invalid_values.push(v);
+        for v in invalid_values {
+            scalar_error(&mut image, true, |i| i.set_physical_repeater(0, &v));
+        }
+        let mut bad_sub = good.clone();
+        bad_sub.sub_name[7] = 0;
+        let error = scalar_error(&mut image, true, |i| i.set_physical_repeater(0, &bad_sub));
+        assert!(matches!(error, Error::Invalid { line, .. } if line == 5 + (r + 34) / 32));
+        for mode in [RepeaterMode::Fm, RepeaterMode::Dv] {
+            let mut v = good.clone();
+            v.mode = mode;
+            v.tone_index = if mode == RepeaterMode::Fm {
+                Some(0)
+            } else {
+                None
+            };
+            v.duplex = RepeaterDuplex::Off;
+            v.repeater_call = [b' '; 8];
+            v.gateway_call = [b' '; 8];
+            image.set_physical_repeater(0, &v).unwrap();
+            assert_eq!(image.physical_repeater(0).unwrap(), Some(v));
+        }
+        // Unknown tone indices 50/FF are getter values, not setter defaults.
+        for index in [50, 255] {
+            image.memory[r + 10] = 0x40;
+            image.memory[r + 48] = index;
+            assert_eq!(
+                image.physical_repeater(0).unwrap().unwrap().tone_index,
+                Some(index)
+            );
+        }
+        use super::memory::{pack_callsign, unpack_callsign};
+        for (call, packed) in [
+            (*b"ABCDEFGH", [0x83, 0x0a, 0x1c, 0x48, 0xb1, 0xa3, 0xc8]),
+            (*b"TEST01 B", [0xa9, 0x16, 0x9d, 0x46, 0x0c, 0x50, 0x42]),
+            ([0; 8], [0; 7]),
+            ([127; 8], [255; 7]),
+        ] {
+            assert_eq!(pack_callsign(&call), packed);
+            assert_eq!(unpack_callsign(&packed), call);
+        }
+        for bit in 0..56 {
+            let mut packed = [0; 7];
+            packed[bit / 8] = 1 << (7 - bit % 8);
+            let mut call = [0; 8];
+            call[bit / 7] = 1 << (6 - bit % 7);
+            assert_eq!(pack_callsign(&call), packed);
+            assert_eq!(unpack_callsign(&packed), call);
+        }
     }
 
     fn synthetic_memory() -> Vec<u8> {
