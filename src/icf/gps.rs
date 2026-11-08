@@ -8,6 +8,148 @@ const STARTS: usize = 0x3c5dd;
 const NAMES: usize = 0x353f1;
 const ALARM: usize = 0x3c622;
 
+impl Icf<'_> {
+    /// Delete an unordered set of original-state `(group, index)` GPS rows.
+    ///
+    /// The batch-set contract is a native extension, not the GUI's repeated-row
+    /// primitive. Static evidence: C8328 order shift/C837E tail, C8392/C83B5
+    /// starts, C83C2..C8419 same-group Memory alarm update. Physical record bytes,
+    /// names, UTC and unrelated metadata stay unchanged; no allocation occurs.
+    ///
+    /// # Errors
+    /// Current topology and active alarm are validated even for an empty batch.
+    /// Invalid new group/index or duplicates return Unsupported at line 5.
+    /// Existing validator errors retain their class/line. All candidates are
+    /// checked before storage; any error preserves the entire state.
+    pub fn delete_gps_rows(&mut self, rows: &[(usize, usize)]) -> Result<(), Error> {
+        let groups = self.gps_groups()?;
+        let alarm = self.gps_alarm()?;
+        let mut removed = [false; 300];
+        for &(group, index) in rows {
+            let p = groups
+                .get(group)
+                .and_then(|g| g.physical_slots().get(index))
+                .copied()
+                .ok_or_else(|| argument("GPS deletion group or row outside current range"))?;
+            if removed[p] {
+                return Err(argument("GPS deletion repeats an original row"));
+            }
+            removed[p] = true;
+        }
+        let mut order = [0xff; 600];
+        let mut starts = [0xff; 54];
+        let mut count = 0;
+        for (g, group) in groups.iter().enumerate() {
+            let mut first = true;
+            for &p in group.physical_slots() {
+                if removed[p] {
+                    continue;
+                }
+                if first {
+                    starts[2 * g..2 * g + 2].copy_from_slice(&(count as u16).to_le_bytes());
+                    first = false;
+                }
+                order[2 * count..2 * count + 2].copy_from_slice(&(p as u16).to_le_bytes());
+                count += 1;
+            }
+        }
+        let mut next_alarm: [u8; 4] = self.memory[ALARM..ALARM + 4]
+            .try_into()
+            .expect("four alarm bytes");
+        if let GpsAlarm::Memory { group, index } = alarm {
+            let slots = groups[group].physical_slots();
+            if removed[slots[index]] {
+                next_alarm.fill(0);
+            } else {
+                let before = slots[..index].iter().filter(|&&p| removed[p]).count();
+                next_alarm[2..4].copy_from_slice(&((index - before) as u16).to_le_bytes());
+            }
+        }
+        self.memory[ORDER..ORDER + 600].copy_from_slice(&order);
+        self.memory[STARTS..STARTS + 54].copy_from_slice(&starts);
+        self.memory[ALARM..ALARM + 4].copy_from_slice(&next_alarm);
+        Ok(())
+    }
+
+    /// Carry an inclusive GPS block one row up (-1) or down (+1) in one group.
+    ///
+    /// Static evidence: CBBA0/CAFBC read block and neighbor before raw stores
+    /// through 69A3/7E3E; CBCA6..CBD46 makes a same-group Memory alarm follow
+    /// content. This rotates 34-byte record contents, never physical IDs/order or
+    /// starts. No cross-group move, sort, decode/re-encode or GUI conversion.
+    ///
+    /// # Errors
+    /// Current topology/active alarm are checked first, even at a no-op boundary.
+    /// Invalid new group/range/delta returns Unsupported at line 5. A valid block
+    /// at the outer boundary succeeds unchanged. Errors preserve all state.
+    pub fn carry_gps_rows(
+        &mut self,
+        group: usize,
+        first: usize,
+        last: usize,
+        delta: i8,
+    ) -> Result<(), Error> {
+        let groups = self.gps_groups()?;
+        let alarm = self.gps_alarm()?;
+        let slots = groups
+            .get(group)
+            .ok_or_else(|| argument("GPS Carry group outside range"))?
+            .physical_slots();
+        if !matches!(delta, -1 | 1) || first > last || last >= slots.len() {
+            return Err(argument(
+                "GPS Carry range or direction outside supported domain",
+            ));
+        }
+        if (delta == -1 && first == 0) || (delta == 1 && last == slots.len() - 1) {
+            return Ok(());
+        }
+        let range = if delta == -1 {
+            first - 1..last + 1
+        } else {
+            first..last + 2
+        };
+        let slots = slots[range].to_vec();
+        let mut records: Vec<[u8; 34]> = slots
+            .iter()
+            .map(|&p| {
+                self.memory[RECORDS + 34 * p..RECORDS + 34 * p + 34]
+                    .try_into()
+                    .expect("34 GPS record bytes")
+            })
+            .collect();
+        if delta == -1 {
+            records.rotate_left(1);
+        } else {
+            records.rotate_right(1);
+        }
+        let mut next_alarm = None;
+        if let GpsAlarm::Memory {
+            group: current,
+            index,
+        } = alarm
+            && current == group
+        {
+            let next = if (first..=last).contains(&index) {
+                if delta == -1 { index - 1 } else { index + 1 }
+            } else if delta == -1 && index == first - 1 {
+                last
+            } else if delta == 1 && index == last + 1 {
+                first
+            } else {
+                index
+            };
+            next_alarm = Some((next as u16).to_le_bytes());
+        }
+        for (&p, bytes) in slots.iter().zip(&records) {
+            self.memory[RECORDS + 34 * p..RECORDS + 34 * p + 34].copy_from_slice(bytes);
+        }
+        if let Some(row) = next_alarm {
+            self.memory[ALARM + 2..ALARM + 4].copy_from_slice(&row);
+        }
+        Ok(())
+    }
+}
+
 /// Raw coordinate precision is 0.001 minute; negative zero is preserved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GpsCoordinate {

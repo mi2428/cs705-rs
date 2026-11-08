@@ -4906,6 +4906,285 @@ mod tests {
         );
     }
 
+    fn gps_rows_fixture() -> Vec<u8> {
+        // Independent Python struct/hashlib and literal nonidentity topology;
+        // records are opaque, including an occupied all-zero and all-FF record.
+        let mut m: Vec<u8> = (0..IMAGE_BYTES)
+            .map(|i| (19 * i + (i >> 8) + 211) as u8)
+            .collect();
+        m[0x355a1] = 6;
+        m[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        m[0x32c19 + 34 * 83..0x32c19 + 34 * 84].fill(0);
+        m[0x32c19 + 34 * 7..0x32c19 + 34 * 8].fill(255);
+        m[0x3c385..0x3c5dd].fill(255);
+        m[0x3c5dd..0x3c613].fill(255);
+        for (i, p) in [83_u16, 7, 299, 0, 218, 51, 142].into_iter().enumerate() {
+            m[0x3c385 + 2 * i..0x3c387 + 2 * i].copy_from_slice(&p.to_le_bytes());
+        }
+        for (g, start) in [(0, 0_u16), (4, 3), (26, 6)] {
+            m[0x3c5dd + 2 * g..0x3c5df + 2 * g].copy_from_slice(&start.to_le_bytes());
+        }
+        m[0x3c622..0x3c626].copy_from_slice(&[3, 4, 1, 0]);
+        fixture_with_memory(&m, "4B6555D73913A5064247A3A99C959F28")
+    }
+
+    #[test]
+    fn gps_delete_batches_preserve_records_and_update_only_selected_references() {
+        let source = gps_rows_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "37D038E44ED306AA24CC19D6E7A6CB78"
+        );
+        for rows in [
+            &[(26, 0), (0, 1), (4, 0)][..],
+            &[(4, 0), (0, 1), (26, 0)][..],
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            let mut expected = image.memory().to_vec();
+            image.delete_gps_rows(rows).unwrap();
+            expected[0x3c385..0x3c5dd].fill(255);
+            expected[0x3c5dd..0x3c613].fill(255);
+            for (i, p) in [83_u16, 299, 218, 51].into_iter().enumerate() {
+                expected[0x3c385 + 2 * i..0x3c387 + 2 * i].copy_from_slice(&p.to_le_bytes());
+            }
+            expected[0x3c5dd..0x3c5df].copy_from_slice(&[0, 0]);
+            expected[0x3c5e5..0x3c5e7].copy_from_slice(&[2, 0]);
+            expected[0x3c624..0x3c626].copy_from_slice(&[0, 0]);
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(
+                image.gps_alarm().unwrap(),
+                GpsAlarm::Memory { group: 4, index: 0 }
+            );
+            let output = image.to_bytes();
+            assert!(output.ends_with(b"#CD=4F24847DB1461AD02B2AC507ADAFD035\r\n"));
+            assert_eq!(
+                format!("{:X}", md5::compute(&output)),
+                "3A860D9F93D16BCD9F445BC0632A7DCB"
+            );
+            let parsed = Icf::parse(&output).unwrap();
+            assert_setting_state(&parsed, &output, &expected);
+        }
+        for (raw, after) in [
+            ([0, 255, 255, 254], [0, 255, 255, 254]),
+            ([1, 255, 255, 254], [1, 255, 255, 254]),
+            ([2, 2, 255, 254], [2, 2, 255, 254]),
+            ([3, 0, 0, 0], [3, 0, 0, 0]),
+            ([3, 0, 1, 0], [0, 0, 0, 0]),
+            ([3, 0, 2, 0], [3, 0, 1, 0]),
+            ([3, 4, 1, 0], [3, 4, 1, 0]),
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[0x3c622..0x3c626].copy_from_slice(&raw);
+            image.delete_gps_rows(&[(0, 1)]).unwrap();
+            assert_eq!(&image.memory()[0x3c622..0x3c626], &after);
+        }
+        for all in [false, true] {
+            let mut image = Icf::parse(&source).unwrap();
+            for i in 0..300 {
+                image.memory[0x3c385 + 2 * i..0x3c387 + 2 * i]
+                    .copy_from_slice(&(((137 * i + 83) % 300) as u16).to_le_bytes());
+            }
+            image.memory[0x3c5dd..0x3c613].fill(255);
+            for (g, start) in [(0, 0_u16), (4, 100), (26, 299)] {
+                image.memory[0x3c5dd + 2 * g..0x3c5df + 2 * g]
+                    .copy_from_slice(&start.to_le_bytes());
+            }
+            let mut expected = image.memory().to_vec();
+            let rows: Vec<_> = if all {
+                (0..100)
+                    .map(|i| (0, i))
+                    .chain((0..199).map(|i| (4, i)))
+                    .chain([(26, 0)])
+                    .collect()
+            } else {
+                vec![(0, 0), (26, 0)]
+            };
+            image.delete_gps_rows(&rows).unwrap();
+            expected[0x3c385..0x3c5dd].fill(255);
+            expected[0x3c5dd..0x3c613].fill(255);
+            if all {
+                expected[0x3c622..0x3c626].fill(0);
+            } else {
+                for (n, i) in (1..299).enumerate() {
+                    expected[0x3c385 + 2 * n..0x3c387 + 2 * n]
+                        .copy_from_slice(&(((137 * i + 83) % 300) as u16).to_le_bytes());
+                }
+                expected[0x3c5dd..0x3c5df].copy_from_slice(&[0, 0]);
+                expected[0x3c5e5..0x3c5e7].copy_from_slice(&[99, 0]);
+            }
+            assert_setting_state(&image, &source, &expected);
+            let output = image.to_bytes();
+            image.delete_gps_rows(&[]).unwrap();
+            assert_eq!(image.to_bytes(), output);
+            assert_setting_state(&Icf::parse(&output).unwrap(), &output, &expected);
+        }
+        for group in [0, 4, 26] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[0x3c622..0x3c626].copy_from_slice(&[3, group as u8, 0, 0]);
+            let rows: Vec<_> = (0..if group == 26 { 1 } else { 3 })
+                .map(|i| (group, i))
+                .collect();
+            image.delete_gps_rows(&rows).unwrap();
+            assert_eq!(image.gps_alarm().unwrap(), GpsAlarm::Off);
+            assert!(
+                image.gps_groups().unwrap()[group]
+                    .physical_slots()
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn gps_carry_rotates_raw_contents_not_ids_and_alarm_follows_content() {
+        let source = gps_rows_fixture();
+        for (first, last, delta, mapping, row, cd, hash) in [
+            (
+                1,
+                2,
+                -1,
+                [(0, 218), (218, 51), (51, 0)],
+                0,
+                "C2F11D4E5C5C4AB0830E399375B43C96",
+                "23E3730271399AA840427EA5E43E4901",
+            ),
+            (
+                0,
+                1,
+                1,
+                [(0, 51), (218, 0), (51, 218)],
+                2,
+                "A531BAD90B1DE31E05D2EA191B84BEBC",
+                "D40B441275F654E2B2C811D549FD168D",
+            ),
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            let initial = image.memory().to_vec();
+            let mut expected = initial.clone();
+            for (dst, src) in mapping {
+                expected[0x32c19 + 34 * dst..0x32c19 + 34 * (dst + 1)]
+                    .copy_from_slice(&initial[0x32c19 + 34 * src..0x32c19 + 34 * (src + 1)]);
+            }
+            expected[0x3c624..0x3c626].copy_from_slice(&[row, 0]);
+            image.carry_gps_rows(4, first, last, delta).unwrap();
+            assert_setting_state(&image, &source, &expected);
+            let output = image.to_bytes();
+            assert!(output.ends_with(format!("#CD={cd}\r\n").as_bytes()));
+            assert_eq!(format!("{:X}", md5::compute(&output)), hash);
+            assert_setting_state(&Icf::parse(&output).unwrap(), &output, &expected);
+        }
+        for (first, last, delta, indices) in [(1, 2, -1, [2, 0, 1]), (0, 1, 1, [1, 2, 0])] {
+            for (old, &new) in indices.iter().enumerate() {
+                let mut image = Icf::parse(&source).unwrap();
+                image.memory[0x3c624..0x3c626].copy_from_slice(&(old as u16).to_le_bytes());
+                image.carry_gps_rows(4, first, last, delta).unwrap();
+                assert_eq!(
+                    image.gps_alarm().unwrap(),
+                    GpsAlarm::Memory {
+                        group: 4,
+                        index: new
+                    }
+                );
+            }
+            for raw in [
+                [0, 255, 255, 254],
+                [1, 255, 255, 254],
+                [2, 27, 255, 254],
+                [3, 0, 2, 0],
+            ] {
+                let mut image = Icf::parse(&source).unwrap();
+                image.memory[0x3c622..0x3c626].copy_from_slice(&raw);
+                image.carry_gps_rows(4, first, last, delta).unwrap();
+                assert_eq!(&image.memory()[0x3c622..0x3c626], &raw);
+            }
+        }
+        for (g, first, last, delta) in [
+            (4, 0, 1, -1),
+            (4, 1, 2, 1),
+            (4, 0, 2, -1),
+            (4, 0, 2, 1),
+            (26, 0, 0, -1),
+            (26, 0, 0, 1),
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.carry_gps_rows(g, first, last, delta).unwrap();
+            assert_eq!(image.to_bytes(), source);
+        }
+        // An occupied 00/FF record is carried without field decoding.
+        let mut image = Icf::parse(&source).unwrap();
+        let initial = image.memory().to_vec();
+        let mut expected = initial.clone();
+        expected[0x32c19 + 34 * 83..0x32c19 + 34 * 84].fill(255);
+        expected[0x32c19 + 34 * 7..0x32c19 + 34 * 8].fill(0);
+        image.carry_gps_rows(0, 1, 1, -1).unwrap();
+        assert_setting_state(&image, &source, &expected);
+    }
+
+    #[test]
+    fn gps_row_operations_validate_current_state_and_late_arguments_before_store() {
+        let source = gps_rows_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        for rows in [
+            &[(0, 0), (4, 1), (0, 0)][..],
+            &[(0, 0), (26, 1)][..],
+            &[(27, 0)][..],
+            &[(usize::MAX, 0)][..],
+            &[(0, usize::MAX)][..],
+            &[(1, 0)][..],
+        ] {
+            message_rejected(&mut image, (false, 5), |i| i.delete_gps_rows(rows));
+        }
+        for (g, first, last, delta) in [
+            (27, 0, 0, 1),
+            (usize::MAX, 0, 0, 1),
+            (4, 2, 1, 1),
+            (4, 0, 3, 1),
+            (4, 0, usize::MAX, 1),
+            (4, usize::MAX, 0, -1),
+            (4, 0, 1, 0),
+            (4, 0, 1, 2),
+            (4, 0, 1, i8::MIN),
+            (1, 0, 0, 1),
+        ] {
+            message_rejected(&mut image, (false, 5), |i| {
+                i.carry_gps_rows(g, first, last, delta)
+            });
+        }
+        for raw in [
+            [255, 0, 0, 0],
+            [2, 28, 0, 0],
+            [3, 27, 0, 0],
+            [3, 1, 0, 0],
+            [3, 4, 3, 0],
+        ] {
+            for operation in 0..3 {
+                let mut image = Icf::parse(&source).unwrap();
+                image.memory[0x3c622..0x3c626].copy_from_slice(&raw);
+                let error = image.gps_alarm().unwrap_err();
+                let expected = image.memory().to_vec();
+                let output = image.to_bytes();
+                let result = match operation {
+                    0 => image.delete_gps_rows(&[]),
+                    1 => image.carry_gps_rows(4, 0, 1, -1),
+                    _ => image.delete_gps_rows(&[(0, 0)]),
+                };
+                assert_eq!(result, Err(error));
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(image.to_bytes(), output);
+            }
+        }
+        for (at, bytes) in [(0x3c387, [83, 0]), (0x3c5e5, [0, 0]), (0x3c5dd, [255, 255])] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[at..at + 2].copy_from_slice(&bytes);
+            let error = image.gps_groups().err().unwrap();
+            let expected = image.memory().to_vec();
+            let output = image.to_bytes();
+            assert_eq!(image.delete_gps_rows(&[]), Err(error.clone()));
+            assert_eq!(image.carry_gps_rows(4, 0, 1, -1), Err(error));
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.to_bytes(), output);
+        }
+    }
+
     fn layout_test_memory(count: usize, canonical: bool) -> Vec<u8> {
         // Independent literal model, Python oracle.py verifies all four complete
         // files. Not derived from canonicalize_memory_layout or its output.
