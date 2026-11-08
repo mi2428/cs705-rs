@@ -1,4 +1,4 @@
-//! Lossless byte-oriented name editing of a limited repeater CSV format.
+//! Lossless raw Name and Sub Name editing of a limited repeater CSV format.
 //!
 //! Only the exact 17-column export header, comma separators, unquoted cells and
 //! CRLF-terminated physical lines are supported. BOMs, quotes, semicolons, ASCII
@@ -7,7 +7,8 @@
 //!
 //! Existing cell bytes are opaque, not decoded as UTF-8 or validated as CP932.
 //! Numeric formats, modes, groups, units and radio suitability are not checked.
-//! New names use a deliberately narrower ASCII-only editing boundary. No source
+//! New Name/Sub Name values use narrower ASCII-only limits of 16/8 bytes.
+//! Sub Name edits have not been compared with the original GUI. No source
 //! application normalization, truncation, padding or defaulting is performed.
 //! Successful parsing establishes structure only, not general CS-705
 //! compatibility. For one fixed native export, DV/FM Name edits matched native
@@ -29,6 +30,7 @@ use std::fmt;
 // acbac158dc80f13a28b6925dce74aacb026bb41a0cf464d0f6c07b2425bee2aa.
 const HEADER: &[u8] = b"Group No,Group Name,Name,Sub Name,Repeater Call Sign,Gateway Call Sign,Frequency,Dup,Offset,Mode,TONE,Repeater Tone,RPT1USE,Position,Latitude,Longitude,UTC Offset\r\n";
 const NAME: usize = 2;
+const SUB_NAME: usize = 3;
 const MAX_ROWS: usize = 2500;
 
 /// Invalid or unsupported CSV structure or editing input.
@@ -91,12 +93,17 @@ impl Row<'_> {
     pub fn name_bytes(&self) -> &[u8] {
         &self.cells[NAME]
     }
+
+    /// Borrow Sub Name bytes without decoding, trimming or enforcing edit limits.
+    pub fn sub_name_bytes(&self) -> &[u8] {
+        &self.cells[SUB_NAME]
+    }
 }
 
 /// A CSV document borrowing unchanged cells and owning only edited names.
 ///
 /// Rows cannot be added, removed or reordered through this API. All bytes other
-/// than an explicitly edited Name, including empty cells and CRLFs, are retained.
+/// than an explicitly edited Name/Sub Name, including empty cells and CRLFs, are retained.
 pub struct Csv<'a> {
     rows: Vec<Row<'a>>,
 }
@@ -214,6 +221,42 @@ impl<'a> Csv<'a> {
         Ok(())
     }
 
+    /// Replace only Sub Name with 0..=8 safe printable ASCII bytes, without padding.
+    ///
+    /// Comma, semicolon, double quote and trailing space are unsupported. Leading
+    /// and interior spaces and case are preserved. An opaque or overlength old
+    /// cell can remain untouched or be explicitly replaced; parsing is unchanged.
+    /// This narrow raw edit has not been compared with the original GUI.
+    ///
+    /// # Errors
+    /// Row bounds are checked before the new value. Unsupported edits leave every
+    /// cell unchanged; no truncation, normalization or value conversion occurs.
+    pub fn set_sub_name(&mut self, index: usize, name: &[u8]) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let line = index + 2;
+        if name.len() > 8 {
+            return Err(Error::Unsupported {
+                line,
+                reason: "Sub Name exceeds 8 bytes",
+            });
+        }
+        if name
+            .iter()
+            .any(|byte| !matches!(*byte, b' '..=b'~') || matches!(*byte, b',' | b';' | b'"'))
+            || name.ends_with(b" ")
+        {
+            return Err(Error::Unsupported {
+                line,
+                reason: "edited sub names require safe ASCII without trailing spaces",
+            });
+        }
+        row.cells[SUB_NAME] = Cow::Owned(name.to_vec());
+        Ok(())
+    }
+
     /// Serialize without normalization, preserving every unedited byte and order.
     ///
     /// No file or device is accessed. The result has the same limited syntax as
@@ -253,6 +296,117 @@ mod tests {
         "1,GROUP1,FM test,FM,,,145.000000,DUP-,0.600000,FM,TONE,88.5Hz,NO,Approximate,-35.500000,139.750000,0:00\r\n",
         "50,GROUP50,DV test,DV,TEST01 B,TEST01 G,439.000000,DUP-,5.000000,DV,,,YES,Exact,35.500000,139.750000,+9:00\r\n",
     ).as_bytes();
+
+    #[test]
+    fn raw_sub_name_edits_preserve_every_other_csv_byte() {
+        let source = [HEADER,
+            b"1,\x83\x5c,\x82\xa0\x95\x5c,\x82\xa0opaque-long,,,not-a-frequency,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n",
+            b"2,Group,Old Name,untouched,,,other,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n",
+        ].concat();
+        let mut csv = Csv::parse(&source).unwrap();
+        let at = HEADER.len() + b"1,\x83\x5c,\x82\xa0\x95\x5c,".len();
+        assert_eq!(csv.rows()[0].sub_name_bytes(), b"\x82\xa0opaque-long");
+        assert_eq!(
+            csv.rows()[0].sub_name_bytes().as_ptr(),
+            source[at..].as_ptr()
+        );
+        assert_eq!(
+            csv.rows()[0].sub_name_bytes().as_ptr(),
+            csv.rows()[0].cells()[3].as_ptr()
+        );
+        assert_eq!(csv.to_bytes(), source);
+        csv.set_sub_name(0, b"AbCd1234").unwrap();
+        csv.set_sub_name(1, b"").unwrap();
+        let expected = [HEADER,
+            b"1,\x83\x5c,\x82\xa0\x95\x5c,AbCd1234,,,not-a-frequency,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n",
+            b"2,Group,Old Name,,,,other,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n",
+        ].concat();
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(csv.rows()[0].name_bytes(), b"\x82\xa0\x95\x5c");
+        assert_eq!(csv.rows()[1].sub_name_bytes(), b"");
+        let parsed = Csv::parse(&expected).unwrap();
+        assert_eq!(parsed.rows()[0].sub_name_bytes(), b"AbCd1234");
+        assert_eq!(parsed.to_bytes(), expected);
+        // Exhaustive single-byte boundary; expected output is built from literals,
+        // never by using a product edit as an oracle.
+        for byte in 0..=255_u8 {
+            let mut csv = Csv::parse(&source).unwrap();
+            if (33..=126).contains(&byte) && !b",;\"".contains(&byte) {
+                csv.set_sub_name(0, &[byte]).unwrap();
+                let expected=[HEADER,b"1,\x83\x5c,\x82\xa0\x95\x5c,",&[byte],b",,,not-a-frequency,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n",b"2,Group,Old Name,untouched,,,other,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque\r\n"].concat();
+                assert_eq!(csv.to_bytes(), expected);
+            } else {
+                assert!(matches!(
+                    csv.set_sub_name(0, &[byte]),
+                    Err(Error::Unsupported { line: 2, .. })
+                ));
+                assert_eq!(csv.to_bytes(), source);
+            }
+        }
+        csv.set_sub_name(0, b" A b").unwrap();
+        assert_eq!(csv.rows()[0].sub_name_bytes(), b" A b");
+        let before = csv.to_bytes();
+        for value in [
+            b"123456789".as_slice(),
+            b"tail ",
+            b" A ",
+            b"ok\0",
+            b"ok\x7f",
+            b"ok\xff",
+            b"ok,",
+            b"ok;",
+            b"ok\"",
+        ] {
+            assert!(matches!(
+                csv.set_sub_name(0, value),
+                Err(Error::Unsupported { line: 2, .. })
+            ));
+            assert_eq!(csv.to_bytes(), before);
+        }
+    }
+
+    #[test]
+    fn sub_name_last_row_and_error_priority_preserve_opaque_cells() {
+        let row = b"1,G,\x82\xa0,LONG-NAME,,,f,dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        assert_eq!(csv.rows()[2499].sub_name_bytes(), b"LONG-NAME");
+        let at = HEADER.len() + 2499 * row.len() + b"1,G,\x82\xa0,".len();
+        assert_eq!(
+            csv.rows()[2499].sub_name_bytes().as_ptr(),
+            source[at..].as_ptr()
+        );
+        csv.set_sub_name(2499, b" LAST x").unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(
+            b"1,G,\x82\xa0, LAST x,,,f,dup,offset,mode,tone,rtone,use,pos,lat,lon,utc\r\n",
+        );
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        assert!(matches!(
+            csv.set_sub_name(2499, b"123456789"),
+            Err(Error::Unsupported { line: 2501, .. })
+        ));
+        for index in [2500, usize::MAX] {
+            assert_eq!(
+                csv.set_sub_name(index, b"\xffinvalid-long"),
+                Err(Error::RowIndexOutOfBounds { index })
+            );
+            assert_eq!(csv.to_bytes(), expected);
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        assert_eq!(
+            empty.set_sub_name(0, b"\0"),
+            Err(Error::RowIndexOutOfBounds { index: 0 })
+        );
+        assert_eq!(empty.to_bytes(), HEADER);
+    }
 
     #[test]
     fn lossless_name_edit_matches_independent_bytes() {
