@@ -44,6 +44,14 @@ const NAME: usize = 2;
 const SUB_NAME: usize = 3;
 const MAX_ROWS: usize = 2500;
 
+// Public frequencies in tenths of Hz, sorted from the Icom IC-705 Advanced
+// Manual, printed pages 2-14 and 2-17 (Selectable tone frequencies).
+const REPEATER_TONES: [u16; 50] = [
+    670, 693, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974, 1000, 1035, 1072, 1109, 1148, 1188,
+    1230, 1273, 1318, 1365, 1413, 1462, 1514, 1567, 1598, 1622, 1655, 1679, 1713, 1738, 1773, 1799,
+    1835, 1862, 1899, 1928, 1966, 1995, 2035, 2065, 2107, 2181, 2257, 2291, 2336, 2418, 2503, 2541,
+];
+
 /// Invalid or unsupported CSV structure or editing input.
 ///
 /// Physical line numbers are one-based; data-row indices are zero-based.
@@ -377,6 +385,29 @@ impl<'a> Csv<'a> {
             RepeaterTone::ToneSquelch => b"TSQL",
         };
         row.cells[10] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only Repeater Tone (column 11) with the saved index's canonical Hz text.
+    ///
+    /// Indices 0..=49 select the ascending public manual frequencies. This raw
+    /// local edit does not decode the old tone, check FM suitability or reproduce
+    /// GUI mode coupling, unknown-tone dialogs or special/default corrections.
+    /// Mode, TONE and all other cells remain unchanged, even for DV/DD/opaque Mode.
+    /// # Errors
+    /// Row bounds take priority; unsupported new indices leave all cells intact.
+    pub fn set_repeater_tone_index(&mut self, index: usize, tone_index: u8) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let tone = REPEATER_TONES
+            .get(usize::from(tone_index))
+            .ok_or(Error::Unsupported {
+                line: index + 2,
+                reason: "CSV Repeater Tone requires a saved index in 0..=49",
+            })?;
+        row.cells[11] = Cow::Owned(format!("{}.{}Hz", tone / 10, tone % 10).into_bytes());
         Ok(())
     }
 
@@ -1098,6 +1129,150 @@ mod tests {
         assert_eq!(empty.set_repeater_call_sign(0, b"a"), error);
         assert_eq!(empty.set_gateway_call_sign(0, b"a"), error);
         assert_eq!(empty.to_bytes(), HEADER);
+    }
+
+    #[test]
+    fn repeater_tone_indices_match_public_frequencies_and_edit_only_one_cell() {
+        // Independently transcribed decimal labels from the public manual's
+        // printed 2-14/2-17 tables, not formatted from REPEATER_TONES.
+        let expected_tones: [&[u8]; 50] = [
+            b"67.0Hz", b"69.3Hz", b"71.9Hz", b"74.4Hz", b"77.0Hz", b"79.7Hz", b"82.5Hz", b"85.4Hz",
+            b"88.5Hz", b"91.5Hz", b"94.8Hz", b"97.4Hz", b"100.0Hz", b"103.5Hz", b"107.2Hz",
+            b"110.9Hz", b"114.8Hz", b"118.8Hz", b"123.0Hz", b"127.3Hz", b"131.8Hz", b"136.5Hz",
+            b"141.3Hz", b"146.2Hz", b"151.4Hz", b"156.7Hz", b"159.8Hz", b"162.2Hz", b"165.5Hz",
+            b"167.9Hz", b"171.3Hz", b"173.8Hz", b"177.3Hz", b"179.9Hz", b"183.5Hz", b"186.2Hz",
+            b"189.9Hz", b"192.8Hz", b"196.6Hz", b"199.5Hz", b"203.5Hz", b"206.5Hz", b"210.7Hz",
+            b"218.1Hz", b"225.7Hz", b"229.1Hz", b"233.6Hz", b"241.8Hz", b"250.3Hz", b"254.1Hz",
+        ];
+        let source = enum_csv_literal(None);
+        let original = source.clone();
+        for (tone_index, text) in expected_tones.iter().enumerate() {
+            let mut csv = Csv::parse(&source).unwrap();
+            let pointers: Vec<_> = csv
+                .rows()
+                .iter()
+                .map(|r| r.cells().map(|c| c.as_ptr()))
+                .collect();
+            csv.set_repeater_tone_index(0, tone_index as u8).unwrap();
+            let expected = enum_csv_literal(Some((11, text)));
+            assert_eq!(csv.to_bytes(), expected);
+            assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+            for (r, row) in csv.rows().iter().enumerate() {
+                for (c, cell) in row.cells().iter().enumerate() {
+                    if (r, c) != (0, 11) {
+                        assert_eq!(cell.as_ptr(), pointers[r][c]);
+                    }
+                }
+            }
+        }
+        assert_eq!(source, original);
+        // Full row literals also exercise empty, unknown, long and opaque old
+        // tones with DV/DD/unknown modes, without interpreting or clearing them.
+        for (tone_index, old_row, new_row) in [
+            (0, b"1,G,Name,Sub,CALL,GATE,f,d,o,DV,TSQL,\x82\xa2Hz,u,p,lat,lon,utc\r\n".as_slice(), b"1,G,Name,Sub,CALL,GATE,f,d,o,DV,TSQL,67.0Hz,u,p,lat,lon,utc\r\n".as_slice()),
+            (8, b"1,G,Name,Sub,CALL,GATE,f,d,o,DD,TSQL,,u,p,lat,lon,utc\r\n", b"1,G,Name,Sub,CALL,GATE,f,d,o,DD,TSQL,88.5Hz,u,p,lat,lon,utc\r\n"),
+            (24, b"1,G,Name,Sub,CALL,GATE,f,d,o,unknown,TSQL,overlength-old-tone-value,u,p,lat,lon,utc\r\n", b"1,G,Name,Sub,CALL,GATE,f,d,o,unknown,TSQL,151.4Hz,u,p,lat,lon,utc\r\n"),
+            (49, b"1,G,Name,Sub,CALL,GATE,f,d,o,DV,TSQL,unknown,u,p,lat,lon,utc\r\n", b"1,G,Name,Sub,CALL,GATE,f,d,o,DV,TSQL,254.1Hz,u,p,lat,lon,utc\r\n"),
+        ] {
+            let source = [HEADER, old_row].concat();
+            let mut csv = Csv::parse(&source).unwrap();
+            csv.set_repeater_tone_index(0, tone_index).unwrap();
+            let expected = [HEADER, new_row].concat();
+            assert_eq!(csv.to_bytes(), expected);
+            assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+            assert_eq!(source, [HEADER, old_row].concat());
+        }
+
+        let row = b"1,G,Name,Sub,CALL,GATE,f,d,o,DD,TONE,opaque-old-tone,u,p,lat,lon,utc\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let original = source.clone();
+        let mut csv = Csv::parse(&source).unwrap();
+        let pointers: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        csv.set_repeater_tone_index(2499, 49).unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected
+            .extend_from_slice(b"1,G,Name,Sub,CALL,GATE,f,d,o,DD,TONE,254.1Hz,u,p,lat,lon,utc\r\n");
+        assert_eq!(csv.to_bytes(), expected);
+        for (r, row) in csv.rows().iter().enumerate() {
+            for (c, cell) in row.cells().iter().enumerate() {
+                if (r, c) != (2499, 11) {
+                    assert_eq!(cell.as_ptr(), pointers[r][c]);
+                }
+            }
+        }
+        // All 17 local column setters can coexist; none is a row-level import.
+        csv.set_group_number(2499, 50).unwrap();
+        csv.set_group_name(2499, b"Local").unwrap();
+        csv.set_name(2499, b"N").unwrap();
+        csv.set_sub_name(2499, b"S").unwrap();
+        csv.set_repeater_call_sign(2499, b"C").unwrap();
+        csv.set_gateway_call_sign(2499, b"G").unwrap();
+        csv.set_frequency_hz(2499, 145000000).unwrap();
+        csv.set_duplex(2499, RepeaterDuplex::Minus).unwrap();
+        csv.set_offset_hz(2499, 600000).unwrap();
+        csv.set_mode(2499, RepeaterMode::Dv).unwrap();
+        csv.set_tone(2499, RepeaterTone::ToneSquelch).unwrap();
+        csv.set_rpt1_use(2499, true).unwrap();
+        csv.set_position(2499, RepeaterPosition::None).unwrap();
+        csv.set_latitude(2499, csv_coordinate(0, 0, true)).unwrap();
+        csv.set_longitude(2499, csv_coordinate(180, 0, false))
+            .unwrap();
+        csv.set_utc_offset_minutes(2499, 330).unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(b"50,Local,N,S,C,G,145.000000,DUP-,0.600000,DV,TSQL,254.1Hz,YES,None,-0.000000,180.000000,+5:30\r\n");
+        assert_eq!(csv.to_bytes(), expected);
+        let before: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        for index in [0, 2499] {
+            for tone_index in [50, 51, 255] {
+                assert!(
+                    matches!(csv.set_repeater_tone_index(index, tone_index), Err(Error::Unsupported { line, .. }) if line == index + 2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+                assert_eq!(
+                    csv.rows()
+                        .iter()
+                        .map(|r| r.cells().map(|c| c.as_ptr()))
+                        .collect::<Vec<_>>(),
+                    before
+                );
+            }
+        }
+        for index in [2500, usize::MAX] {
+            for tone_index in [0, 50, 51, 255] {
+                assert_eq!(
+                    csv.set_repeater_tone_index(index, tone_index),
+                    Err(Error::RowIndexOutOfBounds { index })
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        for tone_index in [0, 50, 51, 255] {
+            assert_eq!(
+                empty.set_repeater_tone_index(0, tone_index),
+                Err(Error::RowIndexOutOfBounds { index: 0 })
+            );
+            assert_eq!(empty.to_bytes(), HEADER);
+        }
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        assert_eq!(source, original);
     }
 
     fn enum_csv_literal(change: Option<(usize, &[u8])>) -> Vec<u8> {
