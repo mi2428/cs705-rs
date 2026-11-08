@@ -14,6 +14,8 @@
 //! row-export coupling, clear companion cells or certify radio suitability.
 //! Group Name/callsign edits are local ASCII replacements, not group renames,
 //! ICF gateway allocation/unlink or original-OS character normalization.
+//! Group No and typed-coordinate setters also replace one cell only. Coordinate
+//! output is an integer canonical subset, not a general decimal/RTL float codec.
 //! Sub Name, Hz, enum and UTC edits have not been compared with the original GUI.
 //! No source application normalization, truncation, padding or defaulting is performed.
 //! Successful parsing establishes structure only, not general CS-705
@@ -21,7 +23,9 @@
 //! GUI edits and native import/re-export byte-for-byte. Other inputs and fields
 //! are not covered by that comparison.
 
-use crate::icf::{RepeaterDuplex, RepeaterMode, RepeaterPosition, RepeaterTone};
+use crate::icf::{
+    RepeaterCoordinate, RepeaterDuplex, RepeaterMode, RepeaterPosition, RepeaterTone,
+};
 use std::borrow::Cow;
 use std::fmt;
 
@@ -522,6 +526,83 @@ impl<'a> Csv<'a> {
         Ok(())
     }
 
+    /// Replace only Group No (column 0) with decimal 1..=50.
+    /// This raw cell edit does not move rows, rename groups, propagate Group Name
+    /// or change ICF group/reference metadata. Old cell contents are not decoded.
+    /// # Errors
+    /// Row bounds take priority; out-of-range new numbers are Unsupported.
+    pub fn set_group_number(&mut self, index: usize, number: u8) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if !(1..=50).contains(&number) {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "CSV Group No requires 1..=50",
+            });
+        }
+        row.cells[0] = Cow::Owned(number.to_string().into_bytes());
+        Ok(())
+    }
+
+    /// Replace only Latitude (column 14) using typed integer components.
+    ///
+    /// Degrees are 0..=90, ticks below 60000 (0.001 minute), and a pole requires
+    /// zero ticks. Fractional microdegrees use (ticks*50+1)/3: integer nearest
+    /// six-place output with no half ties. Negative zero retains a minus prefix.
+    /// No Position/longitude decoding or correction, decimal parser, float/locale
+    /// formatter or original-RTL/GUI boundary equivalence is claimed.
+    /// # Errors
+    /// Row bounds take priority; invalid new components are Unsupported, with no changes.
+    pub fn set_latitude(&mut self, index: usize, value: RepeaterCoordinate) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if value.degrees > 90
+            || value.thousandths_of_minute >= 60000
+            || (value.degrees == 90 && value.thousandths_of_minute != 0)
+        {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "CSV Latitude outside degree/tick domain",
+            });
+        }
+        let fraction = (u32::from(value.thousandths_of_minute) * 50 + 1) / 3;
+        let sign = if value.negative { "-" } else { "" };
+        row.cells[14] = Cow::Owned(format!("{sign}{}.{fraction:06}", value.degrees).into_bytes());
+        Ok(())
+    }
+
+    /// Replace only Longitude (column 15), preserving negative zero and other cells.
+    ///
+    /// Degrees are 0..=180; ticks are below 60000 and zero at a pole. Integer
+    /// (ticks*50+1)/3 gives nearest six-place fractional degrees, without a carry
+    /// to the next degree. This intentional canonical subset does not reproduce
+    /// arbitrary decimal input, float/locale/RTL rounding or GUI row correction.
+    /// # Errors
+    /// Row bounds take priority; invalid new components are Unsupported, with no changes.
+    pub fn set_longitude(&mut self, index: usize, value: RepeaterCoordinate) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if value.degrees > 180
+            || value.thousandths_of_minute >= 60000
+            || (value.degrees == 180 && value.thousandths_of_minute != 0)
+        {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "CSV Longitude outside degree/tick domain",
+            });
+        }
+        let fraction = (u32::from(value.thousandths_of_minute) * 50 + 1) / 3;
+        let sign = if value.negative { "-" } else { "" };
+        row.cells[15] = Cow::Owned(format!("{sign}{}.{fraction:06}", value.degrees).into_bytes());
+        Ok(())
+    }
+
     /// Serialize without normalization, preserving every unedited byte and order.
     ///
     /// No file or device is accessed. The result has the same limited syntax as
@@ -561,6 +642,244 @@ mod tests {
         "1,GROUP1,FM test,FM,,,145.000000,DUP-,0.600000,FM,TONE,88.5Hz,NO,Approximate,-35.500000,139.750000,0:00\r\n",
         "50,GROUP50,DV test,DV,TEST01 B,TEST01 G,439.000000,DUP-,5.000000,DV,,,YES,Exact,35.500000,139.750000,+9:00\r\n",
     ).as_bytes();
+
+    fn csv_coordinate(degrees: u8, ticks: u16, negative: bool) -> RepeaterCoordinate {
+        RepeaterCoordinate {
+            degrees,
+            thousandths_of_minute: ticks,
+            negative,
+        }
+    }
+
+    fn coordinate_csv_literal(changes: &[(usize, &[u8])]) -> Vec<u8> {
+        // Literal expected cells, not a product row/setter. Position is None
+        // while both old coordinate cells and the old Group No are opaque.
+        let cells: [&[u8]; 17] = [
+            b"\x81\x40No",
+            b"\x83\x5cGroup",
+            b"\x82\xa0",
+            b"Sub",
+            b"CALL",
+            b"GATE",
+            b"freq",
+            b"dup",
+            b"offset",
+            b"mode",
+            b"tone",
+            b"rtone",
+            b"use",
+            b"None",
+            b"unknown-lat",
+            b"\x82\xa2lon",
+            b"utc",
+        ];
+        let mut text = HEADER.to_vec();
+        for (column, &cell) in cells.iter().enumerate() {
+            if column != 0 {
+                text.push(b',');
+            }
+            text.extend_from_slice(
+                changes
+                    .iter()
+                    .find(|(c, _)| *c == column)
+                    .map_or(cell, |(_, value)| *value),
+            );
+        }
+        text.extend_from_slice(b"\r\n1,Keep Group,Keep Name,Keep Sub,OLD CALL,OLD GATE,oldfreq,olddup,oldoffset,oldmode,oldtone,oldrtone,olduse,None,oldlat,oldlon,oldutc\r\n");
+        text
+    }
+
+    #[test]
+    fn csv_integer_coordinates_and_group_number_match_literals_and_all_tick_rounding() {
+        let source = coordinate_csv_literal(&[]);
+        let original = source.clone();
+        macro_rules! check {
+            ($column:literal,$method:ident,$cases:expr) => {
+                for (value, text) in $cases {
+                    let mut csv = Csv::parse(&source).unwrap();
+                    let pointers: Vec<_> = csv
+                        .rows()
+                        .iter()
+                        .map(|r| r.cells().map(|c| c.as_ptr()))
+                        .collect();
+                    csv.$method(0, value).unwrap();
+                    let expected = coordinate_csv_literal(&[($column, text)]);
+                    assert_eq!(csv.to_bytes(), expected);
+                    for (r, row) in csv.rows().iter().enumerate() {
+                        for (c, cell) in row.cells().iter().enumerate() {
+                            if (r, c) != (0, $column) {
+                                assert_eq!(cell.as_ptr(), pointers[r][c]);
+                            }
+                        }
+                    }
+                    assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+                }
+            };
+        }
+        check!(0, set_group_number, [(1, b"1".as_slice()), (50, b"50")]);
+        check!(
+            14,
+            set_latitude,
+            [
+                (csv_coordinate(0, 0, false), b"0.000000".as_slice()),
+                (csv_coordinate(0, 0, true), b"-0.000000"),
+                (csv_coordinate(90, 0, false), b"90.000000"),
+                (csv_coordinate(90, 0, true), b"-90.000000"),
+                (csv_coordinate(12, 1, false), b"12.000017"),
+                (csv_coordinate(12, 2, false), b"12.000033"),
+                (csv_coordinate(12, 3, true), b"-12.000050"),
+                (csv_coordinate(89, 59999, false), b"89.999983"),
+            ]
+        );
+        check!(
+            15,
+            set_longitude,
+            [
+                (csv_coordinate(0, 0, false), b"0.000000".as_slice()),
+                (csv_coordinate(0, 0, true), b"-0.000000"),
+                (csv_coordinate(180, 0, false), b"180.000000"),
+                (csv_coordinate(180, 0, true), b"-180.000000"),
+                (csv_coordinate(179, 59999, true), b"-179.999983"),
+            ]
+        );
+        let mut csv = Csv::parse(&source).unwrap();
+        let pointers: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        // One parse, then all raw ticks. Quotient/remainder rounding is independent
+        // of the product's biased numerator. This proves only the integer grid.
+        for ticks in 0..60000_u32 {
+            let numerator = ticks * 50;
+            let quotient = numerator / 3;
+            let remainder = numerator % 3;
+            assert_ne!(2 * remainder, 3);
+            let nearest = quotient + u32::from(2 * remainder > 3);
+            assert!(nearest < 1000000);
+            assert_eq!((6 * nearest + 3) / 100, ticks);
+            let negative = ticks % 2 != 0;
+            csv.set_latitude(0, csv_coordinate(37, ticks as u16, negative))
+                .unwrap();
+            csv.set_longitude(0, csv_coordinate(139, ticks as u16, !negative))
+                .unwrap();
+            let lat = format!("{}37.{nearest:06}", if negative { "-" } else { "" });
+            let lon = format!("{}139.{nearest:06}", if negative { "" } else { "-" });
+            assert_eq!(csv.rows()[0].cells()[14], lat.as_bytes());
+            assert_eq!(csv.rows()[0].cells()[15], lon.as_bytes());
+        }
+        for (r, row) in csv.rows().iter().enumerate() {
+            for (c, cell) in row.cells().iter().enumerate() {
+                if r != 0 || ![14, 15].contains(&c) {
+                    assert_eq!(cell.as_ptr(), pointers[r][c]);
+                }
+            }
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_group_number(0, 50).unwrap();
+        csv.set_latitude(0, csv_coordinate(0, 0, true)).unwrap();
+        csv.set_longitude(0, csv_coordinate(179, 59999, true))
+            .unwrap();
+        csv.set_group_name(0, b"Local Group").unwrap();
+        csv.set_repeater_call_sign(0, b" CALL/1").unwrap();
+        csv.set_gateway_call_sign(0, b" GATE/2").unwrap();
+        csv.set_name(0, b"Name").unwrap();
+        csv.set_sub_name(0, b"Sub").unwrap();
+        csv.set_frequency_hz(0, 145000000).unwrap();
+        csv.set_offset_hz(0, 600000).unwrap();
+        csv.set_mode(0, RepeaterMode::Dv).unwrap();
+        csv.set_duplex(0, RepeaterDuplex::Off).unwrap();
+        csv.set_tone(0, RepeaterTone::ToneSquelch).unwrap();
+        csv.set_rpt1_use(0, true).unwrap();
+        csv.set_position(0, RepeaterPosition::None).unwrap();
+        csv.set_utc_offset_minutes(0, 330).unwrap();
+        let expected=[HEADER,b"50,Local Group,Name,Sub, CALL/1, GATE/2,145.000000,OFF,0.600000,DV,TSQL,rtone,YES,None,-0.000000,-179.999983,+5:30\r\n",b"1,Keep Group,Keep Name,Keep Sub,OLD CALL,OLD GATE,oldfreq,olddup,oldoffset,oldmode,oldtone,oldrtone,olduse,None,oldlat,oldlon,oldutc\r\n"].concat();
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+        assert_eq!(source, original);
+    }
+
+    #[test]
+    fn csv_group_coordinate_last_row_domains_and_bounds_are_atomic() {
+        let row =
+            b"1,Keep Group,Name,Sub,CALL,GATE,f,d,o,m,t,r,u,None,unknown-lat,unknown-lon,utc\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        let pointers: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        csv.set_group_number(2499, 50).unwrap();
+        csv.set_latitude(2499, csv_coordinate(90, 0, true)).unwrap();
+        csv.set_longitude(2499, csv_coordinate(180, 0, false))
+            .unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(
+            b"50,Keep Group,Name,Sub,CALL,GATE,f,d,o,m,t,r,u,None,-90.000000,180.000000,utc\r\n",
+        );
+        assert_eq!(csv.to_bytes(), expected);
+        for (r, row) in csv.rows().iter().enumerate() {
+            for (c, cell) in row.cells().iter().enumerate() {
+                if r != 2499 || ![0, 14, 15].contains(&c) {
+                    assert_eq!(cell.as_ptr(), pointers[r][c]);
+                }
+            }
+        }
+        for index in [0, 2499] {
+            for number in [0, 51, 255] {
+                assert!(
+                    matches!(csv.set_group_number(index,number),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+            for value in [
+                csv_coordinate(91, 0, false),
+                csv_coordinate(90, 1, true),
+                csv_coordinate(0, 60000, false),
+                csv_coordinate(0, u16::MAX, true),
+                csv_coordinate(u8::MAX, 0, true),
+            ] {
+                assert!(
+                    matches!(csv.set_latitude(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+            for value in [
+                csv_coordinate(181, 0, false),
+                csv_coordinate(180, 1, true),
+                csv_coordinate(0, 60000, false),
+                csv_coordinate(0, u16::MAX, true),
+                csv_coordinate(u8::MAX, 0, true),
+            ] {
+                assert!(
+                    matches!(csv.set_longitude(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+        }
+        let invalid = csv_coordinate(255, 65535, true);
+        for index in [2500, usize::MAX] {
+            let error = Err(Error::RowIndexOutOfBounds { index });
+            assert_eq!(csv.set_group_number(index, 0), error);
+            assert_eq!(csv.set_latitude(index, invalid), error);
+            assert_eq!(csv.set_longitude(index, invalid), error);
+            assert_eq!(csv.to_bytes(), expected);
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        let error = Err(Error::RowIndexOutOfBounds { index: 0 });
+        assert_eq!(empty.set_group_number(0, 255), error);
+        assert_eq!(empty.set_latitude(0, invalid), error);
+        assert_eq!(empty.set_longitude(0, invalid), error);
+        assert_eq!(empty.to_bytes(), HEADER);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+    }
 
     fn text_csv_literal(change: Option<(usize, &[u8])>) -> Vec<u8> {
         // Independent cell literals, including overlength/opaque old text and
