@@ -29,6 +29,7 @@ pub use common::{
     TemporarySkipTime, TransmitBandwidth, TransmitMeter, TransmitTimeout, TunerSelection,
     TxRecordingAudio, VoxBreakInKeyFunction, VoxVoiceDelay, WindSpeedUnit,
 };
+pub use common::{AudioFftAttenuator, AudioFftWaveform, AudioOscLevel, AudioOscSweepTime};
 pub use common::{
     CwBreakIn, CwKeyType, CwMicKeyer, CwNumberStyle, CwRiseTime, DtmfSpeed, KeyPolarity,
     RttyFftAveraging, RttyLinefeed, RttyLogFormat, RttyLogTime, RttyMark, RttyShift,
@@ -6843,6 +6844,237 @@ mod tests {
             assert_setting_state(&image, &source, &expected);
         }
         assert_eq!(image.to_bytes(), source);
+    }
+
+    #[test]
+    fn audio_scope_stored_selectors_and_rgb_preserve_all_other_state() {
+        // Independent synthetic image and Python hashlib checksum: incrementing
+        // bytes, revision/signature, then these five selector bytes set to zero.
+        let fields = [
+            (0x37801, 0),
+            (0x3995a, 0),
+            (0x3995e, 0),
+            (0x37800, 0),
+            (0x377ff, 0),
+        ];
+        let source = fixture_with_bytes(&fields, "D4ABD8601DBE2B35DAF6BDBDA409389B");
+        let original = source.clone();
+        let mut expected = synthetic_memory();
+        for (at, value) in fields {
+            expected[at] = value;
+        }
+        let mut image = Icf::parse(&source).unwrap();
+        assert_setting_state(&image, &source, &expected);
+        macro_rules! selector {
+            ($get:ident, $set:ident, $at:literal, $cases:expr) => {
+                assert_eq!(image.$get(), Ok($cases[0].1));
+                for (raw, value) in $cases {
+                    image.$set(value).unwrap();
+                    expected[$at] = raw;
+                    assert_eq!(image.$get(), Ok(value));
+                    assert_setting_state(&image, &source, &expected);
+                }
+                // Inject unsupported current codes, never use a setter to make
+                // its own expectation. A later error must retain prior edits.
+                for raw in [$cases.len() as u8, 0xfe, 0xff] {
+                    image.memory[$at] = raw; expected[$at] = raw;
+                    let before = image.to_bytes();
+                    assert!(matches!(image.$get(), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
+                    for (_, value) in $cases {
+                        assert!(matches!(image.$set(value), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
+                        assert_setting_state(&image, &source, &expected);
+                    }
+                    assert_eq!(image.to_bytes(), before);
+                }
+                image.memory[$at] = 0; expected[$at] = 0;
+            };
+        }
+        selector!(
+            audio_fft_attenuator,
+            set_audio_fft_attenuator,
+            0x37801,
+            [
+                (0, AudioFftAttenuator::Off),
+                (1, AudioFftAttenuator::Db10),
+                (2, AudioFftAttenuator::Db20),
+                (3, AudioFftAttenuator::Db30)
+            ]
+        );
+        selector!(
+            audio_fft_waveform,
+            set_audio_fft_waveform,
+            0x3995a,
+            [(0, AudioFftWaveform::Line), (1, AudioFftWaveform::Fill)]
+        );
+        selector!(
+            audio_fft_waterfall_display,
+            set_audio_fft_waterfall_display,
+            0x3995e,
+            [(0, false), (1, true)]
+        );
+        selector!(
+            audio_osc_level,
+            set_audio_osc_level,
+            0x37800,
+            [
+                (0, AudioOscLevel::Db0),
+                (1, AudioOscLevel::Minus10Db),
+                (2, AudioOscLevel::Minus20Db),
+                (3, AudioOscLevel::Minus30Db)
+            ]
+        );
+        selector!(
+            audio_osc_sweep_time,
+            set_audio_osc_sweep_time,
+            0x377ff,
+            [
+                (0, AudioOscSweepTime::Ms1),
+                (1, AudioOscSweepTime::Ms3),
+                (2, AudioOscSweepTime::Ms10),
+                (3, AudioOscSweepTime::Ms30),
+                (4, AudioOscSweepTime::Ms100),
+                (5, AudioOscSweepTime::Ms300)
+            ]
+        );
+
+        assert_eq!(image.audio_fft_waveform_color(), Ok([0x5b, 0x5c, 0x5d]));
+        assert_eq!(image.audio_osc_waveform_color(), Ok([0x5f, 0x60, 0x61]));
+        image.set_audio_fft_waterfall_display(true).unwrap();
+        expected[0x3995e] = 1;
+        image
+            .set_audio_fft_waveform_color([0x12, 0xa5, 0xf0])
+            .unwrap();
+        expected[0x3995b..0x3995e].copy_from_slice(&[0x12, 0xa5, 0xf0]);
+        image.set_audio_osc_waveform_color([0xff, 0, 0x81]).unwrap();
+        expected[0x3995f..0x39962].copy_from_slice(&[0xff, 0, 0x81]);
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            &image.memory()[0x3995a..0x39963],
+            &[0, 0x12, 0xa5, 0xf0, 1, 0xff, 0, 0x81, 0x62]
+        );
+        for component in 0..=255_u8 {
+            let fft = [component, component.wrapping_add(73), 255 - component];
+            let osc = [255 - component, component, component.wrapping_add(129)];
+            image.set_audio_fft_waveform_color(fft).unwrap();
+            expected[0x3995b..0x3995e].copy_from_slice(&fft);
+            assert_eq!(image.audio_fft_waveform_color(), Ok(fft));
+            assert_setting_state(&image, &source, &expected);
+            image.set_audio_osc_waveform_color(osc).unwrap();
+            expected[0x3995f..0x39962].copy_from_slice(&osc);
+            assert_eq!(image.audio_osc_waveform_color(), Ok(osc));
+            assert_setting_state(&image, &source, &expected);
+        }
+        // Leave an unknown selector in the output, retaining successful colors.
+        image.memory[0x3995e] = 0xfe;
+        expected[0x3995e] = 0xfe;
+        let before = image.to_bytes();
+        assert!(matches!(
+            image.set_audio_fft_waterfall_display(false),
+            Err(Error::Unsupported { .. })
+        ));
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(image.to_bytes(), before);
+        let parsed = Icf::parse(&before).unwrap();
+        assert_setting_state(&parsed, &before, &expected);
+        assert!(matches!(
+            parsed.audio_fft_waterfall_display(),
+            Err(Error::Unsupported { .. })
+        ));
+        assert_eq!(
+            parsed.audio_fft_waveform_color(),
+            image.audio_fft_waveform_color()
+        );
+        assert_eq!(source, original);
+    }
+
+    #[test]
+    fn swr_graph_physical_slots_raw_domains_and_errors_preserve_all_state() {
+        // Independent Python hashlib: incrementing synthetic memory with the
+        // 34-byte physical SWR window set to FE, not a product-generated oracle.
+        let mut expected = synthetic_memory();
+        expected[0x379b9..0x379db].fill(0xfe);
+        let source = fixture_with_memory(&expected, "1C9E441908D25018455D777B6651C9A3");
+        let original = source.clone();
+        let mut image = Icf::parse(&source).unwrap();
+        for slot in 0..17 {
+            assert_eq!(image.swr_graph_step_index(slot), Ok(0xfe));
+            assert_eq!(image.swr_graph_bar_index(slot), Ok(0xfe));
+        }
+        image.set_swr_graph_step_index(16, 3).unwrap();
+        expected[0x379d9] = 3;
+        assert_eq!(image.swr_graph_bar_index(16), Ok(0xfe));
+        image.set_swr_graph_bar_index(0, 5).unwrap();
+        expected[0x379ba] = 5;
+        assert_eq!(image.swr_graph_step_index(0), Ok(0xfe));
+        assert_setting_state(&image, &source, &expected);
+        for slot in 0..17 {
+            let step = 0x379b9 + 2 * slot;
+            let bar = 0x379ba + 2 * slot;
+            for value in 0..=3 {
+                image.set_swr_graph_step_index(slot, value).unwrap();
+                expected[step] = value;
+                assert_eq!(image.swr_graph_step_index(slot), Ok(value));
+                assert_eq!(image.swr_graph_bar_index(slot), Ok(expected[bar]));
+                assert_setting_state(&image, &source, &expected);
+            }
+            for value in 0..=5 {
+                image.set_swr_graph_bar_index(slot, value).unwrap();
+                expected[bar] = value;
+                assert_eq!(image.swr_graph_bar_index(slot), Ok(value));
+                assert_eq!(image.swr_graph_step_index(slot), Ok(expected[step]));
+                assert_setting_state(&image, &source, &expected);
+            }
+            for value in [4, 6, 255] {
+                assert!(
+                    matches!(image.set_swr_graph_step_index(slot, value), Err(Error::Invalid { line, .. }) if line == 5 + step / 32)
+                );
+                assert_setting_state(&image, &source, &expected);
+            }
+            for value in [6, 255] {
+                assert!(
+                    matches!(image.set_swr_graph_bar_index(slot, value), Err(Error::Invalid { line, .. }) if line == 5 + bar / 32)
+                );
+                assert_setting_state(&image, &source, &expected);
+            }
+        }
+        // Raw getters must not mask/default any of the 256 possible bytes.
+        for value in 0..=255_u8 {
+            image.memory[0x379b9] = value;
+            expected[0x379b9] = value;
+            image.memory[0x379da] = value;
+            expected[0x379da] = value;
+            assert_eq!(image.swr_graph_step_index(0), Ok(value));
+            assert_eq!(image.swr_graph_bar_index(16), Ok(value));
+            assert_setting_state(&image, &source, &expected);
+        }
+        let before = image.to_bytes();
+        for slot in [17, usize::MAX] {
+            assert!(matches!(
+                image.swr_graph_step_index(slot),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            assert!(matches!(
+                image.swr_graph_bar_index(slot),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            for value in [0, 3, 4, 5, 6, 255] {
+                assert!(matches!(
+                    image.set_swr_graph_step_index(slot, value),
+                    Err(Error::Unsupported { line: 5, .. })
+                ));
+                assert!(matches!(
+                    image.set_swr_graph_bar_index(slot, value),
+                    Err(Error::Unsupported { line: 5, .. })
+                ));
+                assert_setting_state(&image, &source, &expected);
+            }
+        }
+        assert_eq!(image.to_bytes(), before);
+        let parsed = Icf::parse(&before).unwrap();
+        assert_setting_state(&parsed, &before, &expected);
+        assert_eq!(parsed.swr_graph_step_index(0), Ok(255));
+        assert_eq!(parsed.swr_graph_bar_index(16), Ok(255));
+        assert_eq!(source, original);
     }
 
     #[test]

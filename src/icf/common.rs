@@ -1430,3 +1430,91 @@ stored_enum!(RttyShift, rtty_shift, set_rtty_shift, 0x39314, "rtty shift", {Hz17
 stored_setting!(rtty_key_polarity, set_rtty_key_polarity, KeyPolarity, 0x39315, "rtty key polarity", {0 => KeyPolarity::Normal, 1 => KeyPolarity::Reverse});
 // Key 0x120: handler RVA 6ac88..6acd2, store RVA 6accc (A2-H56361-02).
 stored_enum!(DtmfSpeed, dtmf_speed, set_dtmf_speed, 0x399f4, "dtmf speed", {Ms100 = 0, Ms200 = 1, Ms300 = 2, Ms500 = 3});
+
+// Audio Scope stored preferences only, not drawing, measurement, audio/RF
+// operation, GUI enable conditions or whole-document save normalization.
+// Keys 0x357/0x358/0x35a: read/store 0x7a8fc/0x7a938,
+// 0x7a9e9/0x7aa25 and 0x7aa59/0x7aa95. All are full-byte selectors.
+stored_enum!(AudioFftAttenuator, audio_fft_attenuator, set_audio_fft_attenuator, 0x37801, "Audio FFT attenuator", {Off = 0, Db10 = 1, Db20 = 2, Db30 = 3});
+stored_enum!(AudioFftWaveform, audio_fft_waveform, set_audio_fft_waveform, 0x3995a, "Audio FFT waveform", {Line = 0, Fill = 1});
+stored_setting!(audio_fft_waterfall_display, set_audio_fft_waterfall_display, bool, 0x3995e, "Audio FFT waterfall display", {0 => false, 1 => true});
+// Keys 0x35b/0x35c: read/store 0x7a94b/0x7a987 and 0x7a99a/0x7a9d6.
+// Negative dB and milliseconds per division are labels, not stored quantities.
+stored_enum!(AudioOscLevel, audio_osc_level, set_audio_osc_level, 0x37800, "Audio Osc level", {Db0 = 0, Minus10Db = 1, Minus20Db = 2, Minus30Db = 3});
+stored_enum!(AudioOscSweepTime, audio_osc_sweep_time, set_audio_osc_sweep_time, 0x377ff, "Audio Osc sweep time", {Ms1 = 0, Ms3 = 1, Ms10 = 2, Ms30 = 3, Ms100 = 4, Ms300 = 5});
+// Keys 0x359/0x35d: 0x7aa44/0x7aab5 -> 0x9d308. COLORREF 0x00BBGGRR
+// is stored as exactly R,G,B bytes at 0x9d3d3/0x9d3d5/0x9d3df, never alpha.
+stored_color!(
+    audio_fft_waveform_color,
+    set_audio_fft_waveform_color,
+    0x3995b
+);
+stored_color!(
+    audio_osc_waveform_color,
+    set_audio_osc_waveform_color,
+    0x3995f
+);
+
+fn swr_graph_offset(slot: usize) -> Result<usize, Error> {
+    if slot >= 17 {
+        return Err(Error::Unsupported {
+            line: 5,
+            reason: "SWR graph physical slot outside 0..=16",
+        });
+    }
+    Ok(0x379b9 + 2 * slot)
+}
+
+impl Icf<'_> {
+    /// Read a raw SWR measuring-step index from physical slot 0..=16 (all byte values).
+    /// Codes 0..3 label 10k/50k/100k/500k; this does not convert to Hz or measure RF.
+    /// Only_50M/Only_TX70M/Only_FMradio_Air visibility and band/model applicability
+    /// remain unverified and are separate from these 17 physical storage slots.
+    /// # Errors
+    /// Rejects an invalid slot, without inferring a display-row or band mapping.
+    pub fn swr_graph_step_index(&self, slot: usize) -> Result<u8, Error> {
+        Ok(self.memory[swr_graph_offset(slot)?])
+    }
+
+    /// Replace only one stored SWR step index with 0..=3, even if its old byte is unknown.
+    /// No paired bar, other slot, GUI visibility or measurement state is changed.
+    /// # Errors
+    /// Slot bounds take priority; an invalid new index leaves all state intact.
+    pub fn set_swr_graph_step_index(&mut self, slot: usize, value: u8) -> Result<(), Error> {
+        let at = swr_graph_offset(slot)?;
+        if value > 3 {
+            return Err(Error::Invalid {
+                line: 5 + at / RECORD_BYTES,
+                reason: "new SWR graph step index outside 0..=3",
+            });
+        }
+        self.memory[at] = value;
+        Ok(())
+    }
+
+    /// Read a raw SWR graph-bar index from physical slot 0..=16 (all byte values).
+    /// Codes 0..5 label 3/5/7/9/11/13 bars, not literal bar counts to store.
+    /// The unresolved Only_50M/Only_TX70M/Only_FMradio_Air visibility conditions
+    /// and band/model applicability are separate from physical slot storage.
+    /// # Errors
+    /// Rejects an invalid slot; unknown stored bytes are returned without defaulting.
+    pub fn swr_graph_bar_index(&self, slot: usize) -> Result<u8, Error> {
+        Ok(self.memory[swr_graph_offset(slot)? + 1])
+    }
+
+    /// Replace only one stored SWR bar index with 0..=5, even if its old byte is unknown.
+    /// Preserves the paired step, all other slots and every non-target byte.
+    /// # Errors
+    /// Slot bounds take priority; an invalid new index leaves all state intact.
+    pub fn set_swr_graph_bar_index(&mut self, slot: usize, value: u8) -> Result<(), Error> {
+        let at = swr_graph_offset(slot)? + 1;
+        if value > 5 {
+            return Err(Error::Invalid {
+                line: 5 + at / RECORD_BYTES,
+                reason: "new SWR graph bar index outside 0..=5",
+            });
+        }
+        self.memory[at] = value;
+        Ok(())
+    }
+}
