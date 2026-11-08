@@ -250,11 +250,16 @@ impl Icf<'_> {
     }
 }
 
-// Full-byte stored selectors traced from CS-705 1.30. Each invocation records
-// its read/write RVAs below. No GUI, audio, charging, power or device I/O occurs.
+// Stored selectors traced from CS-705 1.30. Full-byte access is the default;
+// the four explicit masks preserve all other bits. No device I/O occurs.
 macro_rules! stored_setting {
-    ($get:ident, $set:ident, $ty:ty, $offset:literal, $label:literal,
+    ($get:ident, $set:ident, $ty:ty, $offset:literal, $label:literal $(, mask $mask:literal, shift $shift:literal)?,
      {$($raw:literal => $value:expr),+ $(,)?}) => {
+        $(const _: () = {
+            assert!($shift < 8);
+            assert!($mask != 0 && (($mask as u16 >> $shift) << $shift) == $mask as u16);
+            assert!(($mask as u16 >> $shift).trailing_ones() == ($mask as u16).count_ones());
+        };)?
         impl Icf<'_> {
             #[doc = concat!("Read the stored ", $label, ".")]
             ///
@@ -264,7 +269,9 @@ macro_rules! stored_setting {
             /// # Errors
             /// Returns [`Error::Unsupported`] for an unknown stored code.
             pub fn $get(&self) -> Result<$ty, Error> {
-                match self.memory[$offset] {
+                let raw = self.memory[$offset];
+                $(let raw = (raw & $mask) >> $shift;)?
+                match raw {
                     $($raw => Ok($value),)+
                     _ => Err(Error::Unsupported {
                         line: 5 + $offset / RECORD_BYTES,
@@ -275,14 +282,16 @@ macro_rules! stored_setting {
 
             #[doc = concat!("Change only the stored ", $label, " byte, not device operation.")]
             ///
-            /// All other memory, metadata and original source bytes are preserved.
+            /// All non-target bits, memory, metadata and original source bytes are preserved.
             /// Use [`Self::to_bytes`] to serialize. No I/O occurs.
             ///
             /// # Errors
             /// Refuses an unknown current code without changing any bytes.
             pub fn $set(&mut self, value: $ty) -> Result<(), Error> {
                 self.$get()?;
-                self.memory[$offset] = value as u8;
+                let raw = value as u8;
+                $(let raw = (self.memory[$offset] & !$mask) | ((raw << $shift) & $mask);)?
+                self.memory[$offset] = raw;
                 Ok(())
             }
         }
@@ -346,6 +355,183 @@ stored_enum!(MemoryGroupDisplay, memory_group_display, set_memory_group_display,
 stored_enum!(KeyboardInput, keyboard_input, set_keyboard_input, 0x3932e, "keyboard input", {TenKey = 0, Full = 1});
 stored_enum!(KeyboardLayout, keyboard_layout, set_keyboard_layout, 0x3932f, "keyboard layout", {JapanUsUk = 0, Germany = 1, France = 2});
 stored_enum!(ScreenCaptureFileType, screen_capture_file_type, set_screen_capture_file_type, 0x3932d, "screen capture file type", {Png = 0, Bmp = 1});
+
+// Additional confirmed stored selectors (RC common IDs below). Static evidence
+// only: no original-GUI comparison, CSV processing or device operation.
+// Key 0x284: read RVA 0x762b0, store RVA 0x762ec (common ID A2-H54848-07).
+stored_setting!(qso_log, set_qso_log, bool, 0x399dd, "QSO log", {0 => false, 1 => true});
+// Key 0x285: read RVA 0x762ff, store RVA 0x7633b (common ID A2-H54848-08).
+stored_setting!(receive_history_log, set_receive_history_log, bool, 0x399de, "receive history log", {0 => false, 1 => true});
+// Key 0x2b1: read RVA 0x766a3, store RVA 0x766df (common ID A2-H54848-14).
+stored_setting!(bluetooth, set_bluetooth, bool, 0x39701, "Bluetooth", {0 => false, 1 => true});
+// Key 0x2b2: read RVA 0x766f2, store RVA 0x7672e (common ID A2-H54848-15).
+stored_setting!(bluetooth_auto_connect, set_bluetooth_auto_connect, bool, 0x39702, "Bluetooth auto connect", {0 => false, 1 => true});
+// Key 0x2b6: read RVA 0x7682e, store RVA 0x7686a (common ID A2-H54848-19).
+stored_setting!(bluetooth_power_save, set_bluetooth_power_save, bool, 0x39705, "Bluetooth power save", {0 => false, 1 => true});
+// Key 0x2b7: read RVA 0x7687d, store RVA 0x768b9 (common ID A2-H54848-20).
+stored_setting!(bluetooth_one_touch_ptt, set_bluetooth_one_touch_ptt, bool, 0x39706, "Bluetooth one-touch PTT", {0 => false, 1 => true});
+// Key 0x2b8: read RVA 0x768cc, store RVA 0x76908 (common ID A2-H54848-21).
+stored_setting!(bluetooth_ptt_beep, set_bluetooth_ptt_beep, bool, 0x39707, "Bluetooth PTT beep", {0 => false, 1 => true});
+// Key 0x2b9: read RVA 0x7691b, store RVA 0x76957 (common ID A2-H54848-22).
+stored_setting!(bluetooth_custom_key_beep, set_bluetooth_custom_key_beep, bool, 0x39708, "Bluetooth custom-key beep", {0 => false, 1 => true});
+// Key 0x260: read RVA 0x75b11, store RVA 0x75b4d (common ID A2-H54848-55).
+stored_setting!(speech_compressor, set_speech_compressor, bool, 0x39999, "speech compressor", {0 => false, 1 => true});
+// Key 0x264: read RVA 0x75c5e, store RVA 0x75c9a (common ID A2-H54848-59).
+stored_setting!(monitor, set_monitor, bool, 0x3999b, "monitor", {0 => false, 1 => true});
+// Key 0x279: read RVA 0x7608a, store RVA 0x760c6 (common ID A2-H54848-62).
+stored_setting!(voice_auto_monitor, set_voice_auto_monitor, bool, 0x39962, "voice auto monitor", {0 => false, 1 => true});
+// Key 0x25b: read RVA 0x75659, store RVA 0x756c3 (common ID A2-H54848-66).
+stored_setting!(vox, set_vox, bool, 0x37781, "VOX", mask 0x80, shift 7, {0 => false, 1 => true});
+// Key 0x291: read RVA 0x73ad1, store RVA 0x73b0a (common ID A2-H54848-76).
+stored_setting!(ptt_lock, set_ptt_lock, bool, 0x3930a, "PTT lock", {0 => false, 1 => true});
+// Key 0x243: read RVA 0x73c74, store RVA 0x73cad (common ID A2-H54848-81).
+stored_setting!(tuner_memory, set_tuner_memory, bool, 0x39310, "tuner memory", {0 => false, 1 => true});
+// Key 0x244: read RVA 0x73cbd, store RVA 0x73cf6 (common ID A2-H54848-82).
+stored_setting!(ptt_tune, set_ptt_tune, bool, 0x39311, "PTT tune", {0 => false, 1 => true});
+// Key 0x253: read RVA 0x7429c, store RVA 0x74304 (common ID A2-H54848-97).
+stored_setting!(one_hz_mode, set_one_hz_mode, bool, 0x37780, "1 Hz mode", mask 0x02, shift 1, {0 => false, 1 => true});
+// Key 0x255: read RVA 0x74319, store RVA 0x74355 (common ID A2-H54848-98).
+stored_setting!(quarter_tuning, set_quarter_tuning, bool, 0x37784, "quarter tuning", {0 => false, 1 => true});
+// Key 0x292: read RVA 0x7444f, store RVA 0x7448b (common ID A2-H54848-102).
+stored_setting!(noise_blanker, set_noise_blanker, bool, 0x37782, "noise blanker", {0 => false, 1 => true});
+// Key 0x296: read RVA 0x7480c, store RVA 0x74848 (common ID A2-H54848-106).
+stored_setting!(noise_reduction, set_noise_reduction, bool, 0x37783, "noise reduction", {0 => false, 1 => true});
+// Key 0x29d: read RVA 0x74b48, store RVA 0x74b81 (common ID A2-H54848-116).
+stored_setting!(ssb_cw_frequency_shift, set_ssb_cw_frequency_shift, bool, 0x39326, "SSB/CW frequency shift", {0 => false, 1 => true});
+// Key 0x2a0: read RVA 0x75155, store RVA 0x75191 (common ID A2-H54848-119).
+stored_setting!(scan_resume, set_scan_resume, bool, 0x3998a, "scan resume", {0 => false, 1 => true});
+// Key 0x226: read RVA 0x72f07, store RVA 0x72f43 (common ID A2-H54848-141).
+stored_setting!(ntp, set_ntp, bool, 0x396bd, "NTP", {0 => false, 1 => true});
+// Key 0x228: read RVA 0x72fee, store RVA 0x7302a (common ID A2-H54848-143).
+stored_setting!(gps_time_auto_correction, set_gps_time_auto_correction, bool, 0x396fe, "GPS time auto correction", {0 => false, 1 => true});
+
+// Key 0x286: read RVA 0x7634e, store RVA 0x7638a (common ID A2-H54848-09).
+stored_enum!(CsvSeparatorDecimal, log_csv_separator_decimal, set_log_csv_separator_decimal, 0x399df, "log CSV separator/decimal", {CommaDot = 0, SemicolonDot = 1, SemicolonComma = 2});
+// Key 0x287: read RVA 0x7639d, store RVA 0x763d9 (common ID A2-H54848-10).
+stored_enum!(CsvDateFormat, log_csv_date_format, set_log_csv_date_format, 0x399e0, "log CSV date format", {YearMonthDay = 0, MonthDayYear = 1, DayMonthYear = 2});
+// Key 0x2b3: read RVA 0x76741, store RVA 0x7677d (common ID A2-H54848-16).
+stored_enum!(BluetoothAudioOutput, bluetooth_audio_output, set_bluetooth_audio_output, 0x39703, "Bluetooth audio output", {HeadsetOnly = 0, HeadsetAndSpeaker = 1});
+// Key 0x2b4: read RVA 0x76790, store RVA 0x767cc (common ID A2-H54848-17).
+stored_enum!(BluetoothAutoDisconnect, bluetooth_auto_disconnect, set_bluetooth_auto_disconnect, 0x39721, "Bluetooth auto disconnect", {Off = 0, Seconds0 = 1, Seconds1 = 2, Seconds2 = 3, Seconds3 = 4, Seconds4 = 5, Seconds5 = 6, Seconds6 = 7, Seconds7 = 8, Seconds8 = 9, Seconds9 = 10, Seconds10 = 11});
+// Key 0x2b5: read RVA 0x767df, store RVA 0x7681b (common ID A2-H54848-18).
+stored_enum!(BluetoothHeadsetFunction, bluetooth_headset_function, set_bluetooth_headset_function, 0x39704, "Bluetooth headset function", {Normal = 0, Microphone = 1, Ptt = 2});
+// Key 0x2bb: read RVA 0x7696a, store RVA 0x769a6 (common ID A2-H54848-24).
+stored_enum!(BluetoothSerialFunction, bluetooth_serial_function, set_bluetooth_serial_function, 0x39709, "Bluetooth serial function", {CivNoEcho = 0, CivEcho = 1, DvData = 2});
+// Key 0x21e: read RVA 0x72c69, store RVA 0x72ca5 (common ID A2-H54848-27).
+stored_enum!(ScreenSaverDelay, battery_screen_saver, set_battery_screen_saver, 0x396ae, "battery screen saver", {Off = 0, Minutes1 = 1, Minutes2 = 2, Minutes5 = 3, Minutes15 = 4, Minutes30 = 5, Minutes60 = 6});
+// Key 0x21f: read RVA 0x72cb8, store RVA 0x72cf4 (common ID A2-H54848-28).
+stored_setting!(external_power_screen_saver, set_external_power_screen_saver, ScreenSaverDelay, 0x396af, "external-power screen saver", {0 => ScreenSaverDelay::Off, 1 => ScreenSaverDelay::Minutes1, 2 => ScreenSaverDelay::Minutes2, 3 => ScreenSaverDelay::Minutes5, 4 => ScreenSaverDelay::Minutes15, 5 => ScreenSaverDelay::Minutes30, 6 => ScreenSaverDelay::Minutes60});
+// Key 0x216: read RVA 0x72a40, store RVA 0x72a7c (common ID A2-H54848-32).
+stored_enum!(TransmitMeter, transmit_meter, set_transmit_meter, 0x37786, "transmit meter", {Po = 0, Swr = 1, Alc = 2, Comp = 3, Vd = 4, Id = 5});
+// Key 0x224: read RVA 0x72e43, store RVA 0x72e7b (common ID A2-H54848-38).
+stored_enum!(Language, display_language, set_display_language, 0x396bb, "display language", {English = 0, Japanese = 1});
+// Key 0x225: read RVA 0x72eb1, store RVA 0x72eed (common ID A2-H54848-39).
+stored_setting!(system_language, set_system_language, Language, 0x396bc, "system language", {0 => Language::English, 1 => Language::Japanese});
+// Key 0x22a: read RVA 0x73093;0x730e2, store RVA 0x730cf;0x7311e (common ID A2-H54848-40).
+stored_enum!(CoordinateDisplay, coordinate_display, set_coordinate_display, 0x396b4, "coordinate display", {DegreesDecimalMinutes = 0, DegreesMinutesSeconds = 1, DecimalDegrees = 2});
+// Key 0x22b: read RVA 0x73131, store RVA 0x7316d (common ID A2-H54848-41).
+stored_enum!(AltitudeDistanceUnit, altitude_distance_unit, set_altitude_distance_unit, 0x396b5, "altitude/distance unit", {Meters = 0, FeetMiles = 1});
+// Key 0x22c: read RVA 0x73180, store RVA 0x731bc (common ID A2-H54848-42).
+stored_enum!(SpeedUnit, speed_unit, set_speed_unit, 0x396b6, "speed unit", {KilometersPerHour = 0, MilesPerHour = 1, Knots = 2});
+// Key 0x22d: read RVA 0x731d8;0x73227, store RVA 0x73214;0x73263 (common ID A2-H54848-43).
+stored_enum!(TemperatureUnit, temperature_unit, set_temperature_unit, 0x396b7, "temperature unit", {Celsius = 0, Fahrenheit = 1});
+// Key 0x22e: read RVA 0x73276, store RVA 0x732b2 (common ID A2-H54848-44).
+stored_enum!(PressureUnit, pressure_unit, set_pressure_unit, 0x396b8, "pressure unit", {Hectopascals = 0, Millibars = 1, MillimetersMercury = 2, InchesMercury = 3});
+// Key 0x22f: read RVA 0x732c5, store RVA 0x73301 (common ID A2-H54848-45).
+stored_enum!(RainfallUnit, rainfall_unit, set_rainfall_unit, 0x396b9, "rainfall unit", {Millimeters = 0, Inches = 1});
+// Key 0x230: read RVA 0x73314, store RVA 0x73350 (common ID A2-H54848-46).
+stored_enum!(WindSpeedUnit, wind_speed_unit, set_wind_speed_unit, 0x396ba, "wind speed unit", {MetersPerSecond = 0, KilometersPerHour = 1, MilesPerHour = 2, Knots = 3});
+// Key 0x262: read RVA 0x75bc0, store RVA 0x75bfc (common ID A2-H54848-57).
+stored_enum!(TransmitBandwidth, compressor_off_transmit_bandwidth, set_compressor_off_transmit_bandwidth, 0x399b0, "compressor-OFF transmit bandwidth", {Wide = 0, Mid = 1, Narrow = 2});
+// Key 0x263: read RVA 0x75c0f, store RVA 0x75c4b (common ID A2-H54848-58).
+stored_setting!(compressor_on_transmit_bandwidth, set_compressor_on_transmit_bandwidth, TransmitBandwidth, 0x399b1, "compressor-ON transmit bandwidth", {0 => TransmitBandwidth::Wide, 1 => TransmitBandwidth::Mid, 2 => TransmitBandwidth::Narrow});
+// Key 0x27a: read RVA 0x760d9, store RVA 0x76115 (common ID A2-H54848-64).
+stored_enum!(RecordingMicrophone, recording_microphone, set_recording_microphone, 0x37816, "recording microphone", {HandMicrophone = 0, BluetoothMicrophone = 1});
+// Key 0x25f: read RVA 0x75ac2, store RVA 0x75afe (common ID A2-H54848-70).
+stored_enum!(VoxVoiceDelay, vox_voice_delay, set_vox_voice_delay, 0x399ae, "VOX voice delay", {Off = 0, Short = 1, Mid = 2, Long = 3});
+// Key 0x28e: read RVA 0x739f4, store RVA 0x73a2d (common ID A2-H54848-72).
+stored_enum!(BatteryPowerLimit, battery_power_limit, set_battery_power_limit, 0x39302, "battery power limit", {Milliwatts500 = 0, Watts1 = 1, Milliwatts2500 = 2, Watts5 = 3});
+// Key 0x28d: read RVA 0x739ab, store RVA 0x739e4 (common ID A2-H54848-73).
+stored_enum!(ExternalPowerLimit, external_power_limit, set_external_power_limit, 0x39303, "external-power limit", {Milliwatts500 = 0, Watts1 = 1, Milliwatts2500 = 2, Watts5 = 3, Watts10 = 4});
+// Key 0x290: read RVA 0x73a88, store RVA 0x73ac1 (common ID A2-H54848-75).
+stored_enum!(TransmitTimeout, transmit_timeout, set_transmit_timeout, 0x39309, "transmit timeout", {Off = 0, Minutes3 = 1, Minutes5 = 2, Minutes10 = 3, Minutes20 = 4, Minutes30 = 5});
+// Key 0x242: read RVA 0x73c2b, store RVA 0x73c64 (common ID A2-H54848-80).
+stored_enum!(TunerSelection, tuner_selection, set_tuner_selection, 0x3930f, "tuner selection", {Ah705 = 0, Other = 1});
+// Key 0x298: read RVA 0x748bb, store RVA 0x748f7 (common ID A2-H54848-108).
+stored_enum!(NotchFilter, notch_filter, set_notch_filter, 0x399a5, "notch filter", {Off = 0, Auto = 1, Manual = 2});
+// Key 0x299: read RVA 0x7490a, store RVA 0x74947 (common ID A2-H54848-109).
+stored_enum!(ManualNotchWidth, ssb_manual_notch_width, set_ssb_manual_notch_width, 0x399a7, "SSB manual notch width", {Wide = 0, Mid = 1, Narrow = 2});
+// Key 0x299: read RVA 0x7490a, store RVA 0x74947 (common ID A2-H54848-110).
+stored_setting!(cw_manual_notch_width, set_cw_manual_notch_width, ManualNotchWidth, 0x399a8, "CW manual notch width", {0 => ManualNotchWidth::Wide, 1 => ManualNotchWidth::Mid, 2 => ManualNotchWidth::Narrow});
+// Key 0x299: read RVA 0x7490a, store RVA 0x74947 (common ID A2-H54848-111).
+stored_setting!(rtty_manual_notch_width, set_rtty_manual_notch_width, ManualNotchWidth, 0x399a9, "RTTY manual notch width", {0 => ManualNotchWidth::Wide, 1 => ManualNotchWidth::Mid, 2 => ManualNotchWidth::Narrow});
+// Key 0x299: read RVA 0x7490a, store RVA 0x74947 (common ID A2-H54848-112).
+stored_setting!(am_manual_notch_width, set_am_manual_notch_width, ManualNotchWidth, 0x399aa, "AM manual notch width", {0 => ManualNotchWidth::Wide, 1 => ManualNotchWidth::Mid, 2 => ManualNotchWidth::Narrow});
+// Key 0x29b: read RVA 0x74ab6, store RVA 0x74aef (common ID A2-H54848-114).
+stored_enum!(NotchKeyFunction, ssb_notch_key_function, set_ssb_notch_key_function, 0x39324, "SSB notch-key function", {Auto = 0, Manual = 1, AutoManual = 2});
+// Key 0x29c: read RVA 0x74aff, store RVA 0x74b38 (common ID A2-H54848-115).
+stored_setting!(am_notch_key_function, set_am_notch_key_function, NotchKeyFunction, 0x39325, "AM notch-key function", {0 => NotchKeyFunction::Auto, 1 => NotchKeyFunction::Manual, 2 => NotchKeyFunction::AutoManual});
+// Key 0x29e: read RVA 0x74b91, store RVA 0x74bca (common ID A2-H54848-117).
+stored_enum!(CwBfoSide, cw_bfo_side, set_cw_bfo_side, 0x39327, "CW BFO side", {LowerSideband = 0, UpperSideband = 1});
+// Key 0x29f: read RVA 0x75106, store RVA 0x75142 (common ID A2-H54848-118).
+stored_enum!(ScanSpeed, scan_speed, set_scan_speed, 0x39989, "scan speed", {Slow = 0, Fast = 1});
+// Key 0x2a1: read RVA 0x751a4, store RVA 0x751e0 (common ID A2-H54848-120).
+stored_enum!(ScanPauseTime, scan_pause_time, set_scan_pause_time, 0x3998b, "scan pause time", {Seconds2 = 0, Seconds4 = 1, Seconds6 = 2, Seconds8 = 3, Seconds10 = 4, Seconds12 = 5, Seconds14 = 6, Seconds16 = 7, Seconds18 = 8, Seconds20 = 9, Hold = 10});
+// Key 0x2a2: read RVA 0x751f3, store RVA 0x7522f (common ID A2-H54848-121).
+stored_enum!(ScanRestartTime, scan_restart_time, set_scan_restart_time, 0x3998c, "scan restart time", {Seconds0 = 0, Seconds1 = 1, Seconds2 = 2, Seconds3 = 3, Seconds4 = 4, Seconds5 = 5, Hold = 6});
+// Key 0x2a3: read RVA 0x75242, store RVA 0x7527e (common ID A2-H54848-122).
+stored_enum!(TemporarySkipTime, temporary_skip_time, set_temporary_skip_time, 0x3998d, "temporary skip time", {Minutes5 = 0, Minutes10 = 1, Minutes15 = 2, WhileScanning = 3, UntilPowerOff = 4});
+// Key 0x2a5: read RVA 0x75291, store RVA 0x752cd (common ID A2-H54848-123).
+stored_enum!(ScanMainDial, scan_main_dial, set_scan_main_dial, 0x3998e, "scan main dial", {Stop = 0, UpDown = 1});
+
+/// Stored Delta-F span codes, not frequency or scan operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DeltaFSpan {
+    /// Select 5 kHz.
+    Khz5 = 0,
+    /// Select 10 kHz.
+    Khz10 = 1,
+    /// Select 20 kHz.
+    Khz20 = 2,
+    /// Select 50 kHz.
+    Khz50 = 3,
+    /// Select 100 kHz.
+    Khz100 = 4,
+    /// Select 500 kHz.
+    Khz500 = 5,
+    /// Select 1 MHz.
+    Mhz1 = 6,
+}
+
+/// Stored select-memory scan codes, not scan operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SelectMemoryScan {
+    /// Select all stars.
+    AllStars = 0,
+    /// Select one star.
+    OneStar = 1,
+    /// Select two stars.
+    TwoStars = 2,
+    /// Select three stars.
+    ThreeStars = 3,
+}
+
+// Key 0x2a6: read RVA 0x75371, store RVA 0x753e2 (common ID A2-H54848-124).
+stored_setting!(delta_f_span, set_delta_f_span, DeltaFSpan, 0x37804, "Delta-F span", mask 0x0e, shift 1, {0 => DeltaFSpan::Khz5, 1 => DeltaFSpan::Khz10, 2 => DeltaFSpan::Khz20, 3 => DeltaFSpan::Khz50, 4 => DeltaFSpan::Khz100, 5 => DeltaFSpan::Khz500, 6 => DeltaFSpan::Mhz1});
+// Key 0x2a8: read RVA 0x75515, store RVA 0x75573 (common ID A2-H54848-126).
+stored_setting!(select_memory_scan, set_select_memory_scan, SelectMemoryScan, 0x37802, "select-memory scan", mask 0x03, shift 0, {0 => SelectMemoryScan::AllStars, 1 => SelectMemoryScan::OneStar, 2 => SelectMemoryScan::TwoStars, 3 => SelectMemoryScan::ThreeStars});
+// Key 0x323: read RVA 0x791c9, store RVA 0x79202 (common ID A2-H54848-132).
+stored_enum!(RemotePowerOffMode, remote_power_off_mode, set_remote_power_off_mode, 0x39328, "remote power-off mode", {ShutdownOnly = 0, StandbyShutdown = 1});
+// Key 0x269: read RVA 0x74cc7, store RVA 0x74d00 (common ID A2-H54848-133).
+stored_enum!(VoxBreakInKeyFunction, vox_break_in_key_function, set_vox_break_in_key_function, 0x39332, "VOX/break-in key function", {Transmit = 0, Tuner = 1, VoxBreakIn = 2, PreampAttenuator = 3, Notch = 4, NoiseBlanker = 5, NoiseReduction = 6, Split = 7, VfoAOrB = 8, VfoOrMemory = 9, Cd = 10, Preset = 11, HomeChannel = 12, TemporarySkip = 13, VoiceKeyerRttyMemory1 = 14, VoiceKeyerRttyMemory2 = 15, VoiceKeyerRttyMemory3 = 16, VoiceKeyerRttyMemory4 = 17});
+// Key 0x26a: read RVA 0x74d10, store RVA 0x74d49 (common ID A2-H54848-134).
+stored_enum!(AutoTuneRxCallsignKeyFunction, auto_tune_rx_callsign_key_function, set_auto_tune_rx_callsign_key_function, 0x39333, "auto-tune/RX-callsign key function", {AutoTuneRxCallsign = 0, CdRxCallsign = 1, PresetRxCallsign = 2, HomeChannelRxCallsign = 3, TemporarySkipRxCallsign = 4});
+// Key 0x288: read RVA 0x763ec, store RVA 0x76428 (common ID A2-H54848-145).
+stored_setting!(repeater_csv_separator_decimal, set_repeater_csv_separator_decimal, CsvSeparatorDecimal, 0x399e1, "repeater CSV separator/decimal", {0 => CsvSeparatorDecimal::CommaDot, 1 => CsvSeparatorDecimal::SemicolonDot, 2 => CsvSeparatorDecimal::SemicolonComma});
+// Key 0x289: read RVA 0x7643b, store RVA 0x76477 (common ID A2-H54848-146).
+stored_setting!(repeater_csv_date_format, set_repeater_csv_date_format, CsvDateFormat, 0x399e2, "repeater CSV date format", {0 => CsvDateFormat::YearMonthDay, 1 => CsvDateFormat::MonthDayYear, 2 => CsvDateFormat::DayMonthYear});
 
 // Key 0x233 dispatches to RVA 0x73523: block 0x392C0 + byte 0x34.
 // GI_Sheet_Sel_Misc_OnOff at RVA 0x3177F2 maps OFF/ON to 0/1.

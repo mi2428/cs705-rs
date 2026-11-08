@@ -11,11 +11,18 @@ mod common;
 mod groups;
 
 pub use common::{
-    AutoPowerOff, BandEdgeBeep, DialAutoTs, KeyboardInput, KeyboardLayout, LockFunction,
-    MemoryChannelSelectionScope, MemoryGroupDisplay, MemoryPadChannels, MicUpDownSpeed,
-    PlaybackSkipTime, PowerSave, PreRecordingTime, ReceivedCallsignSpeech, RecordingCondition,
-    ScreenCaptureFileType, ScrollSpeed, SpeechAlphabet, SpeechLanguage, SpeechLockKey, SpeechSpeed,
-    TxRecordingAudio,
+    AltitudeDistanceUnit, AutoPowerOff, AutoTuneRxCallsignKeyFunction, BandEdgeBeep,
+    BatteryPowerLimit, BluetoothAudioOutput, BluetoothAutoDisconnect, BluetoothHeadsetFunction,
+    BluetoothSerialFunction, CoordinateDisplay, CsvDateFormat, CsvSeparatorDecimal, CwBfoSide,
+    DeltaFSpan, DialAutoTs, ExternalPowerLimit, KeyboardInput, KeyboardLayout, Language,
+    LockFunction, ManualNotchWidth, MemoryChannelSelectionScope, MemoryGroupDisplay,
+    MemoryPadChannels, MicUpDownSpeed, NotchFilter, NotchKeyFunction, PlaybackSkipTime, PowerSave,
+    PreRecordingTime, PressureUnit, RainfallUnit, ReceivedCallsignSpeech, RecordingCondition,
+    RecordingMicrophone, RemotePowerOffMode, ScanMainDial, ScanPauseTime, ScanRestartTime,
+    ScanSpeed, ScreenCaptureFileType, ScreenSaverDelay, ScrollSpeed, SelectMemoryScan,
+    SpeechAlphabet, SpeechLanguage, SpeechLockKey, SpeechSpeed, SpeedUnit, TemperatureUnit,
+    TemporarySkipTime, TransmitBandwidth, TransmitMeter, TransmitTimeout, TunerSelection,
+    TxRecordingAudio, VoxBreakInKeyFunction, VoxVoiceDelay, WindSpeedUnit,
 };
 pub use groups::MemoryGroup;
 
@@ -1872,6 +1879,870 @@ mod tests {
             0,
             &[512, 65535],
             &[[0, 2], [255, 255]]
+        );
+    }
+
+    // Independent RC IDs, offsets, last codes, masks and shifts. No product registry.
+    const SELECTORS: [(u16, usize, u8, u8, u8); 69] = [
+        (7, 0x399dd, 1, 0xff, 0),
+        (8, 0x399de, 1, 0xff, 0),
+        (14, 0x39701, 1, 0xff, 0),
+        (15, 0x39702, 1, 0xff, 0),
+        (19, 0x39705, 1, 0xff, 0),
+        (20, 0x39706, 1, 0xff, 0),
+        (21, 0x39707, 1, 0xff, 0),
+        (22, 0x39708, 1, 0xff, 0),
+        (55, 0x39999, 1, 0xff, 0),
+        (59, 0x3999b, 1, 0xff, 0),
+        (62, 0x39962, 1, 0xff, 0),
+        (66, 0x37781, 1, 0x80, 7),
+        (76, 0x3930a, 1, 0xff, 0),
+        (81, 0x39310, 1, 0xff, 0),
+        (82, 0x39311, 1, 0xff, 0),
+        (97, 0x37780, 1, 0x02, 1),
+        (98, 0x37784, 1, 0xff, 0),
+        (102, 0x37782, 1, 0xff, 0),
+        (106, 0x37783, 1, 0xff, 0),
+        (116, 0x39326, 1, 0xff, 0),
+        (119, 0x3998a, 1, 0xff, 0),
+        (141, 0x396bd, 1, 0xff, 0),
+        (143, 0x396fe, 1, 0xff, 0),
+        (9, 0x399df, 2, 0xff, 0),
+        (10, 0x399e0, 2, 0xff, 0),
+        (16, 0x39703, 1, 0xff, 0),
+        (17, 0x39721, 11, 0xff, 0),
+        (18, 0x39704, 2, 0xff, 0),
+        (24, 0x39709, 2, 0xff, 0),
+        (27, 0x396ae, 6, 0xff, 0),
+        (28, 0x396af, 6, 0xff, 0),
+        (32, 0x37786, 5, 0xff, 0),
+        (38, 0x396bb, 1, 0xff, 0),
+        (39, 0x396bc, 1, 0xff, 0),
+        (40, 0x396b4, 2, 0xff, 0),
+        (41, 0x396b5, 1, 0xff, 0),
+        (42, 0x396b6, 2, 0xff, 0),
+        (43, 0x396b7, 1, 0xff, 0),
+        (44, 0x396b8, 3, 0xff, 0),
+        (45, 0x396b9, 1, 0xff, 0),
+        (46, 0x396ba, 3, 0xff, 0),
+        (57, 0x399b0, 2, 0xff, 0),
+        (58, 0x399b1, 2, 0xff, 0),
+        (64, 0x37816, 1, 0xff, 0),
+        (70, 0x399ae, 3, 0xff, 0),
+        (72, 0x39302, 3, 0xff, 0),
+        (73, 0x39303, 4, 0xff, 0),
+        (75, 0x39309, 5, 0xff, 0),
+        (80, 0x3930f, 1, 0xff, 0),
+        (108, 0x399a5, 2, 0xff, 0),
+        (109, 0x399a7, 2, 0xff, 0),
+        (110, 0x399a8, 2, 0xff, 0),
+        (111, 0x399a9, 2, 0xff, 0),
+        (112, 0x399aa, 2, 0xff, 0),
+        (114, 0x39324, 2, 0xff, 0),
+        (115, 0x39325, 2, 0xff, 0),
+        (117, 0x39327, 1, 0xff, 0),
+        (118, 0x39989, 1, 0xff, 0),
+        (120, 0x3998b, 10, 0xff, 0),
+        (121, 0x3998c, 6, 0xff, 0),
+        (122, 0x3998d, 4, 0xff, 0),
+        (123, 0x3998e, 1, 0xff, 0),
+        (124, 0x37804, 6, 0x0e, 1),
+        (126, 0x37802, 3, 0x03, 0),
+        (132, 0x39328, 1, 0xff, 0),
+        (133, 0x39332, 17, 0xff, 0),
+        (134, 0x39333, 4, 0xff, 0),
+        (145, 0x399e1, 2, 0xff, 0),
+        (146, 0x399e2, 2, 0xff, 0),
+    ];
+
+    fn selectors_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        for &(_, offset, _, mask, _) in &SELECTORS {
+            memory[offset] &= !mask;
+        }
+        // Python hashlib/struct oracle: incremental synthetic memory, literal
+        // targets cleared under their masks, internal revision 6 and signature.
+        let source = fixture_with_memory(&memory, "B8C52F5234C99BFD2BEC9FB2AF622C42");
+        (source, memory)
+    }
+
+    #[test]
+    fn edits_all_69_selectors_with_independent_bytes_and_hashes() {
+        let (source, mut expected) = selectors_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "33009E5A8B06174553ECA407B6333DAA"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        let mut seen = Vec::new();
+        macro_rules! check {
+            ($id:literal, $offset:literal, $get:ident, $set:ident, [$($value:expr),+]) => {
+                seen.push(($id, $offset));
+                check_expanded_setting(&mut image, $offset, &[$($value),+],
+                    |image| image.$get(), |image, value| image.$set(value));
+            };
+        }
+        check!(7, 0x399dd, qso_log, set_qso_log, [false, true]);
+        check!(
+            8,
+            0x399de,
+            receive_history_log,
+            set_receive_history_log,
+            [false, true]
+        );
+        check!(14, 0x39701, bluetooth, set_bluetooth, [false, true]);
+        check!(
+            15,
+            0x39702,
+            bluetooth_auto_connect,
+            set_bluetooth_auto_connect,
+            [false, true]
+        );
+        check!(
+            19,
+            0x39705,
+            bluetooth_power_save,
+            set_bluetooth_power_save,
+            [false, true]
+        );
+        check!(
+            20,
+            0x39706,
+            bluetooth_one_touch_ptt,
+            set_bluetooth_one_touch_ptt,
+            [false, true]
+        );
+        check!(
+            21,
+            0x39707,
+            bluetooth_ptt_beep,
+            set_bluetooth_ptt_beep,
+            [false, true]
+        );
+        check!(
+            22,
+            0x39708,
+            bluetooth_custom_key_beep,
+            set_bluetooth_custom_key_beep,
+            [false, true]
+        );
+        check!(
+            55,
+            0x39999,
+            speech_compressor,
+            set_speech_compressor,
+            [false, true]
+        );
+        check!(59, 0x3999b, monitor, set_monitor, [false, true]);
+        check!(
+            62,
+            0x39962,
+            voice_auto_monitor,
+            set_voice_auto_monitor,
+            [false, true]
+        );
+        check!(76, 0x3930a, ptt_lock, set_ptt_lock, [false, true]);
+        check!(81, 0x39310, tuner_memory, set_tuner_memory, [false, true]);
+        check!(82, 0x39311, ptt_tune, set_ptt_tune, [false, true]);
+        check!(
+            98,
+            0x37784,
+            quarter_tuning,
+            set_quarter_tuning,
+            [false, true]
+        );
+        check!(
+            102,
+            0x37782,
+            noise_blanker,
+            set_noise_blanker,
+            [false, true]
+        );
+        check!(
+            106,
+            0x37783,
+            noise_reduction,
+            set_noise_reduction,
+            [false, true]
+        );
+        check!(
+            116,
+            0x39326,
+            ssb_cw_frequency_shift,
+            set_ssb_cw_frequency_shift,
+            [false, true]
+        );
+        check!(119, 0x3998a, scan_resume, set_scan_resume, [false, true]);
+        check!(141, 0x396bd, ntp, set_ntp, [false, true]);
+        check!(
+            143,
+            0x396fe,
+            gps_time_auto_correction,
+            set_gps_time_auto_correction,
+            [false, true]
+        );
+        check!(
+            9,
+            0x399df,
+            log_csv_separator_decimal,
+            set_log_csv_separator_decimal,
+            [
+                CsvSeparatorDecimal::CommaDot,
+                CsvSeparatorDecimal::SemicolonDot,
+                CsvSeparatorDecimal::SemicolonComma
+            ]
+        );
+        check!(
+            10,
+            0x399e0,
+            log_csv_date_format,
+            set_log_csv_date_format,
+            [
+                CsvDateFormat::YearMonthDay,
+                CsvDateFormat::MonthDayYear,
+                CsvDateFormat::DayMonthYear
+            ]
+        );
+        check!(
+            16,
+            0x39703,
+            bluetooth_audio_output,
+            set_bluetooth_audio_output,
+            [
+                BluetoothAudioOutput::HeadsetOnly,
+                BluetoothAudioOutput::HeadsetAndSpeaker
+            ]
+        );
+        check!(
+            17,
+            0x39721,
+            bluetooth_auto_disconnect,
+            set_bluetooth_auto_disconnect,
+            [
+                BluetoothAutoDisconnect::Off,
+                BluetoothAutoDisconnect::Seconds0,
+                BluetoothAutoDisconnect::Seconds1,
+                BluetoothAutoDisconnect::Seconds2,
+                BluetoothAutoDisconnect::Seconds3,
+                BluetoothAutoDisconnect::Seconds4,
+                BluetoothAutoDisconnect::Seconds5,
+                BluetoothAutoDisconnect::Seconds6,
+                BluetoothAutoDisconnect::Seconds7,
+                BluetoothAutoDisconnect::Seconds8,
+                BluetoothAutoDisconnect::Seconds9,
+                BluetoothAutoDisconnect::Seconds10
+            ]
+        );
+        check!(
+            18,
+            0x39704,
+            bluetooth_headset_function,
+            set_bluetooth_headset_function,
+            [
+                BluetoothHeadsetFunction::Normal,
+                BluetoothHeadsetFunction::Microphone,
+                BluetoothHeadsetFunction::Ptt
+            ]
+        );
+        check!(
+            24,
+            0x39709,
+            bluetooth_serial_function,
+            set_bluetooth_serial_function,
+            [
+                BluetoothSerialFunction::CivNoEcho,
+                BluetoothSerialFunction::CivEcho,
+                BluetoothSerialFunction::DvData
+            ]
+        );
+        check!(
+            27,
+            0x396ae,
+            battery_screen_saver,
+            set_battery_screen_saver,
+            [
+                ScreenSaverDelay::Off,
+                ScreenSaverDelay::Minutes1,
+                ScreenSaverDelay::Minutes2,
+                ScreenSaverDelay::Minutes5,
+                ScreenSaverDelay::Minutes15,
+                ScreenSaverDelay::Minutes30,
+                ScreenSaverDelay::Minutes60
+            ]
+        );
+        check!(
+            28,
+            0x396af,
+            external_power_screen_saver,
+            set_external_power_screen_saver,
+            [
+                ScreenSaverDelay::Off,
+                ScreenSaverDelay::Minutes1,
+                ScreenSaverDelay::Minutes2,
+                ScreenSaverDelay::Minutes5,
+                ScreenSaverDelay::Minutes15,
+                ScreenSaverDelay::Minutes30,
+                ScreenSaverDelay::Minutes60
+            ]
+        );
+        check!(
+            32,
+            0x37786,
+            transmit_meter,
+            set_transmit_meter,
+            [
+                TransmitMeter::Po,
+                TransmitMeter::Swr,
+                TransmitMeter::Alc,
+                TransmitMeter::Comp,
+                TransmitMeter::Vd,
+                TransmitMeter::Id
+            ]
+        );
+        check!(
+            38,
+            0x396bb,
+            display_language,
+            set_display_language,
+            [Language::English, Language::Japanese]
+        );
+        check!(
+            39,
+            0x396bc,
+            system_language,
+            set_system_language,
+            [Language::English, Language::Japanese]
+        );
+        check!(
+            40,
+            0x396b4,
+            coordinate_display,
+            set_coordinate_display,
+            [
+                CoordinateDisplay::DegreesDecimalMinutes,
+                CoordinateDisplay::DegreesMinutesSeconds,
+                CoordinateDisplay::DecimalDegrees
+            ]
+        );
+        check!(
+            41,
+            0x396b5,
+            altitude_distance_unit,
+            set_altitude_distance_unit,
+            [
+                AltitudeDistanceUnit::Meters,
+                AltitudeDistanceUnit::FeetMiles
+            ]
+        );
+        check!(
+            42,
+            0x396b6,
+            speed_unit,
+            set_speed_unit,
+            [
+                SpeedUnit::KilometersPerHour,
+                SpeedUnit::MilesPerHour,
+                SpeedUnit::Knots
+            ]
+        );
+        check!(
+            43,
+            0x396b7,
+            temperature_unit,
+            set_temperature_unit,
+            [TemperatureUnit::Celsius, TemperatureUnit::Fahrenheit]
+        );
+        check!(
+            44,
+            0x396b8,
+            pressure_unit,
+            set_pressure_unit,
+            [
+                PressureUnit::Hectopascals,
+                PressureUnit::Millibars,
+                PressureUnit::MillimetersMercury,
+                PressureUnit::InchesMercury
+            ]
+        );
+        check!(
+            45,
+            0x396b9,
+            rainfall_unit,
+            set_rainfall_unit,
+            [RainfallUnit::Millimeters, RainfallUnit::Inches]
+        );
+        check!(
+            46,
+            0x396ba,
+            wind_speed_unit,
+            set_wind_speed_unit,
+            [
+                WindSpeedUnit::MetersPerSecond,
+                WindSpeedUnit::KilometersPerHour,
+                WindSpeedUnit::MilesPerHour,
+                WindSpeedUnit::Knots
+            ]
+        );
+        check!(
+            57,
+            0x399b0,
+            compressor_off_transmit_bandwidth,
+            set_compressor_off_transmit_bandwidth,
+            [
+                TransmitBandwidth::Wide,
+                TransmitBandwidth::Mid,
+                TransmitBandwidth::Narrow
+            ]
+        );
+        check!(
+            58,
+            0x399b1,
+            compressor_on_transmit_bandwidth,
+            set_compressor_on_transmit_bandwidth,
+            [
+                TransmitBandwidth::Wide,
+                TransmitBandwidth::Mid,
+                TransmitBandwidth::Narrow
+            ]
+        );
+        check!(
+            64,
+            0x37816,
+            recording_microphone,
+            set_recording_microphone,
+            [
+                RecordingMicrophone::HandMicrophone,
+                RecordingMicrophone::BluetoothMicrophone
+            ]
+        );
+        check!(
+            70,
+            0x399ae,
+            vox_voice_delay,
+            set_vox_voice_delay,
+            [
+                VoxVoiceDelay::Off,
+                VoxVoiceDelay::Short,
+                VoxVoiceDelay::Mid,
+                VoxVoiceDelay::Long
+            ]
+        );
+        check!(
+            72,
+            0x39302,
+            battery_power_limit,
+            set_battery_power_limit,
+            [
+                BatteryPowerLimit::Milliwatts500,
+                BatteryPowerLimit::Watts1,
+                BatteryPowerLimit::Milliwatts2500,
+                BatteryPowerLimit::Watts5
+            ]
+        );
+        check!(
+            73,
+            0x39303,
+            external_power_limit,
+            set_external_power_limit,
+            [
+                ExternalPowerLimit::Milliwatts500,
+                ExternalPowerLimit::Watts1,
+                ExternalPowerLimit::Milliwatts2500,
+                ExternalPowerLimit::Watts5,
+                ExternalPowerLimit::Watts10
+            ]
+        );
+        check!(
+            75,
+            0x39309,
+            transmit_timeout,
+            set_transmit_timeout,
+            [
+                TransmitTimeout::Off,
+                TransmitTimeout::Minutes3,
+                TransmitTimeout::Minutes5,
+                TransmitTimeout::Minutes10,
+                TransmitTimeout::Minutes20,
+                TransmitTimeout::Minutes30
+            ]
+        );
+        check!(
+            80,
+            0x3930f,
+            tuner_selection,
+            set_tuner_selection,
+            [TunerSelection::Ah705, TunerSelection::Other]
+        );
+        check!(
+            108,
+            0x399a5,
+            notch_filter,
+            set_notch_filter,
+            [NotchFilter::Off, NotchFilter::Auto, NotchFilter::Manual]
+        );
+        check!(
+            109,
+            0x399a7,
+            ssb_manual_notch_width,
+            set_ssb_manual_notch_width,
+            [
+                ManualNotchWidth::Wide,
+                ManualNotchWidth::Mid,
+                ManualNotchWidth::Narrow
+            ]
+        );
+        check!(
+            110,
+            0x399a8,
+            cw_manual_notch_width,
+            set_cw_manual_notch_width,
+            [
+                ManualNotchWidth::Wide,
+                ManualNotchWidth::Mid,
+                ManualNotchWidth::Narrow
+            ]
+        );
+        check!(
+            111,
+            0x399a9,
+            rtty_manual_notch_width,
+            set_rtty_manual_notch_width,
+            [
+                ManualNotchWidth::Wide,
+                ManualNotchWidth::Mid,
+                ManualNotchWidth::Narrow
+            ]
+        );
+        check!(
+            112,
+            0x399aa,
+            am_manual_notch_width,
+            set_am_manual_notch_width,
+            [
+                ManualNotchWidth::Wide,
+                ManualNotchWidth::Mid,
+                ManualNotchWidth::Narrow
+            ]
+        );
+        check!(
+            114,
+            0x39324,
+            ssb_notch_key_function,
+            set_ssb_notch_key_function,
+            [
+                NotchKeyFunction::Auto,
+                NotchKeyFunction::Manual,
+                NotchKeyFunction::AutoManual
+            ]
+        );
+        check!(
+            115,
+            0x39325,
+            am_notch_key_function,
+            set_am_notch_key_function,
+            [
+                NotchKeyFunction::Auto,
+                NotchKeyFunction::Manual,
+                NotchKeyFunction::AutoManual
+            ]
+        );
+        check!(
+            117,
+            0x39327,
+            cw_bfo_side,
+            set_cw_bfo_side,
+            [CwBfoSide::LowerSideband, CwBfoSide::UpperSideband]
+        );
+        check!(
+            118,
+            0x39989,
+            scan_speed,
+            set_scan_speed,
+            [ScanSpeed::Slow, ScanSpeed::Fast]
+        );
+        check!(
+            120,
+            0x3998b,
+            scan_pause_time,
+            set_scan_pause_time,
+            [
+                ScanPauseTime::Seconds2,
+                ScanPauseTime::Seconds4,
+                ScanPauseTime::Seconds6,
+                ScanPauseTime::Seconds8,
+                ScanPauseTime::Seconds10,
+                ScanPauseTime::Seconds12,
+                ScanPauseTime::Seconds14,
+                ScanPauseTime::Seconds16,
+                ScanPauseTime::Seconds18,
+                ScanPauseTime::Seconds20,
+                ScanPauseTime::Hold
+            ]
+        );
+        check!(
+            121,
+            0x3998c,
+            scan_restart_time,
+            set_scan_restart_time,
+            [
+                ScanRestartTime::Seconds0,
+                ScanRestartTime::Seconds1,
+                ScanRestartTime::Seconds2,
+                ScanRestartTime::Seconds3,
+                ScanRestartTime::Seconds4,
+                ScanRestartTime::Seconds5,
+                ScanRestartTime::Hold
+            ]
+        );
+        check!(
+            122,
+            0x3998d,
+            temporary_skip_time,
+            set_temporary_skip_time,
+            [
+                TemporarySkipTime::Minutes5,
+                TemporarySkipTime::Minutes10,
+                TemporarySkipTime::Minutes15,
+                TemporarySkipTime::WhileScanning,
+                TemporarySkipTime::UntilPowerOff
+            ]
+        );
+        check!(
+            123,
+            0x3998e,
+            scan_main_dial,
+            set_scan_main_dial,
+            [ScanMainDial::Stop, ScanMainDial::UpDown]
+        );
+        check!(
+            132,
+            0x39328,
+            remote_power_off_mode,
+            set_remote_power_off_mode,
+            [
+                RemotePowerOffMode::ShutdownOnly,
+                RemotePowerOffMode::StandbyShutdown
+            ]
+        );
+        check!(
+            133,
+            0x39332,
+            vox_break_in_key_function,
+            set_vox_break_in_key_function,
+            [
+                VoxBreakInKeyFunction::Transmit,
+                VoxBreakInKeyFunction::Tuner,
+                VoxBreakInKeyFunction::VoxBreakIn,
+                VoxBreakInKeyFunction::PreampAttenuator,
+                VoxBreakInKeyFunction::Notch,
+                VoxBreakInKeyFunction::NoiseBlanker,
+                VoxBreakInKeyFunction::NoiseReduction,
+                VoxBreakInKeyFunction::Split,
+                VoxBreakInKeyFunction::VfoAOrB,
+                VoxBreakInKeyFunction::VfoOrMemory,
+                VoxBreakInKeyFunction::Cd,
+                VoxBreakInKeyFunction::Preset,
+                VoxBreakInKeyFunction::HomeChannel,
+                VoxBreakInKeyFunction::TemporarySkip,
+                VoxBreakInKeyFunction::VoiceKeyerRttyMemory1,
+                VoxBreakInKeyFunction::VoiceKeyerRttyMemory2,
+                VoxBreakInKeyFunction::VoiceKeyerRttyMemory3,
+                VoxBreakInKeyFunction::VoiceKeyerRttyMemory4
+            ]
+        );
+        check!(
+            134,
+            0x39333,
+            auto_tune_rx_callsign_key_function,
+            set_auto_tune_rx_callsign_key_function,
+            [
+                AutoTuneRxCallsignKeyFunction::AutoTuneRxCallsign,
+                AutoTuneRxCallsignKeyFunction::CdRxCallsign,
+                AutoTuneRxCallsignKeyFunction::PresetRxCallsign,
+                AutoTuneRxCallsignKeyFunction::HomeChannelRxCallsign,
+                AutoTuneRxCallsignKeyFunction::TemporarySkipRxCallsign
+            ]
+        );
+        check!(
+            145,
+            0x399e1,
+            repeater_csv_separator_decimal,
+            set_repeater_csv_separator_decimal,
+            [
+                CsvSeparatorDecimal::CommaDot,
+                CsvSeparatorDecimal::SemicolonDot,
+                CsvSeparatorDecimal::SemicolonComma
+            ]
+        );
+        check!(
+            146,
+            0x399e2,
+            repeater_csv_date_format,
+            set_repeater_csv_date_format,
+            [
+                CsvDateFormat::YearMonthDay,
+                CsvDateFormat::MonthDayYear,
+                CsvDateFormat::DayMonthYear
+            ]
+        );
+        // The four masked fields are swept over every starting byte below.
+        image.set_vox(true).unwrap();
+        image.set_one_hz_mode(true).unwrap();
+        image.set_delta_f_span(DeltaFSpan::Mhz1).unwrap();
+        image
+            .set_select_memory_scan(SelectMemoryScan::ThreeStars)
+            .unwrap();
+        seen.extend([(66, 0x37781), (97, 0x37780), (124, 0x37804), (126, 0x37802)]);
+        seen.sort_unstable();
+        let mut targets: Vec<_> = SELECTORS
+            .iter()
+            .map(|&(id, at, _, _, _)| (id, at))
+            .collect();
+        targets.sort_unstable();
+        assert_eq!(seen, targets);
+        assert!(targets.windows(2).all(|w| w[0].0 != w[1].0));
+        for &(_, offset, last, mask, shift) in &SELECTORS {
+            expected[offset] = (expected[offset] & !mask) | (last << shift);
+        }
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            [
+                expected[0x37780],
+                expected[0x37781],
+                expected[0x37802],
+                expected[0x37804]
+            ],
+            [0x82, 0x81, 0x03, 0x0c]
+        );
+        let output = image.to_bytes();
+        assert_eq!(output.len(), 589_699);
+        assert!(output.ends_with(b"#CD=27D099B9DAAD804BF73C1A0A4E8B6496\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "172FA265602BBA9E01DBB7CB318AB5AE"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
+        image: &mut Icf<'_>,
+        field: (usize, u8, u8),
+        values: &[T],
+        read: impl Fn(&Icf<'_>) -> Result<T, Error>,
+        write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
+    ) {
+        let (offset, mask, shift) = field;
+        let source = image.source;
+        let mut expected = image.memory().to_vec();
+        for original in 0..=u8::MAX {
+            let code = usize::from((original & mask) >> shift);
+            image.memory[offset] = original;
+            expected[offset] = original;
+            let error = if code < values.len() {
+                assert_eq!(read(image), Ok(values[code]));
+                None
+            } else {
+                let error = read(image).unwrap_err();
+                assert!(
+                    matches!(error, Error::Unsupported { line, .. } if line == 5 + offset / 32)
+                );
+                Some(error)
+            };
+            let before = error.as_ref().map(|_| image.to_bytes());
+            for (new_code, &value) in values.iter().enumerate() {
+                // Each new value is checked against this exact original byte.
+                image.memory[offset] = original;
+                if let Some(ref error) = error {
+                    assert_eq!(write(image, value), Err(error.clone()));
+                    expected[offset] = original;
+                } else {
+                    write(image, value).unwrap();
+                    expected[offset] = (original & !mask) | ((new_code as u8) << shift);
+                    assert_eq!(read(image), Ok(value));
+                }
+                assert_setting_state(image, source, &expected);
+            }
+            if let Some(before) = before {
+                assert_eq!(image.to_bytes(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_all_four_masks_for_every_byte_and_inactive_stored_values() {
+        let (source, _) = selectors_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        check_masked_selector(
+            &mut image,
+            (0x37781, 0x80, 7),
+            &[false, true],
+            |i| i.vox(),
+            |i, v| i.set_vox(v),
+        );
+        check_masked_selector(
+            &mut image,
+            (0x37780, 0x02, 1),
+            &[false, true],
+            |i| i.one_hz_mode(),
+            |i, v| i.set_one_hz_mode(v),
+        );
+        check_masked_selector(
+            &mut image,
+            (0x37804, 0x0e, 1),
+            &[
+                DeltaFSpan::Khz5,
+                DeltaFSpan::Khz10,
+                DeltaFSpan::Khz20,
+                DeltaFSpan::Khz50,
+                DeltaFSpan::Khz100,
+                DeltaFSpan::Khz500,
+                DeltaFSpan::Mhz1,
+            ],
+            |i| i.delta_f_span(),
+            |i, v| i.set_delta_f_span(v),
+        );
+        check_masked_selector(
+            &mut image,
+            (0x37802, 0x03, 0),
+            &[
+                SelectMemoryScan::AllStars,
+                SelectMemoryScan::OneStar,
+                SelectMemoryScan::TwoStars,
+                SelectMemoryScan::ThreeStars,
+            ],
+            |i| i.select_memory_scan(),
+            |i, v| i.set_select_memory_scan(v),
+        );
+        // Parent OFF does not erase or block independently stored child values.
+        let mut image = Icf::parse(&source).unwrap();
+        let mut expected = image.memory().to_vec();
+        image
+            .set_bluetooth_auto_disconnect(BluetoothAutoDisconnect::Seconds10)
+            .unwrap();
+        image.set_bluetooth_power_save(true).unwrap();
+        image
+            .set_compressor_on_transmit_bandwidth(TransmitBandwidth::Narrow)
+            .unwrap();
+        image.set_vox_voice_delay(VoxVoiceDelay::Long).unwrap();
+        for (at, value) in [(0x39721, 11), (0x39705, 1), (0x399b1, 2), (0x399ae, 3)] {
+            expected[at] = value;
+        }
+        assert_eq!(image.bluetooth(), Ok(false));
+        assert_eq!(image.speech_compressor(), Ok(false));
+        assert_eq!(image.vox(), Ok(false));
+        assert_setting_state(&image, &source, &expected);
+        let output = image.to_bytes();
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(
+            reparsed.bluetooth_auto_disconnect(),
+            Ok(BluetoothAutoDisconnect::Seconds10)
+        );
+        assert_eq!(
+            reparsed.compressor_on_transmit_bandwidth(),
+            Ok(TransmitBandwidth::Narrow)
         );
     }
 
