@@ -9,6 +9,7 @@ use std::io::Write;
 
 mod common;
 mod dsp;
+mod gps;
 mod groups;
 mod memory;
 mod messages;
@@ -36,6 +37,7 @@ pub use dsp::{
     Agc, FilterBandGroup, FilterMode, FilterShape, FilterShapeSlot, FilterSlot, PbtSide, Preamp,
     StepAgcMode, ToneMode, TransmitBandwidthPreset, TransmitHigh, TransmitLow,
 };
+pub use gps::{GpsAlarm, GpsAltitude, GpsCoordinate, GpsDate, GpsGroup, GpsTime};
 pub use groups::MemoryGroup;
 pub use memory::{
     MemoryCallsign, MemoryDigitalSquelch, MemoryDuplex, MemoryFilter, MemoryMode, MemorySelection,
@@ -4902,6 +4904,596 @@ mod tests {
             reparsed.compressor_on_transmit_bandwidth(),
             Ok(TransmitBandwidth::Narrow)
         );
+    }
+
+    fn gps_fixture() -> Vec<u8> {
+        // Independent Python struct/hashlib, never product output: sparse
+        // order [299,7,0], starts g0=0/g2=1/g26=2, zero/FF/known raw records.
+        let mut m: Vec<u8> = (0..IMAGE_BYTES)
+            .map(|i| (i * 53 + (i >> 7) + 17) as u8)
+            .collect();
+        m[0x355a1] = 6;
+        m[IMAGE_BYTES - 16..].copy_from_slice(b"IcomCloneFormat3");
+        m[0x3c385..0x3c5dd].fill(255);
+        m[0x3c5dd..0x3c613].fill(255);
+        for (i, p) in [299_u16, 7, 0].into_iter().enumerate() {
+            m[0x3c385 + 2 * i..0x3c387 + 2 * i].copy_from_slice(&p.to_le_bytes());
+        }
+        for (g, start) in [(0, 0_u16), (2, 1), (26, 2)] {
+            m[0x3c5dd + 2 * g..0x3c5df + 2 * g].copy_from_slice(&start.to_le_bytes());
+        }
+        m[0x32c19 + 34 * 299..0x353f1].fill(0);
+        m[0x32c19 + 34 * 7..0x32c19 + 34 * 8].fill(255);
+        m[0x32c19..0x32c19 + 18].copy_from_slice(&[
+            90, 0, 0, b'S', 180, 0, 0, b'W', 1, 1, 0, 0x23, 0x59, 0x59, 255, 255, 255, 127,
+        ]);
+        m[0x3c622..0x3c626].fill(255);
+        fixture_with_memory(&m, "ED4E1DC7E1456C34216DFE9E38B7B9A2")
+    }
+
+    #[test]
+    fn gps_existing_fields_groups_and_alarm_match_independent_image() {
+        let source = gps_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "9AA3BD59A6D7F37EF9274DD5090EE3FF"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        let mut expected = image.memory().to_vec();
+        let groups = image.gps_groups().unwrap();
+        assert_eq!(groups.len(), 27);
+        for (g, group) in groups.iter().enumerate() {
+            let slots: &[usize] = match g {
+                0 => &[299],
+                2 => &[7],
+                26 => &[0],
+                _ => &[],
+            };
+            assert_eq!(group.physical_slots(), slots);
+            if g == 0 {
+                assert_eq!(group.name_bytes(), None);
+            } else {
+                let at = 0x353f1 + 16 * (g - 1);
+                let name = group.name_bytes().unwrap();
+                assert_eq!(name, &expected[at..at + 16]);
+                assert_eq!(name.as_ptr(), image.memory()[at..].as_ptr());
+            }
+        }
+        for p in [299, 7, 0] {
+            let at = 0x32c19 + 34 * p;
+            let raw = image.physical_gps_record_raw(p).unwrap().unwrap();
+            assert_eq!(raw, &expected[at..at + 34]);
+            assert_eq!(raw.as_ptr(), image.memory()[at..].as_ptr());
+            assert_eq!(
+                image.physical_gps_name_raw(p).unwrap().unwrap().as_ptr(),
+                image.memory()[at + 18..].as_ptr()
+            );
+        }
+        assert_eq!(image.physical_gps_record_raw(1).unwrap(), None);
+        assert_eq!(
+            image.physical_gps_date(0).unwrap(),
+            Some(GpsDate {
+                year: 2000,
+                month: 1,
+                day: 1
+            })
+        );
+        assert_eq!(
+            image.physical_gps_altitude(0).unwrap(),
+            Some(GpsAltitude::Unknown)
+        );
+        assert_eq!(
+            image.physical_gps_altitude(7).unwrap(),
+            Some(GpsAltitude::TenthsOfFoot(-1))
+        );
+        macro_rules! edit {
+            ($call:expr,$at:expr,$bytes:expr) => {{
+                $call.unwrap();
+                let bytes: &[u8] = $bytes;
+                expected[$at..$at + bytes.len()].copy_from_slice(bytes);
+                assert_setting_state(&image, &source, &expected);
+            }};
+        }
+        for (p, date, time, lat, lon, alt, name, bytes) in [
+            (
+                299,
+                GpsDate {
+                    year: 2004,
+                    month: 2,
+                    day: 29,
+                },
+                GpsTime {
+                    hour: 23,
+                    minute: 59,
+                    second: 59,
+                },
+                GpsCoordinate {
+                    degrees: 0,
+                    thousandths_of_minute: 0,
+                    negative: true,
+                },
+                GpsCoordinate {
+                    degrees: 179,
+                    thousandths_of_minute: 59999,
+                    negative: false,
+                },
+                GpsAltitude::TenthsOfFoot(-10),
+                b" GPS ".as_slice(),
+                [
+                    0, 0, 0, b'S', 179, 0xea, 0x5f, b'E', 0x29, 2, 4, 0x23, 0x59, 0x59, 0xf6, 255,
+                    255, 255,
+                ],
+            ),
+            (
+                7,
+                GpsDate {
+                    year: 2000,
+                    month: 1,
+                    day: 2,
+                },
+                GpsTime {
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                },
+                GpsCoordinate {
+                    degrees: 90,
+                    thousandths_of_minute: 0,
+                    negative: false,
+                },
+                GpsCoordinate {
+                    degrees: 180,
+                    thousandths_of_minute: 0,
+                    negative: false,
+                },
+                GpsAltitude::Unknown,
+                b"".as_slice(),
+                [
+                    90, 0, 0, b'N', 180, 0, 0, b'E', 2, 1, 0, 0, 0, 0, 255, 255, 255, 127,
+                ],
+            ),
+            (
+                0,
+                GpsDate {
+                    year: 2099,
+                    month: 12,
+                    day: 30,
+                },
+                GpsTime {
+                    hour: 12,
+                    minute: 34,
+                    second: 56,
+                },
+                GpsCoordinate {
+                    degrees: 89,
+                    thousandths_of_minute: 1,
+                    negative: false,
+                },
+                GpsCoordinate {
+                    degrees: 0,
+                    thousandths_of_minute: 0,
+                    negative: true,
+                },
+                GpsAltitude::TenthsOfFoot(328080),
+                b"0123456789ABCDEF".as_slice(),
+                [
+                    89, 0, 1, b'N', 0, 0, 0, b'W', 0x30, 0x12, 0x99, 0x12, 0x34, 0x56, 0x90, 1, 5,
+                    0,
+                ],
+            ),
+        ] {
+            let at = 0x32c19 + 34 * p;
+            edit!(image.set_physical_gps_latitude(p, lat), at, &bytes[..4]);
+            edit!(
+                image.set_physical_gps_longitude(p, lon),
+                at + 4,
+                &bytes[4..8]
+            );
+            edit!(image.set_physical_gps_date(p, date), at + 8, &bytes[8..11]);
+            edit!(
+                image.set_physical_gps_time(p, time),
+                at + 11,
+                &bytes[11..14]
+            );
+            edit!(
+                image.set_physical_gps_altitude(p, alt),
+                at + 14,
+                &bytes[14..18]
+            );
+            let mut padded = [b' '; 16];
+            padded[..name.len()].copy_from_slice(name);
+            edit!(
+                image.set_physical_gps_name_ascii(p, std::str::from_utf8(name).unwrap()),
+                at + 18,
+                &padded
+            );
+            assert_eq!(image.physical_gps_date(p).unwrap(), Some(date));
+            assert_eq!(image.physical_gps_time(p).unwrap(), Some(time));
+            assert_eq!(image.physical_gps_latitude(p).unwrap(), Some(lat));
+            assert_eq!(image.physical_gps_longitude(p).unwrap(), Some(lon));
+            assert_eq!(image.physical_gps_altitude(p).unwrap(), Some(alt));
+        }
+        edit!(image.set_gps_group_name_ascii(1, ""), 0x353f1, &[b' '; 16]);
+        edit!(
+            image.set_gps_group_name_ascii(26, "ZZZZZZZZZZZZZZZZ"),
+            0x35581,
+            &[b'Z'; 16]
+        );
+        edit!(
+            image.set_gps_alarm(GpsAlarm::Memory {
+                group: 26,
+                index: 0
+            }),
+            0x3c622,
+            &[3, 26, 0, 0]
+        );
+        let output = image.to_bytes();
+        assert!(output.ends_with(b"#CD=683D3406965FEC827D8C3377653A835A\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "97D7DD2FC13ED8C23D0F7AF23866F09D"
+        );
+        let parsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&parsed, &output, &expected);
+        assert_eq!(parsed.to_bytes(), output);
+    }
+
+    #[test]
+    fn gps_topology_full_sparse_and_independent_name_windows() {
+        let source = gps_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        for row in 0..300 {
+            let p = ((row * 137 + 299) % 300) as u16;
+            image.memory[0x3c385 + 2 * row..0x3c387 + 2 * row].copy_from_slice(&p.to_le_bytes());
+        }
+        image.memory[0x3c5dd..0x3c613].fill(255);
+        image.memory[0x3c5dd + 52..0x3c5dd + 54].copy_from_slice(&0_u16.to_le_bytes());
+        let groups = image.gps_groups().unwrap();
+        assert_eq!(groups[26].physical_slots().len(), 300);
+        for (r, &p) in groups[26].physical_slots().iter().enumerate() {
+            assert_eq!(p, (r * 137 + 299) % 300);
+        }
+        for p in 0..300 {
+            assert!(image.physical_gps_record_raw(p).unwrap().is_some());
+        }
+        image
+            .set_gps_alarm(GpsAlarm::Memory {
+                group: 26,
+                index: 299,
+            })
+            .unwrap();
+        assert_eq!(&image.memory()[0x3c622..0x3c626], &[3, 26, 43, 1]);
+        assert_eq!(
+            image.gps_alarm().unwrap(),
+            GpsAlarm::Memory {
+                group: 26,
+                index: 299
+            }
+        );
+        message_rejected(&mut image, (true, 5 + 0x3c622 / 32), |i| {
+            i.set_gps_alarm(GpsAlarm::Memory {
+                group: 26,
+                index: 300,
+            })
+        });
+        for (at, bytes) in [
+            (0x3c387, [43, 1]),
+            (0x3c387, [44, 1]),
+            (0x3c387, [255, 255]),
+            (0x3c38d, [1, 0]),
+            (0x3c387, [7, 0]),
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[at..at + 2].copy_from_slice(&bytes);
+            if at == 0x3c387 && bytes == [7, 0] {
+                image.memory[0x3c389..0x3c38b].copy_from_slice(&[7, 0]);
+            }
+            assert!(image.gps_groups().is_err());
+            assert!(image.physical_gps_record_raw(299).is_err());
+            let before = image.memory().to_vec();
+            image.set_gps_group_name_ascii(26, "A").unwrap();
+            let mut expected = before;
+            expected[0x35581..0x35591].fill(b' ');
+            expected[0x35581] = b'A';
+            assert_setting_state(&image, &source, &expected);
+        }
+        for (g, value) in [(0, 1_u16), (2, 0), (26, 3), (26, 0)] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[0x3c5dd + 2 * g..0x3c5df + 2 * g].copy_from_slice(&value.to_le_bytes());
+            assert!(image.gps_groups().is_err());
+            assert!(image.physical_gps_record_raw(299).unwrap().is_some());
+            image.set_physical_gps_name_ascii(299, "OK").unwrap();
+        }
+        let mut image = Icf::parse(&source).unwrap();
+        image.memory[0x3c5dd..0x3c613].fill(255);
+        assert!(image.gps_groups().is_err());
+        image.memory[0x3c385..0x3c5dd].fill(255);
+        assert!(
+            image
+                .gps_groups()
+                .unwrap()
+                .iter()
+                .all(|g| g.physical_slots().is_empty())
+        );
+        assert_eq!(image.physical_gps_record_raw(299).unwrap(), None);
+        message_rejected(&mut image, (false, 5 + 0x3c385 / 32), |i| {
+            i.set_physical_gps_name_ascii(299, "NO ALLOCATION")
+        });
+        for g in [0, 27, usize::MAX] {
+            message_rejected(&mut image, (false, 5), |i| {
+                i.set_gps_group_name_ascii(g, "A")
+            });
+        }
+        for p in [300, usize::MAX] {
+            assert!(matches!(
+                image.physical_gps_record_raw(p),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            message_rejected(&mut image, (false, 5), |i| {
+                i.set_physical_gps_altitude(p, GpsAltitude::Unknown)
+            });
+        }
+    }
+
+    #[test]
+    fn gps_field_domains_unknown_replacement_and_error_atomicity() {
+        let source = gps_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let p = 299;
+        let at = 0x32c19 + 34 * p;
+        for date in [
+            GpsDate {
+                year: 2000,
+                month: 1,
+                day: 1,
+            },
+            GpsDate {
+                year: 2099,
+                month: 12,
+                day: 31,
+            },
+            GpsDate {
+                year: 2001,
+                month: 2,
+                day: 29,
+            },
+            GpsDate {
+                year: 1999,
+                month: 12,
+                day: 30,
+            },
+            GpsDate {
+                year: 2100,
+                month: 1,
+                day: 2,
+            },
+            GpsDate {
+                year: 2004,
+                month: 0,
+                day: 1,
+            },
+            GpsDate {
+                year: 2004,
+                month: 4,
+                day: 31,
+            },
+        ] {
+            message_rejected(&mut image, (true, 5 + (at + 8) / 32), |i| {
+                i.set_physical_gps_date(p, date)
+            });
+        }
+        for bytes in [[0xfa, 1, 0], [0x29, 2, 1], [0, 1, 0], [1, 0x13, 0]] {
+            image.memory[at + 8..at + 11].copy_from_slice(&bytes);
+            assert!(image.physical_gps_date(p).is_err());
+        }
+        image
+            .set_physical_gps_date(
+                p,
+                GpsDate {
+                    year: 2004,
+                    month: 2,
+                    day: 29,
+                },
+            )
+            .unwrap();
+        for time in [
+            GpsTime {
+                hour: 24,
+                minute: 0,
+                second: 0,
+            },
+            GpsTime {
+                hour: 0,
+                minute: 60,
+                second: 0,
+            },
+            GpsTime {
+                hour: 0,
+                minute: 0,
+                second: 60,
+            },
+        ] {
+            message_rejected(&mut image, (true, 5 + (at + 11) / 32), |i| {
+                i.set_physical_gps_time(p, time)
+            });
+        }
+        for bytes in [[0x24, 0, 0], [0, 0x60, 0], [0, 0, 0x60], [0x1a, 0, 0]] {
+            image.memory[at + 11..at + 14].copy_from_slice(&bytes);
+            assert!(image.physical_gps_time(p).is_err());
+        }
+        image
+            .set_physical_gps_time(
+                p,
+                GpsTime {
+                    hour: 23,
+                    minute: 59,
+                    second: 59,
+                },
+            )
+            .unwrap();
+        for longitude in [false, true] {
+            let offset = at + if longitude { 4 } else { 0 };
+            let max = if longitude { 180 } else { 90 };
+            for value in [
+                GpsCoordinate {
+                    degrees: max + 1,
+                    thousandths_of_minute: 0,
+                    negative: false,
+                },
+                GpsCoordinate {
+                    degrees: max,
+                    thousandths_of_minute: 1,
+                    negative: true,
+                },
+                GpsCoordinate {
+                    degrees: 0,
+                    thousandths_of_minute: 60000,
+                    negative: true,
+                },
+            ] {
+                message_rejected(&mut image, (true, 5 + offset / 32), |i| {
+                    if longitude {
+                        i.set_physical_gps_longitude(p, value)
+                    } else {
+                        i.set_physical_gps_latitude(p, value)
+                    }
+                });
+            }
+            for raw in [[255, 0, 0, b'N'], [0, 0xea, 0x60, b'N'], [0, 0, 0, b'?']] {
+                image.memory[offset..offset + 4].copy_from_slice(&raw);
+                assert!(if longitude {
+                    image.physical_gps_longitude(p).is_err()
+                } else {
+                    image.physical_gps_latitude(p).is_err()
+                });
+            }
+            let value = GpsCoordinate {
+                degrees: 0,
+                thousandths_of_minute: 0,
+                negative: true,
+            };
+            if longitude {
+                image.set_physical_gps_longitude(p, value).unwrap();
+                assert_eq!(image.physical_gps_longitude(p).unwrap(), Some(value));
+            } else {
+                image.set_physical_gps_latitude(p, value).unwrap();
+                assert_eq!(image.physical_gps_latitude(p).unwrap(), Some(value));
+            }
+        }
+        for raw in [i32::MIN, -328081, 328081, i32::MAX] {
+            image.memory[at + 14..at + 18].copy_from_slice(&raw.to_le_bytes());
+            assert_eq!(
+                image.physical_gps_altitude(p).unwrap(),
+                Some(if raw == i32::MAX {
+                    GpsAltitude::Unknown
+                } else {
+                    GpsAltitude::TenthsOfFoot(raw)
+                })
+            );
+        }
+        for value in [-328081, 328081, i32::MAX] {
+            message_rejected(&mut image, (true, 5 + (at + 14) / 32), |i| {
+                i.set_physical_gps_altitude(p, GpsAltitude::TenthsOfFoot(value))
+            });
+        }
+        image
+            .set_physical_gps_altitude(p, GpsAltitude::TenthsOfFoot(-328080))
+            .unwrap();
+        assert_eq!(&image.memory()[at + 14..at + 18], &[0x70, 0xfe, 0xfa, 0xff]);
+        for value in ["0123456789ABCDEFG", "A\0", "A\n", "é"] {
+            message_rejected(&mut image, (true, 5 + (at + 18) / 32), |i| {
+                i.set_physical_gps_name_ascii(p, value)
+            });
+            message_rejected(&mut image, (true, 5 + 0x35581 / 32), |i| {
+                i.set_gps_group_name_ascii(26, value)
+            });
+        }
+        let output = image.to_bytes();
+        let parsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&parsed, &output, image.memory());
+        for unused in [1, 298] {
+            assert_eq!(image.physical_gps_date(unused).unwrap(), None);
+            assert_eq!(image.physical_gps_time(unused).unwrap(), None);
+            assert_eq!(image.physical_gps_latitude(unused).unwrap(), None);
+            assert_eq!(image.physical_gps_longitude(unused).unwrap(), None);
+            assert_eq!(image.physical_gps_altitude(unused).unwrap(), None);
+            assert_eq!(image.physical_gps_name_raw(unused).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn gps_explicit_alarm_wire_domains_topology_and_inactive_bytes() {
+        let source = gps_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        for (value, bytes) in [
+            (GpsAlarm::Off, [0, 0, 0, 0]),
+            (GpsAlarm::Receive, [1, 0, 0, 0]),
+            (GpsAlarm::Group(None), [2, 0, 0, 0]),
+            (GpsAlarm::Group(Some(0)), [2, 1, 0, 0]),
+            (GpsAlarm::Group(Some(26)), [2, 27, 0, 0]),
+            (GpsAlarm::Memory { group: 0, index: 0 }, [3, 0, 0, 0]),
+            (
+                GpsAlarm::Memory {
+                    group: 26,
+                    index: 0,
+                },
+                [3, 26, 0, 0],
+            ),
+        ] {
+            let mut expected = image.memory().to_vec();
+            image.set_gps_alarm(value).unwrap();
+            expected[0x3c622..0x3c626].copy_from_slice(&bytes);
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.gps_alarm().unwrap(), value);
+        }
+        image.set_gps_alarm(GpsAlarm::Group(Some(1))).unwrap();
+        for value in [
+            GpsAlarm::Memory { group: 1, index: 0 },
+            GpsAlarm::Memory {
+                group: 26,
+                index: 1,
+            },
+            GpsAlarm::Memory {
+                group: 27,
+                index: 0,
+            },
+            GpsAlarm::Memory {
+                group: 0,
+                index: usize::MAX,
+            },
+            GpsAlarm::Group(Some(27)),
+            GpsAlarm::Group(Some(usize::MAX)),
+        ] {
+            let at = match value {
+                GpsAlarm::Memory { group, index } if group <= 26 && index < 300 => 0x3c624,
+                _ => 0x3c622,
+            };
+            message_rejected(&mut image, (true, 5 + at / 32), |i| i.set_gps_alarm(value));
+        }
+        for raw in [
+            [255, 0, 0, 0],
+            [2, 28, 0, 0],
+            [3, 27, 0, 0],
+            [3, 1, 0, 0],
+            [3, 26, 1, 0],
+        ] {
+            image.memory[0x3c622..0x3c626].copy_from_slice(&raw);
+            assert!(image.gps_alarm().is_err());
+        }
+        image.memory[0x3c387..0x3c389].copy_from_slice(&[43, 1]); // Invalid order, unrelated to non-Memory alarm.
+        for raw in [[0, 255, 255, 255], [1, 255, 255, 255], [2, 27, 255, 255]] {
+            image.memory[0x3c622..0x3c626].copy_from_slice(&raw);
+            let before = image.to_bytes();
+            assert!(image.gps_alarm().is_ok());
+            assert_eq!(image.to_bytes(), before);
+        }
+        let mut expected = image.memory().to_vec();
+        image.set_gps_alarm(GpsAlarm::Group(Some(26))).unwrap();
+        expected[0x3c622..0x3c626].copy_from_slice(&[2, 27, 0, 0]);
+        assert_setting_state(&image, &source, &expected);
+        message_rejected(&mut image, (false, 5 + 0x3c387 / 32), |i| {
+            i.set_gps_alarm(GpsAlarm::Memory { group: 0, index: 0 })
+        });
     }
 
     fn message_fixture() -> Vec<u8> {
