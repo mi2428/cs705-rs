@@ -1,4 +1,5 @@
 //! Strict parsing and serialization of canonical IC-705 MapRev 6 ICF images.
+//! Explicit strict MapRev 5-to-6 byte export is available separately from parsing.
 //!
 //! Unknown layouts are rejected, not repaired. Uninterpreted data is preserved;
 //! a successful parse is not authorization to write the image to a radio.
@@ -7,8 +8,16 @@ use std::fmt;
 use std::io::Write;
 
 mod common;
+mod groups;
 
-pub use common::{AutoPowerOff, BandEdgeBeep, PowerSave};
+pub use common::{
+    AutoPowerOff, BandEdgeBeep, DialAutoTs, KeyboardInput, KeyboardLayout, LockFunction,
+    MemoryChannelSelectionScope, MemoryGroupDisplay, MemoryPadChannels, MicUpDownSpeed,
+    PlaybackSkipTime, PowerSave, PreRecordingTime, ReceivedCallsignSpeech, RecordingCondition,
+    ScreenCaptureFileType, ScrollSpeed, SpeechAlphabet, SpeechLanguage, SpeechLockKey, SpeechSpeed,
+    TxRecordingAudio,
+};
+pub use groups::MemoryGroup;
 
 // CS-705 1.30 CS705.exe SHA-256:
 // e9439e1413e1258be77e6ef2188b72276dd714642e3858f4690e5d45653aeca3.
@@ -36,6 +45,15 @@ const MEMORY_NAME_BYTES: usize = 16;
 // A fixed used/split-OFF slot 0 TEST_A -> TEST_B edit matched original-GUI
 // output, Rust output and original-application resave, SHA-256:
 // f27bb11051cf013599ce853495f23cb24fb93ccf25eabf90c546b5703c23580e.
+// Raw group key 0x101 -> RVA 0x686B7 reads/writes descriptor name +3.
+// RVA 0xB5170 traverses root/next; RVA 0xB5334 copies raw d names into
+// working ordinal g order. RVA 0xB540C rebuilds links on original save.
+// This raw API does neither transformation and requires a full 100-entry chain.
+const RAW_MEMORY_GROUP_COUNT: usize = 100;
+const RAW_MEMORY_GROUPS: usize = 0x355c0;
+const RAW_MEMORY_GROUP_BYTES: usize = 19;
+const RAW_MEMORY_GROUP_ROOT: usize = 0x36628;
+const RAW_MEMORY_GROUP_NAME_BYTES: usize = 16;
 
 /// An invalid or unsupported ICF input or setting. Line numbers are one-based.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,11 +105,38 @@ impl std::error::Error for Error {}
 /// fixed reference image matched original-GUI output and resave byte-for-byte;
 /// other values/images are supported by static evidence and synthetic checks,
 /// not those original-application comparisons.
+/// Split and speech settings are statically traced; comparisons of their edits
+/// with original-software saves remain pending.
 pub struct Icf<'a> {
     source: &'a [u8],
     memory: Vec<u8>,
     comment: &'a [u8],
     extra_data: u32,
+}
+
+/// Convert strict MapRev 5 ICF bytes to canonical MapRev 6 bytes.
+///
+/// This explicit, non-lossless export updates five payload positions and normalizes
+/// text using static CS-705 1.30 evidence (RVA 0xDF9F0..0xDFA36). It has not been
+/// compared with the original GUI. It is not normal document open/save, performs
+/// no file or device I/O, and does not authorize radio access. Input is unchanged.
+///
+/// # Errors
+///
+/// Rejects invalid structure, checksum, EtcData or signature, and any metadata
+/// or internal revision other than exactly 5, before changing any payload byte.
+pub fn convert_map_rev5_to6(source: &[u8]) -> Result<Vec<u8>, Error> {
+    let (mut memory, comment, extra_data) = Icf::parse_image(source, 5)?;
+    memory[INTERNAL_MAP_REV] = 6;
+    memory[0x39724] = 0;
+    memory[0x3a318..0x3a31b].fill(0);
+    Ok(Icf {
+        source,
+        memory,
+        comment,
+        extra_data,
+    }
+    .to_bytes())
 }
 
 impl<'a> Icf<'a> {
@@ -120,6 +165,16 @@ impl<'a> Icf<'a> {
     /// Returns an error for malformed, incomplete, inconsistent, unsupported or
     /// checksum-invalid input. Unknown values are never replaced by defaults.
     pub fn parse(source: &'a [u8]) -> Result<Self, Error> {
+        let (memory, comment, extra_data) = Self::parse_image(source, 6)?;
+        Ok(Self {
+            source,
+            memory,
+            comment,
+            extra_data,
+        })
+    }
+
+    fn parse_image(source: &'a [u8], revision: u8) -> Result<(Vec<u8>, &'a [u8], u32), Error> {
         let body = source.strip_suffix(b"\n").unwrap_or(source);
         let mut lines = body
             .split(|byte| *byte == b'\n')
@@ -147,10 +202,14 @@ impl<'a> Icf<'a> {
                 reason: "unexpected metadata field or order",
             })?;
         }
-        if metadata[1] != b"6" {
+        if metadata[1] != [b'0' + revision] {
             return Err(Error::Unsupported {
                 line: 3,
-                reason: "MapRev other than 6",
+                reason: if revision == 5 {
+                    "MapRev other than 5"
+                } else {
+                    "MapRev other than 6"
+                },
             });
         }
         if metadata[0].iter().any(|byte| matches!(byte, 0 | b'\r')) {
@@ -204,20 +263,19 @@ impl<'a> Icf<'a> {
                     });
                 }
                 // The original reader allows internal revisions 1..6, not
-                // necessarily equal to metadata MapRev. Only internal 6 has an
-                // established editing layout here; do not convert or repair it.
-                if memory[INTERNAL_MAP_REV] != 6 {
+                // necessarily equal to metadata MapRev. Each entry point here
+                // requires its exact internal revision; do not repair it.
+                if memory[INTERNAL_MAP_REV] != revision {
                     return Err(Error::Unsupported {
                         line: 5 + INTERNAL_MAP_REV / RECORD_BYTES,
-                        reason: "internal MapRev other than 6",
+                        reason: if revision == 5 {
+                            "internal MapRev other than 5"
+                        } else {
+                            "internal MapRev other than 6"
+                        },
                     });
                 }
-                return Ok(Self {
-                    source,
-                    memory,
-                    comment: metadata[0],
-                    extra_data,
-                });
+                return Ok((memory, metadata[0], extra_data));
             }
             let header = text.get(..10).and_then(hex::<5>).ok_or(Error::Invalid {
                 line: number,
@@ -391,6 +449,125 @@ impl<'a> Icf<'a> {
         self.memory[offset..offset + MEMORY_NAME_BYTES].copy_from_slice(&bytes);
         Ok(())
     }
+
+    /// Return an existing raw memory group descriptor's exact 16-byte name.
+    ///
+    /// `descriptor` is the stored zero-based index `0..100` in the unexpanded
+    /// ICF image, not a GUI group ordinal or CS-705 working-buffer index. Names
+    /// are borrowed without decoding, trimming or replacing NUL/non-ASCII bytes.
+    /// Nonidentity stored orders are preserved, not reordered.
+    ///
+    /// This deliberately narrow subset requires the root/next chain to visit
+    /// all 100 descriptors exactly once and then end with FF. Only the selected
+    /// head is checked: it must be FFFF or a physical slot below 500. A head of
+    /// FFFF with 16 spaces returns `None`; a named empty group still exists.
+    /// Slot-next links, row maps, empty flags, the free list and other heads are
+    /// not validated. This is not the original application's full acceptance
+    /// policy or proof of complete group consistency or GUI compatibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unsupported`] for an out-of-range descriptor, a chain
+    /// outside this full-100 subset, or an unsupported selected head. A parameter
+    /// error is reported at line 5; stored-link/head errors identify their record.
+    pub fn raw_memory_group_name(&self, descriptor: usize) -> Result<Option<&[u8]>, Error> {
+        if descriptor >= RAW_MEMORY_GROUP_COUNT {
+            return Err(Error::Unsupported {
+                line: 5,
+                reason: "raw memory group descriptor outside 0..100",
+            });
+        }
+        self.raw_memory_group_order()?;
+        let base = RAW_MEMORY_GROUPS + RAW_MEMORY_GROUP_BYTES * descriptor;
+        let head = u16::from_le_bytes([self.memory[base + 1], self.memory[base + 2]]);
+        if head != u16::MAX && usize::from(head) >= MEMORY_CHANNEL_COUNT {
+            return Err(Error::Unsupported {
+                line: 5 + (base + 1) / RECORD_BYTES,
+                reason: "raw memory group head outside physical slots or FFFF",
+            });
+        }
+        let name = &self.memory[base + 3..base + 3 + RAW_MEMORY_GROUP_NAME_BYTES];
+        Ok(
+            if head == u16::MAX && name.iter().all(|byte| *byte == b' ') {
+                None
+            } else {
+                Some(name)
+            },
+        )
+    }
+
+    fn raw_memory_group_order(&self) -> Result<[usize; 100], Error> {
+        let mut order = [0; RAW_MEMORY_GROUP_COUNT];
+        let mut seen = [false; RAW_MEMORY_GROUP_COUNT];
+        let mut link = RAW_MEMORY_GROUP_ROOT;
+        for descriptor in &mut order {
+            let next = usize::from(self.memory[link]);
+            if next >= RAW_MEMORY_GROUP_COUNT || seen[next] {
+                return Err(Error::Unsupported {
+                    line: 5 + link / RECORD_BYTES,
+                    reason: "raw memory group order must visit all 100 descriptors once",
+                });
+            }
+            seen[next] = true;
+            *descriptor = next;
+            link = RAW_MEMORY_GROUPS + RAW_MEMORY_GROUP_BYTES * next;
+        }
+        if self.memory[link] != 0xff {
+            return Err(Error::Unsupported {
+                line: 5 + link / RECORD_BYTES,
+                reason: "raw memory group order must end with FF after 100 descriptors",
+            });
+        }
+        Ok(order)
+    }
+
+    /// Replace only an existing raw descriptor's name with `[A-Z0-9_-]{1,16}`.
+    ///
+    /// Short names are padded with spaces. This is an explicit ASCII subset,
+    /// not the native name codec: no conversion, truncation or empty input is
+    /// accepted. The checks in [`Self::raw_memory_group_name`] run first; no
+    /// group is created, deleted, reordered or resolved to GUI coordinates.
+    ///
+    /// All validation precedes one 16-byte update. Errors leave all state
+    /// unchanged; other memory, links, heads, raw metadata and the borrowed
+    /// original input remain untouched. [`Self::to_bytes`] recomputes CD.
+    /// CS-705 copies raw names to working ordinal order on load and rebuilds
+    /// links on save; this method does neither. Original-GUI group-name edits
+    /// and save/reload behavior have not been dynamically compared.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unsupported`] for a failed raw-descriptor check, an empty
+    /// descriptor, or a new name outside the nonempty 1-to-16-byte ASCII subset.
+    pub fn set_raw_memory_group_name_ascii(
+        &mut self,
+        descriptor: usize,
+        name: &str,
+    ) -> Result<(), Error> {
+        let exists = self.raw_memory_group_name(descriptor)?.is_some();
+        let offset = RAW_MEMORY_GROUPS + RAW_MEMORY_GROUP_BYTES * descriptor + 3;
+        if !exists {
+            return Err(Error::Unsupported {
+                line: 5 + offset / RECORD_BYTES,
+                reason: "cannot rename an empty raw memory group descriptor",
+            });
+        }
+        if name.is_empty()
+            || name.len() > RAW_MEMORY_GROUP_NAME_BYTES
+            || !name.bytes().all(|byte| {
+                byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+            })
+        {
+            return Err(Error::Unsupported {
+                line: 5 + offset / RECORD_BYTES,
+                reason: "raw memory group name requires 1..=16 bytes in A-Z, 0-9, _ or -",
+            });
+        }
+        let mut bytes = [b' '; RAW_MEMORY_GROUP_NAME_BYTES];
+        bytes[..name.len()].copy_from_slice(name.as_bytes());
+        self.memory[offset..offset + RAW_MEMORY_GROUP_NAME_BYTES].copy_from_slice(&bytes);
+        Ok(())
+    }
 }
 
 fn hex<const N: usize>(text: &[u8]) -> Option<[u8; N]> {
@@ -416,6 +593,163 @@ fn digit(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rev5_memory() -> Vec<u8> {
+        let mut memory: Vec<u8> = (0..IMAGE_BYTES).map(|i| (73 * i + 19) as u8).collect();
+        memory[INTERNAL_MAP_REV] = 5;
+        memory[IMAGE_BYTES - 16..].copy_from_slice(IMAGE_SIGNATURE);
+        memory
+    }
+
+    fn rev5_fixture(memory: &[u8], revision: &str, comment: &[u8]) -> Vec<u8> {
+        let mut text = b"40750001\r\n#Comment=".to_vec();
+        text.extend_from_slice(comment);
+        write!(text, "\r\n#MapRev={revision}\r\n#EtcData=12345639\r\n").unwrap();
+        let mut digest = md5::Context::new();
+        digest.consume(SEED);
+        for (index, payload) in memory.chunks(32).enumerate() {
+            let address = (index * 32) as u32;
+            digest.consume(address.to_be_bytes());
+            digest.consume([32]);
+            digest.consume(payload);
+            write!(text, "{address:08X}20").unwrap();
+            for byte in payload {
+                write!(text, "{byte:02X}").unwrap();
+            }
+            text.extend_from_slice(b"\r\n");
+        }
+        write!(text, "#CD={:X}\r\n", digest.finalize()).unwrap();
+        text
+    }
+
+    #[test]
+    fn converts_rev5_with_independent_expected_delta_and_checksums() {
+        let memory = rev5_memory();
+        let source = rev5_fixture(&memory, "5", b"R1 synthetic");
+        let before = source.clone();
+        // Independent Python hashlib oracle, not product serializer output.
+        assert!(source.ends_with(b"#CD=EF17E362C508948229A775AA2629D996\r\n"));
+        assert_eq!(source.len(), 589_709);
+        let output = convert_map_rev5_to6(&source).unwrap();
+        assert_eq!(source, before);
+        assert_ne!(source.as_ptr(), output.as_ptr());
+        assert_eq!(output.len(), 589_709);
+        assert!(output.ends_with(b"#CD=8BFD5FD581A396CFAE06546AC1541CA5\r\n"));
+        let image = Icf::parse(&output).unwrap();
+        let differences: Vec<_> = memory
+            .iter()
+            .zip(image.memory())
+            .enumerate()
+            .filter_map(|(i, (old, new))| (old != new).then_some(i))
+            .collect();
+        assert_eq!(differences, [0x355a1, 0x39724, 0x3a318, 0x3a319, 0x3a31a]);
+        for (offset, value) in [
+            (0x355a1, 6),
+            (0x39724, 0),
+            (0x3a318, 0),
+            (0x3a319, 0),
+            (0x3a31a, 0),
+            (0x399bb, 0x66),
+            (0x399c0, 0xd3),
+        ] {
+            assert_eq!(image.memory()[offset], value);
+        }
+        assert_eq!(image.comment_bytes(), b"R1 synthetic");
+        assert_eq!(image.extra_data(), 0x12345639);
+        assert_eq!(image.to_bytes(), output);
+        assert_eq!(
+            convert_map_rev5_to6(&output),
+            Err(Error::Unsupported {
+                line: 3,
+                reason: "MapRev other than 5",
+            })
+        );
+        let lf: Vec<_> = source.iter().copied().filter(|b| *b != b'\r').collect();
+        let mut lower = source.clone();
+        // Lowercase only hex digits, not field names or the raw comment.
+        let first = lower.windows(10).position(|s| s == b"0000000020").unwrap();
+        lower[first..].make_ascii_lowercase();
+        let cd = lower.len() - 38;
+        lower[cd..cd + 4].copy_from_slice(b"#CD=");
+        for variant in [&lf[..], &source[..source.len() - 2], &lower[..]] {
+            assert_eq!(convert_map_rev5_to6(variant).unwrap(), output);
+        }
+        let raw = rev5_fixture(&memory, "5", &[0x82, 0xa0]);
+        let converted = convert_map_rev5_to6(&raw).unwrap();
+        assert_eq!(
+            Icf::parse(&converted).unwrap().comment_bytes(),
+            [0x82, 0xa0]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_rev5_before_conversion_without_mutating_input() {
+        let memory = rev5_memory();
+        let source = rev5_fixture(&memory, "5", b"R1 synthetic");
+        let reject = |bytes: Vec<u8>, expected: Error| {
+            let before = bytes.clone();
+            assert_eq!(convert_map_rev5_to6(&bytes), Err(expected));
+            assert_eq!(bytes, before);
+        };
+        for revision in ["0", "1", "2", "3", "4", "6", "7", "255", "05"] {
+            reject(
+                rev5_fixture(&memory, revision, b"R1 synthetic"),
+                Error::Unsupported {
+                    line: 3,
+                    reason: "MapRev other than 5",
+                },
+            );
+        }
+        // Recompute CD for invalid internal versions/signatures so checksum
+        // failures cannot hide missing profile validation.
+        for revision in [0, 1, 2, 3, 4, 6, 7, 255] {
+            let mut changed = memory.clone();
+            changed[INTERNAL_MAP_REV] = revision;
+            reject(
+                rev5_fixture(&changed, "5", b"R1 synthetic"),
+                Error::Unsupported {
+                    line: 6834,
+                    reason: "internal MapRev other than 5",
+                },
+            );
+        }
+        let mut changed = memory.clone();
+        changed[IMAGE_BYTES - 1] = b'4';
+        reject(
+            rev5_fixture(&changed, "5", b"R1 synthetic"),
+            Error::Invalid {
+                line: 7762,
+                reason: "image signature",
+            },
+        );
+        let mut changed = source.clone();
+        let cd = changed.len() - 34;
+        changed[cd] = b'F';
+        reject(changed, Error::ChecksumMismatch { line: 7763 });
+        let mut changed = source.clone();
+        let extra = changed.windows(8).position(|s| s == b"12345639").unwrap();
+        changed[extra + 7] = b'8';
+        reject(
+            changed,
+            Error::Invalid {
+                line: 4,
+                reason: "EtcData integrity bits",
+            },
+        );
+        let mut changed = source.clone();
+        let first = changed
+            .windows(10)
+            .position(|s| s == b"0000000020")
+            .unwrap();
+        changed[first + 10] = b'0';
+        reject(changed, Error::ChecksumMismatch { line: 7763 });
+        for end in [0, 8, first, first + 74, source.len() - 38] {
+            let bytes = &source[..end];
+            let before = bytes.to_vec();
+            assert!(convert_map_rev5_to6(bytes).is_err());
+            assert_eq!(bytes, before);
+        }
+    }
 
     fn synthetic_memory() -> Vec<u8> {
         let mut memory: Vec<u8> = (0..IMAGE_BYTES).map(|byte| byte as u8).collect();
@@ -445,13 +779,23 @@ mod tests {
     }
 
     fn fixture_with_byte(offset: usize, value: u8, checksum: &str) -> Vec<u8> {
+        fixture_with_bytes(&[(offset, value)], checksum)
+    }
+
+    fn fixture_with_bytes(changes: &[(usize, u8)], checksum: &str) -> Vec<u8> {
+        let mut memory = synthetic_memory();
+        for &(offset, value) in changes {
+            memory[offset] = value;
+        }
+        fixture_with_memory(&memory, checksum)
+    }
+
+    fn fixture_with_memory(memory: &[u8], checksum: &str) -> Vec<u8> {
         let mut text = b"40750001\r\n#Comment=".to_vec();
         text.extend_from_slice(&[0x82, 0xa0]);
         // 12345639 preserves the old fixture's non-check bits and encodes
         // popcount(0x12345678 & ~0x49) % 8 = 3 in bits 0/3/6.
         text.extend_from_slice(b"\r\n#MapRev=6\r\n#EtcData=12345639\r\n");
-        let mut memory = synthetic_memory();
-        memory[offset] = value;
         for address in (0..IMAGE_BYTES).step_by(RECORD_BYTES) {
             write!(text, "{address:08X}20").unwrap();
             for value in &memory[address..address + RECORD_BYTES] {
@@ -478,6 +822,246 @@ mod tests {
         let cd = source.len() - 34;
         source[cd..cd + 32].copy_from_slice(b"D244B25769D85295AD06D4A61CA780D4");
         source
+    }
+
+    fn raw_group_fixture(
+        reverse: bool,
+        changes: &[(usize, &[u8])],
+        checksum: &str,
+    ) -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        memory[0x36628] = if reverse { 99 } else { 0 };
+        for descriptor in 0..100 {
+            let base = 0x355c0 + 19 * descriptor;
+            memory[base..base + 19].fill(b' ');
+            memory[base] = if reverse {
+                if descriptor == 0 {
+                    255
+                } else {
+                    (descriptor - 1) as u8
+                }
+            } else if descriptor == 99 {
+                255
+            } else {
+                (descriptor + 1) as u8
+            };
+            memory[base + 1..base + 3].copy_from_slice(&[255, 255]);
+        }
+        memory[0x355c1..0x355c3].copy_from_slice(&[0xf3, 1]);
+        memory[0x355c3..0x355d3].copy_from_slice(b"\x82\0\xffRAW_GROUP    ");
+        memory[0x355e7..0x355e9].copy_from_slice(&[0, 0]);
+        memory[0x355fc] = 0;
+        memory[0x35d1c..0x35d2c].copy_from_slice(b"LAST_GROUP      ");
+        for &(offset, bytes) in changes {
+            memory[offset..offset + bytes.len()].copy_from_slice(bytes);
+        }
+        // Reuse only the synthetic text envelope, never Icf::to_bytes(). Python
+        // hashlib independently supplies CD and the full-file hashes below.
+        let mut source = fixture(None);
+        let first = source.windows(10).position(|s| s == b"0000000020").unwrap();
+        for (address, &byte) in memory.iter().enumerate() {
+            let at = first + (address / 32) * 76 + 10 + (address % 32) * 2;
+            source[at] = b"0123456789ABCDEF"[usize::from(byte >> 4)];
+            source[at + 1] = b"0123456789ABCDEF"[usize::from(byte & 15)];
+        }
+        let cd = source.len() - 34;
+        source[cd..cd + 32].copy_from_slice(checksum.as_bytes());
+        (source, memory)
+    }
+
+    fn logical_group_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        memory[0x36628] = 99;
+        for d in 0..100 {
+            let base = 0x355c0 + 19 * d;
+            memory[base..base + 19].fill(b' ');
+            memory[base] = if d == 99 {
+                0
+            } else if d == 98 {
+                255
+            } else {
+                (d + 1) as u8
+            };
+            memory[base + 1..base + 3].fill(255);
+        }
+        memory[0x35d2c..0x35d2c + 1000].fill(255);
+        memory[0x36114..0x36114 + 1300].fill(0);
+        for g in 0..100 {
+            memory[0x36114 + 13 * g + 12] = 0xf0;
+        }
+        memory[0x36114] = 5;
+        memory[0x3662d..0x3662d + 500].fill(255);
+        for p in [499, 1] {
+            memory[0x3662d + p] = 0xfe;
+        }
+        let base = 0x355c0 + 19 * 99;
+        memory[base + 1..base + 3].copy_from_slice(&499_u16.to_le_bytes());
+        memory[base + 3..base + 19].copy_from_slice(b"\x82\0\xffLOGICAL      ");
+        memory[0x35d2c + 2 * 499..0x35d2c + 2 * 499 + 2].copy_from_slice(&1_u16.to_le_bytes());
+        memory[0x355c0 + 19 + 3..0x355c0 + 19 + 19].copy_from_slice(b"NAMED_EMPTY     ");
+        // Python stdlib independently constructed this pattern and hashed
+        // seed || BE32(address) || 0x20 || payload32 for every record.
+        raw_group_fixture(false, &[(0, &memory)], "8ED97592F097E67838197F30627A0694")
+    }
+
+    fn check_logical_groups_unchanged(image: &Icf<'_>, check: impl FnOnce(&Icf<'_>)) {
+        let memory = image.memory().to_vec();
+        let source = image.original_bytes().to_vec();
+        let serialized = image.to_bytes();
+        check(image);
+        assert_setting_state(image, image.original_bytes(), &memory);
+        assert_eq!(image.original_bytes(), source);
+        assert_eq!(image.to_bytes(), serialized);
+    }
+
+    #[test]
+    fn reads_logical_groups_in_nonidentity_order_without_mutating_bytes() {
+        let (source, expected) = logical_group_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        assert_eq!(image.memory(), expected);
+        check_logical_groups_unchanged(&image, |image| {
+            let groups = image.memory_groups().unwrap();
+            assert_eq!(groups.len(), 3);
+            assert_eq!(
+                groups
+                    .iter()
+                    .map(|g| g.raw_descriptor())
+                    .collect::<Vec<_>>(),
+                [99, 0, 1]
+            );
+            assert_eq!(groups[0].name_bytes(), b"\x82\0\xffLOGICAL      ");
+            assert_eq!(
+                groups[0].name_bytes().as_ptr(),
+                image.memory()[0x35d1c..].as_ptr()
+            );
+            let mut slots = [None; 100];
+            slots[1] = Some(499);
+            slots[3] = Some(1);
+            assert_eq!(groups[0].slots(), &slots);
+            assert_eq!(groups[1].slots(), &[None; 100]);
+            assert_eq!(groups[1].name_bytes(), b"                ");
+            assert_eq!(groups[2].slots(), &[None; 100]);
+            assert_eq!(groups[2].name_bytes(), b"NAMED_EMPTY     ");
+        });
+        let base = 0x355c0 + 19 * 98;
+        image.memory[base + 1..base + 3].copy_from_slice(&2_u16.to_le_bytes());
+        image.memory[0x3662d + 2] = 0xfe;
+        check_logical_groups_unchanged(&image, |image| {
+            let groups = image.memory_groups().unwrap();
+            assert_eq!(groups.len(), 100);
+            let order: Vec<_> = std::iter::once(99).chain(0..99).collect();
+            assert_eq!(
+                groups
+                    .iter()
+                    .map(|g| g.raw_descriptor())
+                    .collect::<Vec<_>>(),
+                order
+            );
+            let mut slots = [None; 100];
+            slots[0] = Some(2);
+            assert_eq!(groups[99].slots(), &slots);
+        });
+        for d in 0..100 {
+            let base = 0x355c0 + 19 * d;
+            image.memory[base + 1..base + 3].fill(255);
+            image.memory[base + 3..base + 19].fill(b' ');
+        }
+        check_logical_groups_unchanged(&image, |image| {
+            assert!(image.memory_groups().unwrap().is_empty())
+        });
+    }
+
+    #[test]
+    fn rejects_invalid_logical_links_and_flags_without_mutation() {
+        let (source, _) = logical_group_fixture();
+        let base = 0x355c0 + 19 * 99;
+        for (offset, bytes, reason) in [
+            (
+                0x36628,
+                b"\xff".as_slice(),
+                "raw memory group order must visit all 100 descriptors once",
+            ),
+            (
+                0x36628,
+                b"\x64",
+                "raw memory group order must visit all 100 descriptors once",
+            ),
+            (
+                0x355c0,
+                b"\xff",
+                "raw memory group order must visit all 100 descriptors once",
+            ),
+            (
+                0x355c0,
+                b"\0",
+                "raw memory group order must visit all 100 descriptors once",
+            ),
+            (
+                0x355c0 + 19 * 98,
+                b"\0",
+                "raw memory group order must end with FF after 100 descriptors",
+            ),
+            (
+                base + 1,
+                b"\xf4\x01",
+                "raw memory group head outside physical slots or FFFF",
+            ),
+            (
+                0x35d2c + 2 * 499,
+                b"\xf4\x01",
+                "logical memory next outside physical slots or FFFF",
+            ),
+            (
+                0x35d2c + 2 * 499,
+                b"\xf3\x01",
+                "logical memory groups repeat a physical slot",
+            ),
+            (
+                0x355c0 + 1,
+                b"\xf3\x01",
+                "logical memory groups repeat a physical slot",
+            ),
+            (
+                0x3662d + 499,
+                b"\xff",
+                "logical memory slot has empty physical flag",
+            ),
+            (
+                0x36114,
+                b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff",
+                "logical memory link remains after 100 rows",
+            ),
+        ] {
+            let mut image = Icf::parse(&source).unwrap();
+            image.memory[offset..offset + bytes.len()].copy_from_slice(bytes);
+            check_logical_groups_unchanged(&image, |image| {
+                let error = image.memory_groups().err().unwrap();
+                assert_eq!(
+                    error,
+                    Error::Unsupported {
+                        line: 5 + if offset == 0x36114 { base + 1 } else { offset } / 32,
+                        reason
+                    }
+                );
+            });
+        }
+        let mut image = Icf::parse(&source).unwrap();
+        image.memory[base + 1..base + 3].fill(0);
+        image.memory[0x36114..0x36114 + 13].fill(0);
+        for p in 0..101 {
+            image.memory[0x3662d + p] = 0xfe;
+            image.memory[0x35d2c + 2 * p..0x35d2c + 2 * p + 2]
+                .copy_from_slice(&((p + 1) as u16).to_le_bytes());
+        }
+        check_logical_groups_unchanged(&image, |image| {
+            assert_eq!(
+                image.memory_groups().err(),
+                Some(Error::Unsupported {
+                    line: 5 + (0x35d2c + 2 * 99) / 32,
+                    reason: "logical memory link remains after 100 rows",
+                })
+            );
+        });
     }
 
     #[test]
@@ -619,6 +1203,676 @@ mod tests {
         assert_eq!(image.original_bytes().as_ptr(), source.as_ptr());
         assert_eq!(image.comment_bytes(), [0x82, 0xa0]);
         assert_eq!(image.extra_data(), 0x12345639);
+    }
+
+    // Independent literal offsets/last codes; no production constants or registry.
+    const EXPANDED_SETTINGS: [(usize, u8); 29] = [
+        (0x39968, 1),
+        (0x39969, 1),
+        (0x3969e, 1),
+        (0x396b0, 1),
+        (0x396b1, 1),
+        (0x396a1, 1),
+        (0x396a2, 1),
+        (0x396a3, 1),
+        (0x396b2, 1),
+        (0x396b3, 1),
+        (0x39a02, 1),
+        (0x39a03, 1),
+        (0x39a04, 1),
+        (0x3932c, 1),
+        (0x39966, 1),
+        (0x39967, 1),
+        (0x3996a, 3),
+        (0x3996c, 3),
+        (0x396ad, 1),
+        (0x3931f, 1),
+        (0x39320, 1),
+        (0x39321, 1),
+        (0x39322, 2),
+        (0x39323, 1),
+        (0x37788, 1),
+        (0x37789, 1),
+        (0x3932e, 1),
+        (0x3932f, 2),
+        (0x3932d, 1),
+    ];
+
+    fn expanded_settings_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        for (i, byte) in memory[..IMAGE_BYTES - 16].iter_mut().enumerate() {
+            *byte = (73 * i + 19) as u8;
+        }
+        memory[INTERNAL_MAP_REV] = 6;
+        memory[0x3996b] = 0x5a;
+        for &(offset, _) in &EXPANDED_SETTINGS {
+            memory[offset] = 0;
+        }
+        // Independent Python stdlib: pattern (73*i+19)%256, exact signature,
+        // internal 6, literal targets zero, hole 3996B=5A. Hash seed followed
+        // by struct.pack('>IB', address, 32) + each payload32, then render text.
+        let source = fixture_with_memory(&memory, "C0FEDD2B888F620EF9F199143589080D");
+        (source, memory)
+    }
+
+    fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
+        image: &mut Icf<'_>,
+        offset: usize,
+        values: &[T],
+        read: impl Fn(&Icf<'_>) -> Result<T, Error>,
+        write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
+    ) {
+        let source = image.source;
+        let mut expected = image.memory().to_vec();
+        for (raw, &value) in values.iter().enumerate() {
+            write(image, value).unwrap();
+            expected[offset] = raw as u8;
+            assert_eq!(read(image), Ok(value));
+            assert_setting_state(image, source, &expected);
+            write(image, values[0]).unwrap();
+            expected[offset] = 0;
+            assert_setting_state(image, source, &expected);
+        }
+        for unknown in [values.len() as u8, 255] {
+            image.memory[offset] = unknown;
+            expected[offset] = unknown;
+            let before = image.to_bytes();
+            let error = read(image).unwrap_err();
+            assert!(matches!(error, Error::Unsupported { line, .. } if line == 5 + offset / 32));
+            for &value in values {
+                assert_eq!(write(image, value), Err(error.clone()));
+                assert_setting_state(image, source, &expected);
+            }
+            assert_eq!(image.to_bytes(), before);
+        }
+        image.memory[offset] = 0;
+        write(image, *values.last().unwrap()).unwrap();
+        expected[offset] = (values.len() - 1) as u8;
+        assert_setting_state(image, source, &expected);
+    }
+
+    #[test]
+    fn edits_all_29_stored_settings_and_rejects_unknown_current_codes() {
+        let (source, mut expected) = expanded_settings_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "4A6D731756C1F37A20128C30C0AE91A4"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        macro_rules! check {
+            ($offset:literal, $get:ident, $set:ident, [$($value:expr),+]) => {
+                check_expanded_setting(&mut image, $offset, &[$($value),+],
+                    |image| image.$get(), |image, value| image.$set(value));
+            };
+        }
+        check!(
+            0x39968,
+            recording_file_split,
+            set_recording_file_split,
+            [false, true]
+        );
+        check!(0x39969, ptt_auto_record, set_ptt_auto_record, [false, true]);
+        check!(
+            0x3969e,
+            lcd_backlight_auto_adjust,
+            set_lcd_backlight_auto_adjust,
+            [false, true]
+        );
+        check!(
+            0x396b0,
+            power_key_screen_off,
+            set_power_key_screen_off,
+            [false, true]
+        );
+        check!(0x396b1, receive_led, set_receive_led, [false, true]);
+        check!(0x396a1, meter_peak_hold, set_meter_peak_hold, [false, true]);
+        check!(
+            0x396a2,
+            memory_name_display,
+            set_memory_name_display,
+            [false, true]
+        );
+        check!(
+            0x396a3,
+            memory_group_name_popup,
+            set_memory_group_name_popup,
+            [false, true]
+        );
+        check!(0x396b2, opening_message, set_opening_message, [false, true]);
+        check!(0x396b3, power_on_check, set_power_on_check, [false, true]);
+        check!(
+            0x39a02,
+            battery_pack_selection_display,
+            set_battery_pack_selection_display,
+            [false, true]
+        );
+        check!(
+            0x39a03,
+            charging_when_power_on,
+            set_charging_when_power_on,
+            [false, true]
+        );
+        check!(0x39a04, usb_power_input, set_usb_power_input, [false, true]);
+        check!(
+            0x3932c,
+            screen_capture_power_key,
+            set_screen_capture_power_key,
+            [false, true]
+        );
+        check!(
+            0x39966,
+            transmit_recording_audio,
+            set_transmit_recording_audio,
+            [TxRecordingAudio::Direct, TxRecordingAudio::Monitor]
+        );
+        check!(
+            0x39967,
+            receive_recording_condition,
+            set_receive_recording_condition,
+            [
+                RecordingCondition::Always,
+                RecordingCondition::SquelchLinked
+            ]
+        );
+        check!(
+            0x3996a,
+            pre_recording_time,
+            set_pre_recording_time,
+            [
+                PreRecordingTime::Off,
+                PreRecordingTime::Seconds5,
+                PreRecordingTime::Seconds10,
+                PreRecordingTime::Seconds15
+            ]
+        );
+        check!(
+            0x3996c,
+            playback_skip_time,
+            set_playback_skip_time,
+            [
+                PlaybackSkipTime::Seconds3,
+                PlaybackSkipTime::Seconds5,
+                PlaybackSkipTime::Seconds10,
+                PlaybackSkipTime::Seconds30
+            ]
+        );
+        check!(
+            0x396ad,
+            scroll_speed,
+            set_scroll_speed,
+            [ScrollSpeed::Slow, ScrollSpeed::Fast]
+        );
+        check!(
+            0x3931f,
+            speech_lock_key,
+            set_speech_lock_key,
+            [SpeechLockKey::SpeechLock, SpeechLockKey::LockSpeech]
+        );
+        check!(
+            0x39320,
+            lock_function,
+            set_lock_function,
+            [LockFunction::MainDial, LockFunction::Panel]
+        );
+        check!(
+            0x39321,
+            memory_pad_channels,
+            set_memory_pad_channels,
+            [MemoryPadChannels::Five, MemoryPadChannels::Ten]
+        );
+        check!(
+            0x39322,
+            dial_auto_ts,
+            set_dial_auto_ts,
+            [DialAutoTs::Off, DialAutoTs::Low, DialAutoTs::High]
+        );
+        check!(
+            0x39323,
+            mic_up_down_speed,
+            set_mic_up_down_speed,
+            [MicUpDownSpeed::Slow, MicUpDownSpeed::Fast]
+        );
+        check!(
+            0x37788,
+            memory_channel_selection_scope,
+            set_memory_channel_selection_scope,
+            [
+                MemoryChannelSelectionScope::CurrentGroup,
+                MemoryChannelSelectionScope::AllGroups
+            ]
+        );
+        check!(
+            0x37789,
+            memory_group_display,
+            set_memory_group_display,
+            [
+                MemoryGroupDisplay::RegisteredOnly,
+                MemoryGroupDisplay::AllGroups
+            ]
+        );
+        check!(
+            0x3932e,
+            keyboard_input,
+            set_keyboard_input,
+            [KeyboardInput::TenKey, KeyboardInput::Full]
+        );
+        check!(
+            0x3932f,
+            keyboard_layout,
+            set_keyboard_layout,
+            [
+                KeyboardLayout::JapanUsUk,
+                KeyboardLayout::Germany,
+                KeyboardLayout::France
+            ]
+        );
+        check!(
+            0x3932d,
+            screen_capture_file_type,
+            set_screen_capture_file_type,
+            [ScreenCaptureFileType::Png, ScreenCaptureFileType::Bmp]
+        );
+        for &(offset, value) in &EXPANDED_SETTINGS {
+            expected[offset] = value;
+        }
+        assert_setting_state(&image, &source, &expected);
+        let output = image.to_bytes();
+        assert_eq!(output.len(), 589_699);
+        assert!(output.ends_with(b"#CD=9ACCF6D3CC4A0D88E4710B66685DD85B\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "FC922D25BD93E368A71CC95AC3A49D0A"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+        assert_eq!(
+            reparsed.pre_recording_time(),
+            Ok(PreRecordingTime::Seconds15)
+        );
+        assert_eq!(reparsed.keyboard_layout(), Ok(KeyboardLayout::France));
+    }
+
+    #[test]
+    fn preserves_literal_windows_and_disabled_parent_settings() {
+        let (source, _) = expanded_settings_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        image.memory[0x39966..0x3996e].copy_from_slice(&[0xa6, 0, 1, 0, 0, 0x5a, 0, 0xb7]);
+        image.memory[0x37787..0x3778b].copy_from_slice(&[0xa6, 0, 1, 0xb7]);
+        image.memory[0x3932b..0x39331].copy_from_slice(&[0xa6, 0, 0, 0, 0, 0xb7]);
+        let mut expected = image.memory().to_vec();
+        image
+            .set_pre_recording_time(PreRecordingTime::Seconds15)
+            .unwrap();
+        expected[0x3996a] = 3;
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            &image.memory()[0x39966..0x3996e],
+            &[0xa6, 0, 1, 0, 3, 0x5a, 0, 0xb7]
+        );
+        assert_eq!(image.ptt_auto_record(), Ok(false));
+        image
+            .set_memory_channel_selection_scope(MemoryChannelSelectionScope::AllGroups)
+            .unwrap();
+        expected[0x37788] = 1;
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(&image.memory()[0x37787..0x3778b], &[0xa6, 1, 1, 0xb7]);
+        image.set_keyboard_layout(KeyboardLayout::France).unwrap();
+        expected[0x3932f] = 2;
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(&image.memory()[0x3932b..0x39331], &[0xa6, 0, 0, 0, 2, 0xb7]);
+    }
+
+    const NUMERIC_RAW_OFFSETS: [usize; 11] = [
+        0x3969d, 0x392f2, 0x39998, 0x3999c, 0x39964, 0x37815, 0x399ab, 0x399ac, 0x3931e, 0x399a1,
+        0x399a3,
+    ];
+
+    fn numeric_settings_fixture() -> (Vec<u8>, Vec<u8>) {
+        let (_, mut memory) = expanded_settings_fixture();
+        for offset in NUMERIC_RAW_OFFSETS {
+            memory[offset] = 0;
+        }
+        for offset in [0x3999a, 0x399ad, 0x399a2, 0x399a4] {
+            memory[offset] = 0;
+        }
+        memory[0x39963] = 1;
+        memory[0x399a6] = 128;
+        for offset in [0x3930c, 0x396ff, 0x39330] {
+            memory[offset..offset + 2].fill(0);
+        }
+        // Independent Python hashlib/struct over the expanded pattern, with
+        // these 20 literal fields set to valid zero/minimum values. Expected
+        // edits below use explicit byte windows, never product serialization.
+        let source = fixture_with_memory(&memory, "1ACB6B2BF7D6C73F410B7388309F5941");
+        (source, memory)
+    }
+
+    fn check_numeric_values<T: Copy + fmt::Debug + PartialEq, const N: usize>(
+        image: &mut Icf<'_>,
+        offset: usize,
+        values: &[(T, [u8; N])],
+        read: impl Fn(&Icf<'_>) -> Result<T, Error>,
+        write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
+    ) {
+        let source = image.source;
+        let mut expected = image.memory().to_vec();
+        // Repeat edits to prove setters accept every supported current value.
+        for _ in 0..2 {
+            for &(value, bytes) in values {
+                write(image, value).unwrap();
+                expected[offset..offset + N].copy_from_slice(&bytes);
+                assert_eq!(read(image), Ok(value));
+                assert_setting_state(image, source, &expected);
+            }
+        }
+    }
+
+    #[test]
+    fn edits_20_numeric_settings_with_independent_bytes_and_hashes() {
+        let (source, mut expected) = numeric_settings_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "D5E20831C1A4D8B153B01056B4CBCB74"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        macro_rules! check {
+            ($offset:literal, $get:ident, $set:ident, $values:expr) => {
+                check_numeric_values(
+                    &mut image,
+                    $offset,
+                    $values,
+                    |image| image.$get(),
+                    |image, value| image.$set(value),
+                );
+            };
+        }
+        let raw: Vec<_> = (0..=255).map(|v| (v, [v])).collect();
+        check!(0x3969d, lcd_backlight_raw, set_lcd_backlight_raw, &raw);
+        check!(0x392f2, beep_level_raw, set_beep_level_raw, &raw);
+        check!(0x39998, microphone_gain_raw, set_microphone_gain_raw, &raw);
+        check!(0x3999c, monitor_level_raw, set_monitor_level_raw, &raw);
+        check!(
+            0x39964,
+            voice_transmit_level_raw,
+            set_voice_transmit_level_raw,
+            &raw
+        );
+        check!(
+            0x37815,
+            recording_microphone_gain_raw,
+            set_recording_microphone_gain_raw,
+            &raw
+        );
+        check!(0x399ab, vox_gain_raw, set_vox_gain_raw, &raw);
+        check!(0x399ac, anti_vox_gain_raw, set_anti_vox_gain_raw, &raw);
+        check!(0x3931e, speech_level_raw, set_speech_level_raw, &raw);
+        check!(
+            0x399a1,
+            noise_blanker_level_raw,
+            set_noise_blanker_level_raw,
+            &raw
+        );
+        check!(
+            0x399a3,
+            noise_blanker_width_raw,
+            set_noise_blanker_width_raw,
+            &raw
+        );
+        check!(
+            0x3999a,
+            speech_compression_level,
+            set_speech_compression_level,
+            &[(0, [0]), (5, [5]), (10, [10])]
+        );
+        check!(
+            0x39963,
+            voice_repeat_seconds,
+            set_voice_repeat_seconds,
+            &[(1, [1]), (8, [8]), (15, [15])]
+        );
+        check!(
+            0x399ad,
+            vox_delay_deciseconds,
+            set_vox_delay_deciseconds,
+            &[(0, [0]), (10, [10]), (20, [20])]
+        );
+        check!(
+            0x399a2,
+            noise_blanker_depth,
+            set_noise_blanker_depth,
+            &[(1, [0]), (5, [4]), (10, [9])]
+        );
+        check!(
+            0x399a4,
+            noise_reduction_level,
+            set_noise_reduction_level,
+            &[(0, [0]), (7, [7]), (15, [15])]
+        );
+        check!(
+            0x399a6,
+            manual_notch_position,
+            set_manual_notch_position,
+            &[
+                (-127, [1]),
+                (-1, [127]),
+                (0, [128]),
+                (1, [129]),
+                (127, [255])
+            ]
+        );
+        check!(
+            0x3930c,
+            split_offset_khz,
+            set_split_offset_khz,
+            &[
+                (-9999, [0xf1, 0xd8]),
+                (-1, [255, 255]),
+                (0, [0, 0]),
+                (9999, [0x0f, 0x27])
+            ]
+        );
+        check!(
+            0x396ff,
+            utc_offset_minutes,
+            set_utc_offset_minutes,
+            &[
+                (-840, [0xb8, 0xfc]),
+                (-5, [0xfb, 0xff]),
+                (0, [0, 0]),
+                (5, [5, 0]),
+                (840, [0x48, 3])
+            ]
+        );
+        check!(
+            0x39330,
+            reference_frequency_adjustment,
+            set_reference_frequency_adjustment,
+            &[(0, [0, 0]), (255, [255, 0]), (256, [0, 1]), (511, [255, 1])]
+        );
+        for offset in NUMERIC_RAW_OFFSETS {
+            expected[offset] = 255;
+        }
+        for (offset, value) in [
+            (0x3999a, 10),
+            (0x39963, 15),
+            (0x399ad, 20),
+            (0x399a2, 9),
+            (0x399a4, 15),
+            (0x399a6, 255),
+        ] {
+            expected[offset] = value;
+        }
+        for (offset, bytes) in [
+            (0x3930c, [0x0f, 0x27]),
+            (0x396ff, [0x48, 3]),
+            (0x39330, [255, 1]),
+        ] {
+            expected[offset..offset + 2].copy_from_slice(&bytes);
+        }
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            [
+                image.memory()[0x3996b],
+                image.memory()[0x37788],
+                image.memory()[0x39332],
+                image.memory()[0x39701]
+            ],
+            [0x5a, 0, 0x55, 0x5c]
+        );
+        assert_eq!(image.lcd_backlight_auto_adjust(), Ok(false));
+        let output = image.to_bytes();
+        assert_eq!(output.len(), 589_699);
+        assert!(output.ends_with(b"#CD=970C0CA090D00251FED3B8E9D21A2849\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "51EC1EEB85C3087F3AB47A7F9D0EFD25"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+        assert_eq!(reparsed.noise_blanker_depth(), Ok(10));
+        assert_eq!(reparsed.manual_notch_position(), Ok(127));
+        assert_eq!(reparsed.utc_offset_minutes(), Ok(840));
+        assert_eq!(reparsed.reference_frequency_adjustment(), Ok(511));
+    }
+
+    fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
+        image: &mut Icf<'_>,
+        offset: usize,
+        valid: T,
+        invalid: &[T],
+        current: &[[u8; N]],
+        read: impl Fn(&Icf<'_>) -> Result<T, Error>,
+        write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
+    ) {
+        let source = image.source;
+        let original = image.memory().to_vec();
+        let serialized = image.to_bytes();
+        for &value in invalid {
+            assert!(
+                matches!(write(image,value), Err(Error::Invalid {line,..}) if line==5+offset/32)
+            );
+            assert_setting_state(image, source, &original);
+        }
+        assert_eq!(image.to_bytes(), serialized);
+        for bytes in current {
+            let mut expected = original.clone();
+            expected[offset..offset + N].copy_from_slice(bytes);
+            image.memory[offset..offset + N].copy_from_slice(bytes);
+            let serialized = image.to_bytes();
+            let error = read(image).unwrap_err();
+            assert!(matches!(error,Error::Unsupported {line,..} if line==5+offset/32));
+            assert_eq!(write(image, valid), Err(error));
+            assert_setting_state(image, source, &expected);
+            // Invalid new input wins even when the stored current value is invalid.
+            for &value in invalid {
+                assert!(
+                    matches!(write(image,value),Err(Error::Invalid {line,..}) if line==5+offset/32)
+                );
+                assert_setting_state(image, source, &expected);
+            }
+            assert_eq!(image.to_bytes(), serialized);
+        }
+        image.memory[offset..offset + N].copy_from_slice(&original[offset..offset + N]);
+    }
+
+    #[test]
+    fn rejects_numeric_input_then_current_without_changing_any_other_byte() {
+        let (source, _) = numeric_settings_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        macro_rules! reject {
+            ($offset:literal,$get:ident,$set:ident,$valid:expr,$invalid:expr,$current:expr) => {
+                check_numeric_errors(
+                    &mut image,
+                    $offset,
+                    $valid,
+                    $invalid,
+                    $current,
+                    |image| image.$get(),
+                    |image, value| image.$set(value),
+                );
+            };
+        }
+        reject!(
+            0x3999a,
+            speech_compression_level,
+            set_speech_compression_level,
+            0,
+            &[11, 255],
+            &[[11], [255]]
+        );
+        reject!(
+            0x39963,
+            voice_repeat_seconds,
+            set_voice_repeat_seconds,
+            1,
+            &[0, 16, 255],
+            &[[0], [16], [255]]
+        );
+        reject!(
+            0x399ad,
+            vox_delay_deciseconds,
+            set_vox_delay_deciseconds,
+            0,
+            &[21, 255],
+            &[[21], [255]]
+        );
+        reject!(
+            0x399a2,
+            noise_blanker_depth,
+            set_noise_blanker_depth,
+            1,
+            &[0, 11, 255],
+            &[[10], [255]]
+        );
+        reject!(
+            0x399a4,
+            noise_reduction_level,
+            set_noise_reduction_level,
+            0,
+            &[16, 255],
+            &[[16], [255]]
+        );
+        reject!(
+            0x399a6,
+            manual_notch_position,
+            set_manual_notch_position,
+            0,
+            &[-128],
+            &[[0]]
+        );
+        reject!(
+            0x3930c,
+            split_offset_khz,
+            set_split_offset_khz,
+            0,
+            &[-10000, 10000, i16::MIN, i16::MAX],
+            &[[0xf0, 0xd8], [0x10, 0x27], [0, 0x80], [0xff, 0x7f]]
+        );
+        reject!(
+            0x396ff,
+            utc_offset_minutes,
+            set_utc_offset_minutes,
+            0,
+            &[-845, 845, -1, 1, i16::MIN, i16::MAX],
+            &[
+                [0xb3, 0xfc],
+                [0x4d, 3],
+                [255, 255],
+                [1, 0],
+                [0, 0x80],
+                [255, 0x7f]
+            ]
+        );
+        reject!(
+            0x39330,
+            reference_frequency_adjustment,
+            set_reference_frequency_adjustment,
+            0,
+            &[512, 65535],
+            &[[0, 2], [255, 255]]
+        );
     }
 
     fn check_common_setting<T: Copy + fmt::Debug + PartialEq>(
@@ -803,6 +2057,264 @@ mod tests {
     }
 
     #[test]
+    fn edits_split_speech_settings_and_rejects_every_unknown_current_value() {
+        // Independent Python hashlib/raw-splice recipe, as for the older fields:
+        // image = bytearray(i % 256 for i in range(0x3c9c0))
+        // image[0x355a1] = 6; image[-16:] = b"IcomCloneFormat3"; image[offset] = raw
+        // h = hashlib.md5(bytes.fromhex("440077554075"))
+        // for a in range(0, len(image), 32):
+        //     h.update(struct.pack(">IB", a, 32) + image[a:a+32])
+        // Fixed digests below are not generated from product output.
+        check_common_setting(
+            0x3930b,
+            &[
+                (0, false, "419606C01C486CC75B4E26CEC396F641"),
+                (1, true, "6A863B5ED7B664798A724864497CC474"),
+            ],
+            "3A4AA85B7E60E01232E077B2094951F6",
+            Error::Unsupported {
+                line: 7325,
+                reason: "quick-split value other than OFF or ON",
+            },
+            |image| image.quick_split(),
+            |image, value| image.set_quick_split(value),
+        );
+        check_common_setting(
+            0x3930e,
+            &[
+                (0, false, "7AB37FC106438F57D7CC16EF693167B8"),
+                (1, true, "0B2D84502D34F4CC54B31181252A9D18"),
+            ],
+            "8F564D7A79F0ED4C5175F8F8AA345A56",
+            Error::Unsupported {
+                line: 7325,
+                reason: "split-lock value other than OFF or ON",
+            },
+            |image| image.split_lock(),
+            |image, value| image.set_split_lock(value),
+        );
+        check_common_setting(
+            0x39319,
+            &[
+                (
+                    0,
+                    ReceivedCallsignSpeech::Off,
+                    "659AC62413D2F17366BE2E07D17BBFBD",
+                ),
+                (
+                    1,
+                    ReceivedCallsignSpeech::Kerchunk,
+                    "2051A951920A82925C4401F0B24E34B0",
+                ),
+                (
+                    2,
+                    ReceivedCallsignSpeech::All,
+                    "1F790AF9E4DA19C6D96BE9E6E8313EA1",
+                ),
+            ],
+            "B4D4B00FDE7A7AF383892616E6452F9B",
+            Error::Unsupported {
+                line: 7325,
+                reason: "received callsign speech selection outside 0 through 2",
+            },
+            |image| image.received_callsign_speech(),
+            |image, value| image.set_received_callsign_speech(value),
+        );
+        check_common_setting(
+            0x3931a,
+            &[
+                (0, false, "C177FAEEEFB5E123EB81C2015D52FF2B"),
+                (1, true, "230613C22A5162203E51F98712CD5CE8"),
+            ],
+            "55A1B22FE54F866D1E4F1FF4A1963E18",
+            Error::Unsupported {
+                line: 7325,
+                reason: "RX-to-CS speech value other than OFF or ON",
+            },
+            |image| image.rx_cs_speech(),
+            |image, value| image.set_rx_cs_speech(value),
+        );
+        check_common_setting(
+            0x3931c,
+            &[
+                (0, false, "7CDADA231493A038D7DA3669CCBC2AF9"),
+                (1, true, "77E089B86BD121F70751CFBBE9E371FC"),
+            ],
+            "93614F7F028691D292C80FC439E4810E",
+            Error::Unsupported {
+                line: 7325,
+                reason: "MIC Up/Down speech value other than OFF or ON",
+            },
+            |image| image.mic_up_down_speech(),
+            |image, value| image.set_mic_up_down_speech(value),
+        );
+        check_common_setting(
+            0x3931b,
+            &[
+                (0, false, "D97F4344065EF9BF72BF4AAFFD984793"),
+                (1, true, "97C966FF8544EC34415A689933004079"),
+            ],
+            "57D2C2802A250384820ABAE71F326765",
+            Error::Unsupported {
+                line: 7325,
+                reason: "S-meter level speech value other than OFF or ON",
+            },
+            |image| image.s_meter_level_speech(),
+            |image, value| image.set_s_meter_level_speech(value),
+        );
+        check_common_setting(
+            0x3931d,
+            &[
+                (0, false, "DAEB353E5966CD9934E6738175C7FA80"),
+                (1, true, "3415D48D225284DC5FEFB3CE3AF16AEE"),
+            ],
+            "D3D9A18FE74837AECEB0DBA66D175035",
+            Error::Unsupported {
+                line: 7325,
+                reason: "mode speech value other than OFF or ON",
+            },
+            |image| image.mode_speech(),
+            |image, value| image.set_mode_speech(value),
+        );
+        check_common_setting(
+            0x39316,
+            &[
+                (
+                    0,
+                    SpeechLanguage::English,
+                    "575C57FDB07DFAED5FB4BBF41B54F466",
+                ),
+                (
+                    1,
+                    SpeechLanguage::Japanese,
+                    "B9D13EAC94C01523FAD9F3688D367A88",
+                ),
+            ],
+            "14040B1BCC5DF1541DB5A6996405C388",
+            Error::Unsupported {
+                line: 7325,
+                reason: "speech language selection outside 0 through 1",
+            },
+            |image| image.speech_language(),
+            |image, value| image.set_speech_language(value),
+        );
+        check_common_setting(
+            0x39317,
+            &[
+                (
+                    0,
+                    SpeechAlphabet::Normal,
+                    "29C79CA70A1AA59BD9DB245F7D23682E",
+                ),
+                (
+                    1,
+                    SpeechAlphabet::Phonetic,
+                    "05AC8EF08ED9BA7A2B8458F73B999598",
+                ),
+            ],
+            "F8C3E5BF1AFFB2EDDE1874941800E6E4",
+            Error::Unsupported {
+                line: 7325,
+                reason: "speech alphabet selection outside 0 through 1",
+            },
+            |image| image.speech_alphabet(),
+            |image, value| image.set_speech_alphabet(value),
+        );
+        check_common_setting(
+            0x39318,
+            &[
+                (0, SpeechSpeed::Slow, "34E1EB28639ACBE65B65D22A50F0577E"),
+                (1, SpeechSpeed::Fast, "4A4AC9931913D8A6A90CE8670BB9454D"),
+            ],
+            "12A654387530F5BDD0AB642ABFC690EE",
+            Error::Unsupported {
+                line: 7325,
+                reason: "speech speed selection outside 0 through 1",
+            },
+            |image| image.speech_speed(),
+            |image, value| image.set_speech_speed(value),
+        );
+    }
+
+    #[test]
+    fn consecutive_split_speech_edits_preserve_unrelated_unknown_data() {
+        // Explicit synthetic starting values, not defaults supplied by the parser.
+        let initial = [
+            (0x3930b, 0),
+            (0x3930e, 0),
+            (0x39319, 0),
+            (0x3931a, 0),
+            (0x3931c, 0),
+            (0x3931b, 0),
+            (0x3931d, 0),
+            (0x39316, 0),
+            (0x39317, 0),
+            (0x39318, 0),
+        ];
+        // The same independent Python recipe, applying all raw splices before MD5.
+        let source = fixture_with_bytes(&initial, "6A07F433BB8B905E942D575557C0AF9C");
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "D271EBCD7D8E9AF57D3C4AC8FF5023D8"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        assert!(image.key_touch_beep().is_err());
+        image.set_quick_split(true).unwrap();
+        image.set_split_lock(true).unwrap();
+        image
+            .set_received_callsign_speech(ReceivedCallsignSpeech::All)
+            .unwrap();
+        image.set_rx_cs_speech(true).unwrap();
+        image.set_mic_up_down_speech(true).unwrap();
+        image.set_s_meter_level_speech(true).unwrap();
+        image.set_mode_speech(true).unwrap();
+        image.set_speech_language(SpeechLanguage::Japanese).unwrap();
+        image.set_speech_alphabet(SpeechAlphabet::Phonetic).unwrap();
+        image.set_speech_speed(SpeechSpeed::Fast).unwrap();
+        image.set_quick_split(false).unwrap();
+        let final_values = [
+            (0x3930b, 0),
+            (0x3930e, 1),
+            (0x39319, 2),
+            (0x3931a, 1),
+            (0x3931c, 1),
+            (0x3931b, 1),
+            (0x3931d, 1),
+            (0x39316, 1),
+            (0x39317, 1),
+            (0x39318, 1),
+        ];
+        let mut expected = synthetic_memory();
+        for (offset, value) in final_values {
+            expected[offset] = value;
+        }
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(&image.memory()[0x3930c..0x3930e], &[0x0c, 0x0d]);
+        assert!(image.key_touch_beep().is_err());
+        let serialized = image.to_bytes();
+        assert_eq!(
+            serialized,
+            fixture_with_bytes(&final_values, "42190843018BFB6BA418FE4DA031C061")
+        );
+        assert_eq!(
+            format!("{:X}", md5::compute(&serialized)),
+            "83AF0A19CD1B392770EBD741B0116730"
+        );
+        let reparsed = Icf::parse(&serialized).unwrap();
+        assert_setting_state(&reparsed, &serialized, &expected);
+        assert_eq!(
+            reparsed.speech_language().unwrap(),
+            SpeechLanguage::Japanese
+        );
+        assert_eq!(
+            reparsed.received_callsign_speech().unwrap(),
+            ReceivedCallsignSpeech::All
+        );
+        assert!(reparsed.mic_up_down_speech().unwrap());
+        assert!(reparsed.s_meter_level_speech().unwrap());
+    }
+
+    #[test]
     fn reads_raw_physical_names_and_preserves_every_other_byte_on_edit() {
         let source = memory_name_fixture();
         assert_eq!(
@@ -926,5 +2438,187 @@ mod tests {
             Some(b"RETRY_OK        ".as_slice())
         );
         assert_eq!(image.original_bytes(), source);
+    }
+
+    #[test]
+    fn reads_raw_group_descriptors_and_edits_only_their_name_windows() {
+        for (reverse, checksum, baseline_md5, edit_md5) in [
+            (
+                false,
+                "E1C1750FBE655BA68E44B82F8F3D6654",
+                "A605BCC6F3E9EF3AECB671EED70C3BCD",
+                [
+                    "0305A6B0F2F914F99DA09DF0FBB159EF",
+                    "8DD057668387631DE1AA609773A684D6",
+                    "11BBB159C5535E8444A9746E240EBB43",
+                ],
+            ),
+            (
+                true,
+                "147BA5A83AEF431704436D62AE2574C6",
+                "6F4F48710EAEE7095142DFFF65D9FD1E",
+                [
+                    "3DBACF270DD0E58D2F07884925240E03",
+                    "C1A56B1784A81290A0E84800897FF3ED",
+                    "2095A4BFFAEFBFA587E1C0096548F23C",
+                ],
+            ),
+        ] {
+            let (source, mut expected) = raw_group_fixture(reverse, &[], checksum);
+            assert_eq!(format!("{:X}", md5::compute(&source)), baseline_md5);
+            let mut image = Icf::parse(&source).unwrap();
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.raw_memory_group_name(1).unwrap(), None);
+            // Descriptor 2 exists despite an all-space name (head 0); descriptor
+            // 3 exists despite head FFFF (NUL is not an all-space sentinel).
+            for (descriptor, offset) in [(0, 0x355c3), (2, 0x355e9), (3, 0x355fc), (99, 0x35d1c)] {
+                let name = image.raw_memory_group_name(descriptor).unwrap().unwrap();
+                assert_eq!(name, &expected[offset..offset + 16]);
+                assert_eq!(name.as_ptr(), image.memory()[offset..].as_ptr());
+            }
+            for ((descriptor, offset, name, padded), file_md5) in [
+                (0, 0x355c3, "A", b"A               "),
+                (99, 0x35d1c, "AZ09_-AZ09_-AZ09", b"AZ09_-AZ09_-AZ09"),
+                (2, 0x355e9, "LINKED_0", b"LINKED_0        "),
+            ]
+            .into_iter()
+            .zip(edit_md5)
+            {
+                image
+                    .set_raw_memory_group_name_ascii(descriptor, name)
+                    .unwrap();
+                expected[offset..offset + 16].copy_from_slice(padded);
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(
+                    image.raw_memory_group_name(descriptor).unwrap(),
+                    Some(padded.as_slice())
+                );
+                let serialized = image.to_bytes();
+                assert_eq!(serialized.len(), 589_699);
+                assert_eq!(format!("{:X}", md5::compute(&serialized)), file_md5);
+                let reparsed = Icf::parse(&serialized).unwrap();
+                assert_setting_state(&reparsed, &serialized, &expected);
+                assert_eq!(
+                    reparsed.raw_memory_group_name(descriptor).unwrap(),
+                    Some(padded.as_slice())
+                );
+            }
+            let serialized = image.to_bytes();
+            image.set_raw_memory_group_name_ascii(0, "SECOND").unwrap();
+            image.set_raw_memory_group_name_ascii(0, "A").unwrap();
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.to_bytes(), serialized);
+        }
+
+        // Only the selected head is guarded. An unrelated head 500 and all
+        // uninterpreted slot/row/flag bytes are neither validated nor repaired.
+        let (source, mut expected) = raw_group_fixture(
+            false,
+            &[(0x355d4, b"\xf4\x01")],
+            "D75452CD9745E2FEF3161167009FD339",
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        assert!(matches!(
+            image.raw_memory_group_name(1),
+            Err(Error::Unsupported { .. })
+        ));
+        image.set_raw_memory_group_name_ascii(0, "A").unwrap();
+        expected[0x355c3..0x355d3].copy_from_slice(b"A               ");
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            format!("{:X}", md5::compute(image.to_bytes())),
+            "C6C45367606CC66D3A79FDCF5123C182"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_raw_group_edits_without_changing_state() {
+        // Every malformed chain/head enters through parse with independently
+        // computed CD, so rejection belongs to the raw-group API, not parse.
+        for (descriptor, offset, value, checksum) in [
+            (
+                0,
+                0x36628,
+                b"\xff".as_slice(),
+                "325015A25F65C3DF191D1F8E6D7711DC",
+            ),
+            (0, 0x36628, b"\x64", "A2A87E93B128D2B0D85D523C1CAEE7A6"),
+            (0, 0x36628, b"\xfe", "841C4746799D82C7ECE4E8EE5360A6F9"),
+            (0, 0x355c0, b"\xff", "34658673E7ABE5750D4FD235D39C7840"),
+            (0, 0x35d06, b"\xff", "D3E445748790111CE5A4D9EC1E52D06C"),
+            (0, 0x35976, b"\x32", "5B3FE7FF6611831884E1AB7D7C769A5D"),
+            (0, 0x35976, b"\x31", "DDE5501236458BBF9128C7E7908BF1FE"),
+            (0, 0x35976, b"\x64", "2608B4D32FF398C4B180F03C28079110"),
+            (0, 0x35976, b"\xfe", "CABBB1F63B49136715A2D130FB6EFAEF"),
+            (0, 0x35d19, b"\0", "403187659A7ED6336E7A4E32AD679B68"),
+            (0, 0x35d19, b"\x64", "ECC68FE40CBDC0894AC5B9D6BE74FBCE"),
+            (0, 0x355c1, b"\xf4\x01", "729582B41C488C74B855A038F8664FBC"),
+            (0, 0x355c1, b"\xfe\xff", "E986B057EDEEFFC09840EA2B1E180FD4"),
+            (99, 0x35d1a, b"\xf4\x01", "AF49FBAE3B337D263506E2D6BA13507E"),
+        ] {
+            let (source, expected) = raw_group_fixture(false, &[(offset, value)], checksum);
+            let mut image = Icf::parse(&source).unwrap();
+            assert!(matches!(
+                image.raw_memory_group_name(descriptor),
+                Err(Error::Unsupported { .. })
+            ));
+            assert_setting_state(&image, &source, &expected);
+            assert!(matches!(
+                image.set_raw_memory_group_name_ascii(descriptor, "VALID"),
+                Err(Error::Unsupported { .. })
+            ));
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.to_bytes(), source);
+        }
+
+        let (source, mut expected) =
+            raw_group_fixture(false, &[], "E1C1750FBE655BA68E44B82F8F3D6654");
+        let mut image = Icf::parse(&source).unwrap();
+        image.set_raw_memory_group_name_ascii(0, "RENAMED").unwrap();
+        expected[0x355c3..0x355d3].copy_from_slice(b"RENAMED         ");
+        let serialized = image.to_bytes();
+        for (descriptor, name) in [
+            (1, "VALID"),
+            (100, "VALID"),
+            (usize::MAX, "VALID"),
+            (0, ""),
+            (0, "ABCDEFGHIJKLMNOPQ"),
+            (0, "a"),
+            (0, "@"),
+            (0, "["),
+            (0, "/"),
+            (0, ":"),
+            (0, "A B"),
+            (0, "A\0B"),
+            (0, "A\nB"),
+            (0, "\u{7f}"),
+            (99, "\u{ff21}"),
+            (99, "AAAAAAAAAAAAAA\u{e9}"),
+            (99, "AAAAAAAAAAAAAAA\u{e9}"),
+            (usize::MAX, ""),
+        ] {
+            assert!(matches!(
+                image.set_raw_memory_group_name_ascii(descriptor, name),
+                Err(Error::Unsupported { .. })
+            ));
+            assert_setting_state(&image, &source, &expected);
+        }
+        for descriptor in [100, usize::MAX] {
+            assert!(matches!(
+                image.raw_memory_group_name(descriptor),
+                Err(Error::Unsupported { line: 5, .. })
+            ));
+            assert_setting_state(&image, &source, &expected);
+        }
+        assert_eq!(image.to_bytes(), serialized);
+        image
+            .set_raw_memory_group_name_ascii(0, "RETRY_OK")
+            .unwrap();
+        expected[0x355c3..0x355d3].copy_from_slice(b"RETRY_OK        ");
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            image.raw_memory_group_name(0).unwrap(),
+            Some(b"RETRY_OK        ".as_slice())
+        );
     }
 }
