@@ -1,4 +1,4 @@
-//! Local Name/Sub Name and canonical integer-Hz edits of a limited repeater CSV.
+//! Lossless explicit column edits of a limited repeater CSV format.
 //!
 //! Only the exact 17-column export header, comma separators, unquoted cells and
 //! CRLF-terminated physical lines are supported. BOMs, quotes, semicolons, ASCII
@@ -10,13 +10,16 @@
 //! New Name/Sub Name values use narrower ASCII-only limits of 16/8 bytes.
 //! Frequency/Offset edits accept integer Hz and emit exactly six decimal MHz
 //! places using integer division/remainder, not the original float/locale codec.
-//! Sub Name and Hz edits have not been compared with the original GUI. No source
-//! application normalization, truncation, padding or defaulting is performed.
+//! Named enum/UTC setters edit one raw column only; they do not reproduce source
+//! row-export coupling, clear companion cells or certify radio suitability.
+//! Sub Name, Hz, enum and UTC edits have not been compared with the original GUI.
+//! No source application normalization, truncation, padding or defaulting is performed.
 //! Successful parsing establishes structure only, not general CS-705
 //! compatibility. For one fixed native export, DV/FM Name edits matched native
 //! GUI edits and native import/re-export byte-for-byte. Other inputs and fields
 //! are not covered by that comparison.
 
+use crate::icf::{RepeaterDuplex, RepeaterMode, RepeaterPosition, RepeaterTone};
 use std::borrow::Cow;
 use std::fmt;
 
@@ -102,11 +105,10 @@ impl Row<'_> {
     }
 }
 
-/// A CSV document borrowing unchanged cells and owning only explicitly edited cells.
+/// A CSV document borrowing unchanged cells and retaining explicit column edits.
 ///
-/// Rows cannot be added, removed or reordered through this API. All bytes other
-/// than an explicitly edited Name/Sub Name/Frequency/Offset, including empty cells
-/// and CRLFs, are retained.
+/// Rows cannot be added, removed or reordered through this API. All bytes outside
+/// explicitly edited cells, including empty cells and CRLFs, are retained.
 pub struct Csv<'a> {
     rows: Vec<Row<'a>>,
 }
@@ -307,6 +309,132 @@ impl<'a> Csv<'a> {
         Ok(())
     }
 
+    /// Replace only column 9 with FM or DV. No tone/companion-cell correction.
+    /// This raw column subset is not the original row exporter or radio validation.
+    /// # Errors
+    /// Row bounds take priority; FM-N/DD are Unsupported. Errors preserve all cells.
+    pub fn set_mode(&mut self, index: usize, value: RepeaterMode) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let text: &[u8] = match value {
+            RepeaterMode::Fm => b"FM",
+            RepeaterMode::Dv => b"DV",
+            _ => {
+                return Err(Error::Unsupported {
+                    line: index + 2,
+                    reason: "CSV Mode edits support FM or DV only",
+                });
+            }
+        };
+        row.cells[9] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only column 7 with OFF/DUP-/DUP+, without mode/offset inference.
+    /// This is a raw column edit, not the original row's coupled normalization.
+    /// # Errors
+    /// Row bounds take priority; RPS is Unsupported. No cell changes on error.
+    pub fn set_duplex(&mut self, index: usize, value: RepeaterDuplex) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let text: &[u8] = match value {
+            RepeaterDuplex::Off => b"OFF",
+            RepeaterDuplex::Minus => b"DUP-",
+            RepeaterDuplex::Plus => b"DUP+",
+            RepeaterDuplex::Rps => {
+                return Err(Error::Unsupported {
+                    line: index + 2,
+                    reason: "CSV Dup edits do not support RPS",
+                });
+            }
+        };
+        row.cells[7] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only column 10 with OFF/TONE/TSQL, even when Mode is opaque/DV.
+    /// No mode decoding, blanking or tone-index correction occurs.
+    /// # Errors
+    /// Rejects an invalid row index before any edit.
+    pub fn set_tone(&mut self, index: usize, value: RepeaterTone) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let text: &[u8] = match value {
+            RepeaterTone::Off => b"OFF",
+            RepeaterTone::Tone => b"TONE",
+            RepeaterTone::ToneSquelch => b"TSQL",
+        };
+        row.cells[10] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only column 12 with NO/YES; no callsign or group linkage is changed.
+    /// # Errors
+    /// Rejects an invalid row index before any edit.
+    pub fn set_rpt1_use(&mut self, index: usize, value: bool) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let text: &[u8] = if value { b"YES" } else { b"NO" };
+        row.cells[12] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only column 13 with None/Approximate/Exact. None never clears coordinates.
+    /// This is a local raw-column preference, not full row/radio validation.
+    /// # Errors
+    /// Rejects an invalid row index before any edit.
+    pub fn set_position(&mut self, index: usize, value: RepeaterPosition) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        let text: &[u8] = match value {
+            RepeaterPosition::None => b"None",
+            RepeaterPosition::Approximate => b"Approximate",
+            RepeaterPosition::Exact => b"Exact",
+        };
+        row.cells[13] = Cow::Borrowed(text);
+        Ok(())
+    }
+
+    /// Replace only column 16 with canonical signed h:mm from integer minutes.
+    /// Accepts -840..=840 in 5-minute steps. Zero is 0:00, nonzero has a sign,
+    /// hours are unpadded and minutes have two digits. No rounding/default/locale
+    /// or interpretation of the old cell occurs; this is not a full CSV importer.
+    /// # Errors
+    /// Row bounds take priority; noncanonical input is Unsupported without changes.
+    pub fn set_utc_offset_minutes(&mut self, index: usize, minutes: i16) -> Result<(), Error> {
+        let row = self
+            .rows
+            .get_mut(index)
+            .ok_or(Error::RowIndexOutOfBounds { index })?;
+        if !(-840..=840).contains(&minutes) || minutes % 5 != 0 {
+            return Err(Error::Unsupported {
+                line: index + 2,
+                reason: "CSV UTC Offset requires -840..=840 minutes in steps of 5",
+            });
+        }
+        let magnitude = minutes.unsigned_abs();
+        let sign = if minutes == 0 {
+            ""
+        } else if minutes < 0 {
+            "-"
+        } else {
+            "+"
+        };
+        row.cells[16] =
+            Cow::Owned(format!("{sign}{}:{:02}", magnitude / 60, magnitude % 60).into_bytes());
+        Ok(())
+    }
+
     /// Serialize without normalization, preserving every unedited byte and order.
     ///
     /// No file or device is accessed. The result has the same limited syntax as
@@ -346,6 +474,215 @@ mod tests {
         "1,GROUP1,FM test,FM,,,145.000000,DUP-,0.600000,FM,TONE,88.5Hz,NO,Approximate,-35.500000,139.750000,0:00\r\n",
         "50,GROUP50,DV test,DV,TEST01 B,TEST01 G,439.000000,DUP-,5.000000,DV,,,YES,Exact,35.500000,139.750000,+9:00\r\n",
     ).as_bytes();
+
+    fn enum_csv_literal(change: Option<(usize, &[u8])>) -> Vec<u8> {
+        // Independent raw cell literals; never built from a product setter/row.
+        let cells: [&[u8]; 17] = [
+            b"1",
+            b"\x83\x5c",
+            b"\x82\xa0",
+            b"opaque-long",
+            b"CALL-opaque",
+            b"GATE-opaque",
+            b"",
+            b"\x81\x40dup",
+            b"",
+            b"",
+            b"unknown-tone",
+            b"\x82\xa2Hz",
+            b"",
+            b"unknown-position",
+            b"opaque-lat",
+            b"opaque-lon",
+            b"--:--",
+        ];
+        let mut text = HEADER.to_vec();
+        for (column, &cell) in cells.iter().enumerate() {
+            if column != 0 {
+                text.push(b',');
+            }
+            text.extend_from_slice(match change {
+                Some((target, value)) if target == column => value,
+                _ => cell,
+            });
+        }
+        text.extend_from_slice(b"\r\n2,G,Keep,Sub,Call,Gate,0.1,OLD-DUP,OLD-OFFSET,OLD-MODE,OLD-TONE,OLD-RTONE,OLD-USE,OLD-POS,OLD-LAT,OLD-LON,OLD-UTC\r\n");
+        text
+    }
+
+    #[test]
+    fn enum_and_integer_utc_edits_match_literals_and_preserve_other_borrows() {
+        let source = enum_csv_literal(None);
+        macro_rules! check {
+            ($column:literal,$method:ident,$cases:expr) => {
+                for &(value, text) in $cases {
+                    let mut csv = Csv::parse(&source).unwrap();
+                    let pointers: Vec<_> = csv
+                        .rows()
+                        .iter()
+                        .map(|r| r.cells().map(|c| c.as_ptr()))
+                        .collect();
+                    csv.$method(0, value).unwrap();
+                    let expected = enum_csv_literal(Some(($column, text)));
+                    assert_eq!(csv.to_bytes(), expected);
+                    assert_eq!(csv.rows()[0].cells()[$column], text);
+                    for (r, row) in csv.rows().iter().enumerate() {
+                        for (c, cell) in row.cells().iter().enumerate() {
+                            if (r, c) != (0, $column) {
+                                assert_eq!(cell.as_ptr(), pointers[r][c]);
+                            }
+                        }
+                    }
+                    let parsed = Csv::parse(&expected).unwrap();
+                    assert_eq!(parsed.to_bytes(), expected);
+                    assert_eq!(parsed.rows()[0].cells()[$column], text);
+                }
+            };
+        }
+        check!(
+            9,
+            set_mode,
+            &[
+                (RepeaterMode::Fm, b"FM".as_slice()),
+                (RepeaterMode::Dv, b"DV")
+            ]
+        );
+        check!(
+            7,
+            set_duplex,
+            &[
+                (RepeaterDuplex::Off, b"OFF".as_slice()),
+                (RepeaterDuplex::Minus, b"DUP-"),
+                (RepeaterDuplex::Plus, b"DUP+")
+            ]
+        );
+        check!(
+            10,
+            set_tone,
+            &[
+                (RepeaterTone::Off, b"OFF".as_slice()),
+                (RepeaterTone::Tone, b"TONE"),
+                (RepeaterTone::ToneSquelch, b"TSQL")
+            ]
+        );
+        check!(
+            12,
+            set_rpt1_use,
+            &[(false, b"NO".as_slice()), (true, b"YES")]
+        );
+        check!(
+            13,
+            set_position,
+            &[
+                (RepeaterPosition::None, b"None".as_slice()),
+                (RepeaterPosition::Approximate, b"Approximate"),
+                (RepeaterPosition::Exact, b"Exact")
+            ]
+        );
+        check!(
+            16,
+            set_utc_offset_minutes,
+            &[
+                (-840, b"-14:00".as_slice()),
+                (-330, b"-5:30"),
+                (-5, b"-0:05"),
+                (0, b"0:00"),
+                (5, b"+0:05"),
+                (330, b"+5:30"),
+                (840, b"+14:00"),
+                (15, b"+0:15"),
+                (60, b"+1:00"),
+                (-60, b"-1:00")
+            ]
+        );
+        assert_eq!(source, enum_csv_literal(None));
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_mode(0, RepeaterMode::Dv).unwrap();
+        csv.set_tone(0, RepeaterTone::ToneSquelch).unwrap();
+        csv.set_position(0, RepeaterPosition::None).unwrap();
+        csv.set_duplex(0, RepeaterDuplex::Plus).unwrap();
+        csv.set_rpt1_use(0, true).unwrap();
+        csv.set_utc_offset_minutes(0, -5).unwrap();
+        csv.set_name(0, b"New Name").unwrap();
+        csv.set_sub_name(0, b"New Sub").unwrap();
+        csv.set_frequency_hz(0, 145125000).unwrap();
+        csv.set_offset_hz(0, 600000).unwrap();
+        let expected=[HEADER,b"1,\x83\x5c,New Name,New Sub,CALL-opaque,GATE-opaque,145.125000,DUP+,0.600000,DV,TSQL,\x82\xa2Hz,YES,None,opaque-lat,opaque-lon,-0:05\r\n",b"2,G,Keep,Sub,Call,Gate,0.1,OLD-DUP,OLD-OFFSET,OLD-MODE,OLD-TONE,OLD-RTONE,OLD-USE,OLD-POS,OLD-LAT,OLD-LON,OLD-UTC\r\n"].concat();
+        assert_eq!(csv.to_bytes(), expected);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+    }
+
+    #[test]
+    fn csv_enum_utc_bounds_last_row_and_late_errors_are_atomic() {
+        let row=b"1,G,Name,Sub,Call,Gate,unknown,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,opaque,--:--\r\n";
+        let mut source = HEADER.to_vec();
+        for _ in 0..2500 {
+            source.extend_from_slice(row);
+        }
+        let mut csv = Csv::parse(&source).unwrap();
+        let pointers: Vec<_> = csv
+            .rows()
+            .iter()
+            .map(|r| r.cells().map(|c| c.as_ptr()))
+            .collect();
+        csv.set_mode(2499, RepeaterMode::Fm).unwrap();
+        csv.set_duplex(2499, RepeaterDuplex::Minus).unwrap();
+        csv.set_tone(2499, RepeaterTone::Tone).unwrap();
+        csv.set_rpt1_use(2499, false).unwrap();
+        csv.set_position(2499, RepeaterPosition::Exact).unwrap();
+        csv.set_utc_offset_minutes(2499, 840).unwrap();
+        let mut expected = HEADER.to_vec();
+        for _ in 0..2499 {
+            expected.extend_from_slice(row);
+        }
+        expected.extend_from_slice(b"1,G,Name,Sub,Call,Gate,unknown,DUP-,opaque,FM,TONE,opaque,NO,Exact,opaque,opaque,+14:00\r\n");
+        assert_eq!(csv.to_bytes(), expected);
+        for (r, row) in csv.rows().iter().enumerate() {
+            for (c, cell) in row.cells().iter().enumerate() {
+                if r != 2499 || ![7, 9, 10, 12, 13, 16].contains(&c) {
+                    assert_eq!(cell.as_ptr(), pointers[r][c]);
+                }
+            }
+        }
+        for index in [0, 2499] {
+            for mode in [RepeaterMode::FmNarrow, RepeaterMode::Dd] {
+                assert!(
+                    matches!(csv.set_mode(index,mode),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+            assert!(
+                matches!(csv.set_duplex(index,RepeaterDuplex::Rps),Err(Error::Unsupported {line,..}) if line==index+2)
+            );
+            assert_eq!(csv.to_bytes(), expected);
+            for value in [-845, 845, -841, 841, -1, 1, i16::MIN, i16::MAX, 32766] {
+                assert!(
+                    matches!(csv.set_utc_offset_minutes(index,value),Err(Error::Unsupported {line,..}) if line==index+2)
+                );
+                assert_eq!(csv.to_bytes(), expected);
+            }
+        }
+        for index in [2500, usize::MAX] {
+            let error = Err(Error::RowIndexOutOfBounds { index });
+            assert_eq!(csv.set_mode(index, RepeaterMode::Dd), error);
+            assert_eq!(csv.set_duplex(index, RepeaterDuplex::Rps), error);
+            assert_eq!(csv.set_tone(index, RepeaterTone::Off), error);
+            assert_eq!(csv.set_rpt1_use(index, true), error);
+            assert_eq!(csv.set_position(index, RepeaterPosition::None), error);
+            assert_eq!(csv.set_utc_offset_minutes(index, i16::MIN), error);
+            assert_eq!(csv.to_bytes(), expected);
+        }
+        let mut empty = Csv::parse(HEADER).unwrap();
+        let error = Err(Error::RowIndexOutOfBounds { index: 0 });
+        assert_eq!(empty.set_mode(0, RepeaterMode::FmNarrow), error);
+        assert_eq!(empty.set_duplex(0, RepeaterDuplex::Rps), error);
+        assert_eq!(empty.set_tone(0, RepeaterTone::Tone), error);
+        assert_eq!(empty.set_rpt1_use(0, false), error);
+        assert_eq!(empty.set_position(0, RepeaterPosition::None), error);
+        assert_eq!(empty.set_utc_offset_minutes(0, i16::MAX), error);
+        assert_eq!(empty.to_bytes(), HEADER);
+        assert_eq!(Csv::parse(&expected).unwrap().to_bytes(), expected);
+    }
 
     #[test]
     fn integer_hz_edits_match_literal_csv_and_keep_other_cells_borrowed() {
