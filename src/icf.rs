@@ -9,6 +9,8 @@ use std::io::Write;
 
 mod common;
 mod groups;
+mod memory;
+mod repeaters;
 
 pub use common::{
     AltitudeDistanceUnit, AutoPowerOff, AutoTuneRxCallsignKeyFunction, BandEdgeBeep,
@@ -25,6 +27,11 @@ pub use common::{
     TxRecordingAudio, VoxBreakInKeyFunction, VoxVoiceDelay, WindSpeedUnit,
 };
 pub use groups::MemoryGroup;
+pub use memory::{
+    MemoryCallsign, MemoryDigitalSquelch, MemoryDuplex, MemoryFilter, MemoryMode, MemorySelection,
+    MemorySide, MemoryTone,
+};
+pub use repeaters::RepeaterGroup;
 
 // CS-705 1.30 CS705.exe SHA-256:
 // e9439e1413e1258be77e6ef2188b72276dd714642e3858f4690e5d45653aeca3.
@@ -756,6 +763,983 @@ mod tests {
             assert!(convert_map_rev5_to6(bytes).is_err());
             assert_eq!(bytes, before);
         }
+    }
+
+    fn scalar_memory_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        for (i, value) in memory[..IMAGE_BYTES - 16].iter_mut().enumerate() {
+            *value = (73 * i + 19) as u8;
+        }
+        memory[INTERNAL_MAP_REV] = 6;
+        for slot in 0..500 {
+            let b = 83 * slot;
+            memory[b] = 0x3f;
+            memory[0x3662d + slot] = 0xfe;
+            for at in [b + 1, b + 0x22] {
+                memory[at..at + 4].copy_from_slice(&144_000_000_u32.to_le_bytes());
+                memory[at + 4] = 0x70;
+                memory[at + 5] = 0xf9;
+                memory[at + 6..at + 12].fill(0);
+                memory[at + 29..at + 33].fill(0);
+            }
+        }
+        // Independent Python struct/hashlib: pattern (73*i+19)%256, all 500
+        // occupied records, both sides FM, literal header/control bytes above.
+        let text = fixture_with_memory(&memory, "6CEFD2C31EE2F114F5F868F9200960AB");
+        (text, memory)
+    }
+
+    fn scalar_error(
+        image: &mut Icf<'_>,
+        invalid: bool,
+        operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
+    ) -> Error {
+        let before = image.memory().to_vec();
+        let source = image.source;
+        let error = operation(image).unwrap_err();
+        assert!(if invalid {
+            matches!(error, Error::Invalid { .. })
+        } else {
+            matches!(error, Error::Unsupported { .. })
+        });
+        assert_setting_state(image, source, &before);
+        error
+    }
+
+    #[test]
+    fn scalar_fm_codec_sweeps_all_500_slots_both_sides_and_preserves_windows() {
+        let (source, mut expected) = scalar_memory_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "8EA14C5D34DD7F6CCE9723470265917E"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        let tones = [
+            MemoryTone::Off,
+            MemoryTone::Tone,
+            MemoryTone::ToneSquelch,
+            MemoryTone::Dtcs,
+            MemoryTone::DtcsTransmit,
+            MemoryTone::ToneTransmitDtcsReceive,
+            MemoryTone::DtcsTransmitToneSquelchReceive,
+            MemoryTone::ToneTransmitToneSquelchReceive,
+        ];
+        for slot in 0..500 {
+            let b = 83 * slot;
+            image
+                .set_physical_memory_selection(slot, MemorySelection::Three)
+                .unwrap();
+            expected[b] = 0xff;
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(
+                image.physical_memory_selection(slot),
+                Ok(MemorySelection::Three)
+            );
+            for (number, side) in [MemorySide::Main, MemorySide::Split]
+                .into_iter()
+                .enumerate()
+            {
+                let at = b + if number == 0 { 1 } else { 0x22 };
+                let hz = 30_000 + slot as u32 * 1000 + number as u32;
+                image
+                    .set_physical_memory_frequency_hz(slot, side, hz)
+                    .unwrap();
+                expected[at..at + 4].copy_from_slice(&hz.to_le_bytes());
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(image.physical_memory_frequency_hz(slot, side), Ok(hz));
+                assert_eq!(image.physical_memory_mode(slot, side), Ok(MemoryMode::Fm));
+                assert_eq!(image.physical_memory_data(slot, side), Ok(true));
+                image
+                    .set_physical_memory_filter(slot, side, MemoryFilter::Filter3)
+                    .unwrap();
+                expected[at + 4] = 0x72;
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(
+                    image.physical_memory_filter(slot, side),
+                    Ok(MemoryFilter::Filter3)
+                );
+                image
+                    .set_physical_memory_duplex(slot, side, MemoryDuplex::Plus)
+                    .unwrap();
+                expected[at + 5] = 0xfd;
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(
+                    image.physical_memory_duplex(slot, side),
+                    Ok(MemoryDuplex::Plus)
+                );
+                let offset = (slot as u32 * 2 + number as u32) * 100;
+                image
+                    .set_physical_memory_offset_hz(slot, side, offset)
+                    .unwrap();
+                expected[at + 29..at + 33].copy_from_slice(&offset.to_le_bytes());
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(image.physical_memory_offset_hz(slot, side), Ok(offset));
+                // Grey UI conditions are not storage guards: tone OFF still
+                // permits the saved TX/RX indices and polarity to be edited.
+                for value in [0, 49] {
+                    image
+                        .set_physical_memory_tx_tone_index(slot, side, value)
+                        .unwrap();
+                    expected[at + 9] = value;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_tx_tone_index(slot, side), Ok(value));
+                    image
+                        .set_physical_memory_rx_tone_index(slot, side, value)
+                        .unwrap();
+                    expected[at + 10] = value;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_rx_tone_index(slot, side), Ok(value));
+                }
+                for value in [0, 103] {
+                    image
+                        .set_physical_memory_dtcs_index(slot, side, value)
+                        .unwrap();
+                    expected[at + 11] = value;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_dtcs_index(slot, side), Ok(value));
+                }
+                for (raw, value) in tones.into_iter().enumerate() {
+                    image.set_physical_memory_tone(slot, side, value).unwrap();
+                    expected[at + 6] = raw as u8;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_tone(slot, side), Ok(value));
+                }
+                for (rx, tx) in [(false, false), (false, true), (true, true), (true, false)] {
+                    image
+                        .set_physical_memory_dtcs_polarity(slot, side, (rx, tx))
+                        .unwrap();
+                    expected[at + 7..at + 9].copy_from_slice(&[u8::from(rx), u8::from(tx)]);
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(
+                        image.physical_memory_dtcs_polarity(slot, side),
+                        Ok((rx, tx))
+                    );
+                }
+            }
+            image.set_physical_memory_split(slot, false).unwrap();
+            expected[b] = 0xfd;
+            assert_setting_state(&image, &source, &expected);
+            assert!(
+                image
+                    .physical_memory_frequency_hz(slot, MemorySide::Split)
+                    .is_err()
+            );
+            image.set_physical_memory_split(slot, true).unwrap();
+            expected[b] = 0xff;
+            assert_setting_state(&image, &source, &expected);
+        }
+        let output = image.to_bytes();
+        assert!(output.ends_with(b"#CD=6268052E7F747D0B9F65B85CBB178D67\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "DD6C4770A2E85D0F7E7951A3EAE668C2"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    #[test]
+    fn scalar_dv_overlay_and_literal_callsign_packing_cover_both_sides_all_slots() {
+        let (source, mut expected) = scalar_memory_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let space = [0x40, 0x81, 2, 4, 8, 0x10, 0x20];
+        let first = [0x83, 0x0a, 0x1c, 0x48, 0xb1, 0xa3, 0xc8];
+        let second = [0xa9, 0x16, 0x9d, 0x46, 0x0c, 0x50, 0x42];
+        for slot in 0..500 {
+            for (side, at) in [
+                (MemorySide::Main, 83 * slot + 1),
+                (MemorySide::Split, 83 * slot + 0x22),
+            ] {
+                // Test setup only: the API deliberately has no mode/DATA setter.
+                image.memory[at + 4] = 0x90;
+                image.memory[at + 6..at + 8].fill(0);
+                for start in [at + 8, at + 15, at + 22] {
+                    image.memory[start..start + 7].copy_from_slice(&space);
+                }
+                expected[at + 4] = 0x90;
+                expected[at + 6..at + 8].fill(0);
+                for start in [at + 8, at + 15, at + 22] {
+                    expected[start..start + 7].copy_from_slice(&space);
+                }
+                for value in [0, 99] {
+                    image
+                        .set_physical_memory_digital_code(slot, side, value)
+                        .unwrap();
+                    expected[at + 7] = value;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_digital_code(slot, side), Ok(value));
+                }
+                for (raw, value) in [
+                    MemoryDigitalSquelch::Off,
+                    MemoryDigitalSquelch::Callsign,
+                    MemoryDigitalSquelch::Code,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    image
+                        .set_physical_memory_digital_squelch(slot, side, value)
+                        .unwrap();
+                    expected[at + 6] = raw as u8;
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(image.physical_memory_digital_squelch(slot, side), Ok(value));
+                }
+                for (which, text, packed, start) in [
+                    (MemoryCallsign::Your, *b"ABCDEFGH", first, at + 8),
+                    (MemoryCallsign::Repeater1, *b"TEST01 B", second, at + 15),
+                    (MemoryCallsign::Repeater2, *b"ABCDEFGH", first, at + 22),
+                ] {
+                    image
+                        .set_physical_memory_callsign_raw(slot, side, which, text)
+                        .unwrap();
+                    expected[start..start + 7].copy_from_slice(&packed);
+                    assert_setting_state(&image, &source, &expected);
+                    assert_eq!(
+                        image.physical_memory_callsign_raw(slot, side, which),
+                        Ok(text)
+                    );
+                }
+                assert_eq!(image.physical_memory_mode(slot, side), Ok(MemoryMode::Dv));
+            }
+        }
+        let output = image.to_bytes();
+        assert!(output.ends_with(b"#CD=9A7AA4B2DC71EF4A49C2F92C431D5CCD\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "5CD23559245AAD4BDCCF9667926396F3"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    #[test]
+    fn scalar_guards_ranges_modes_and_masks_reject_without_state_changes() {
+        let (source, _) = scalar_memory_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        let side = MemorySide::Main;
+        for slot in [500, usize::MAX] {
+            let e = scalar_error(&mut image, false, |i| {
+                i.set_physical_memory_frequency_hz(slot, side, 30_000)
+            });
+            assert!(matches!(e, Error::Unsupported { line: 5, .. }));
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_frequency_hz(slot, side, 0)
+            });
+            scalar_error(&mut image, false, |i| {
+                i.set_physical_memory_split(slot, true)
+            });
+        }
+        image.memory[0x3662d] = 0xff;
+        let e = scalar_error(&mut image, false, |i| {
+            i.set_physical_memory_frequency_hz(0, side, 30_000)
+        });
+        assert!(matches!(e,Error::Unsupported {line,..} if line==5+0x3662d/32));
+        image.memory[0x3662d] = 0xfe;
+        image.set_physical_memory_split(0, false).unwrap();
+        scalar_error(&mut image, false, |i| {
+            i.set_physical_memory_frequency_hz(0, MemorySide::Split, 30_000)
+        });
+        image.set_physical_memory_split(0, true).unwrap();
+        for raw in [0, u32::MAX] {
+            image.memory[1..5].copy_from_slice(&raw.to_le_bytes());
+            assert_eq!(image.physical_memory_frequency_hz(0, side), Ok(raw));
+            image
+                .set_physical_memory_frequency_hz(0, side, 30_000)
+                .unwrap();
+        }
+        for value in [0, 29_999, 470_000_001, u32::MAX] {
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_frequency_hz(0, side, value)
+            });
+        }
+        for value in [30_000, 470_000_000] {
+            image
+                .set_physical_memory_frequency_hz(0, side, value)
+                .unwrap();
+        }
+        for value in [0, 100, 9_999_900] {
+            image.set_physical_memory_offset_hz(0, side, value).unwrap();
+            assert_eq!(image.physical_memory_offset_hz(0, side), Ok(value));
+        }
+        for value in [1, 49, 50, 51, 9_999_901, 10_000_000, u32::MAX] {
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_offset_hz(0, side, value)
+            });
+            image.memory[30..34].copy_from_slice(&value.to_le_bytes());
+            scalar_error(&mut image, false, |i| {
+                i.set_physical_memory_offset_hz(0, side, 0)
+            });
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_offset_hz(0, side, 1)
+            });
+            image.memory[30..34].fill(0);
+        }
+        let modes = [
+            MemoryMode::Lsb,
+            MemoryMode::Usb,
+            MemoryMode::Cw,
+            MemoryMode::CwReverse,
+            MemoryMode::Rtty,
+            MemoryMode::RttyReverse,
+            MemoryMode::Am,
+            MemoryMode::Fm,
+            MemoryMode::Wfm,
+            MemoryMode::Dv,
+        ];
+        for raw in 0..16 {
+            image.memory[5] = (raw << 4) | 2;
+            assert_eq!(
+                image.physical_memory_filter(0, side),
+                Ok(MemoryFilter::Filter3)
+            );
+            if raw < 10 {
+                assert_eq!(image.physical_memory_mode(0, side), Ok(modes[raw as usize]));
+            } else {
+                scalar_error(&mut image, false, |i| {
+                    i.physical_memory_mode(0, side).map(|_| ())
+                });
+            }
+            if raw == 8 || raw >= 10 {
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_filter(0, side, MemoryFilter::Filter1)
+                });
+            } else {
+                image
+                    .set_physical_memory_filter(0, side, MemoryFilter::Filter1)
+                    .unwrap();
+                assert_eq!(image.memory[5], raw << 4);
+            }
+            if raw != 7 {
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_tone(0, side, MemoryTone::Off)
+                });
+            }
+            if raw != 9 {
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_digital_squelch(0, side, MemoryDigitalSquelch::Off)
+                });
+            }
+            // DUP/offset do not acquire a mode validation guard.
+            image.memory[6] = 0xf9;
+            image
+                .set_physical_memory_duplex(0, side, MemoryDuplex::Minus)
+                .unwrap();
+            image.set_physical_memory_offset_hz(0, side, 100).unwrap();
+        }
+        image.memory[5] = 0x70;
+        for (raw, value) in [
+            MemoryFilter::Filter1,
+            MemoryFilter::Filter2,
+            MemoryFilter::Filter3,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            image.set_physical_memory_filter(0, side, value).unwrap();
+            assert_eq!(image.memory[5], 0x70 | raw as u8);
+            assert_eq!(image.physical_memory_filter(0, side), Ok(value));
+        }
+        for raw in 3..16 {
+            image.memory[5] = 0x70 | raw;
+            scalar_error(&mut image, false, |i| {
+                i.set_physical_memory_filter(0, side, MemoryFilter::Filter1)
+            });
+        }
+        image.memory[5] = 0x70;
+        for raw in 0..=255 {
+            image.memory[6] = raw;
+            assert_eq!(image.physical_memory_data(0, side), Ok(raw & 1 != 0));
+            if (raw >> 1) & 3 == 3 {
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_duplex(0, side, MemoryDuplex::Off)
+                });
+            } else {
+                let values = [MemoryDuplex::Off, MemoryDuplex::Minus, MemoryDuplex::Plus];
+                assert_eq!(
+                    image.physical_memory_duplex(0, side),
+                    Ok(values[((raw >> 1) & 3) as usize])
+                );
+                image
+                    .set_physical_memory_duplex(0, side, MemoryDuplex::Plus)
+                    .unwrap();
+                assert_eq!(image.memory[6], (raw & !6) | 4);
+            }
+            image.memory[0] = raw;
+            assert_eq!(image.physical_memory_split(0), Ok(raw & 2 != 0));
+            let selections = [
+                MemorySelection::Off,
+                MemorySelection::One,
+                MemorySelection::Two,
+                MemorySelection::Three,
+            ];
+            assert_eq!(
+                image.physical_memory_selection(0),
+                Ok(selections[(raw >> 6) as usize])
+            );
+            image
+                .set_physical_memory_selection(0, MemorySelection::Two)
+                .unwrap();
+            assert_eq!(image.memory[0], (raw & 0x3f) | 0x80);
+            image.set_physical_memory_split(0, true).unwrap();
+            assert_eq!(image.memory[0], (raw & 0x3d) | 0x82);
+        }
+    }
+
+    #[test]
+    fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
+        let (source, _) = scalar_memory_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        for (side, t) in [(MemorySide::Main, 1), (MemorySide::Split, 0x22)] {
+            for bad in [8, 255] {
+                image.memory[t + 6] = bad;
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_tone(0, side, MemoryTone::Off)
+                });
+            }
+            image.memory[t + 6] = 0;
+            for (at, max) in [(9, 49), (10, 49), (11, 103)] {
+                for bad in [max + 1, 255] {
+                    image.memory[t + at] = bad;
+                    match at {
+                        9 => {
+                            scalar_error(&mut image, false, |i| {
+                                i.set_physical_memory_tx_tone_index(0, side, 0)
+                            });
+                            scalar_error(&mut image, true, |i| {
+                                i.set_physical_memory_tx_tone_index(0, side, bad)
+                            });
+                        }
+                        10 => {
+                            scalar_error(&mut image, false, |i| {
+                                i.set_physical_memory_rx_tone_index(0, side, 0)
+                            });
+                            scalar_error(&mut image, true, |i| {
+                                i.set_physical_memory_rx_tone_index(0, side, bad)
+                            });
+                        }
+                        _ => {
+                            scalar_error(&mut image, false, |i| {
+                                i.set_physical_memory_dtcs_index(0, side, 0)
+                            });
+                            scalar_error(&mut image, true, |i| {
+                                i.set_physical_memory_dtcs_index(0, side, bad)
+                            });
+                        }
+                    }
+                }
+                image.memory[t + at] = 0;
+            }
+            for at in [7, 8] {
+                for bad in [2, 255] {
+                    image.memory[t + at] = bad;
+                    scalar_error(&mut image, false, |i| {
+                        i.set_physical_memory_dtcs_polarity(0, side, (false, false))
+                    });
+                }
+                image.memory[t + at] = 0;
+            }
+            image.memory[t + 4] = 0x90;
+            for bad in [3, 255] {
+                image.memory[t + 6] = bad;
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_digital_squelch(0, side, MemoryDigitalSquelch::Off)
+                });
+            }
+            image.memory[t + 6] = 0;
+            for bad in [100, 255] {
+                image.memory[t + 7] = bad;
+                scalar_error(&mut image, false, |i| {
+                    i.set_physical_memory_digital_code(0, side, 0)
+                });
+                scalar_error(&mut image, true, |i| {
+                    i.set_physical_memory_digital_code(0, side, bad)
+                });
+            }
+            image.memory[t + 7] = 0;
+            // Every 7-bit stored alphabet remains readable, including NUL/DEL.
+            for raw in 0..128_u8 {
+                let bits = (0..8).fold(0_u64, |acc, _| acc << 7 | u64::from(raw));
+                image.memory[t + 8..t + 15].copy_from_slice(&bits.to_be_bytes()[1..]);
+                assert_eq!(
+                    image.physical_memory_callsign_raw(0, side, MemoryCallsign::Your),
+                    Ok([raw; 8])
+                );
+            }
+            let space = [0x40, 0x81, 2, 4, 8, 0x10, 0x20];
+            image.memory[t + 15..t + 22].copy_from_slice(&space);
+            image.memory[t + 22..t + 29].copy_from_slice(&space);
+            for which in [
+                MemoryCallsign::Your,
+                MemoryCallsign::Repeater1,
+                MemoryCallsign::Repeater2,
+            ] {
+                for bad in [*b"lower   ", [0; 8], [127; 8], [128; 8], *b"BAD_    "] {
+                    scalar_error(&mut image, true, |i| {
+                        i.set_physical_memory_callsign_raw(0, side, which, bad)
+                    });
+                }
+            }
+            image
+                .set_physical_memory_callsign_raw(0, side, MemoryCallsign::Your, *b"/A0    /")
+                .unwrap();
+            image
+                .set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater1, *b"RPT123 G")
+                .unwrap();
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater2, *b"ABCDEFGH")
+            });
+            // Seed an inconsistent stored pair; changing Your must not bypass
+            // the shared post-edit validator, but either repeater can resolve it.
+            image.memory[t + 22..t + 29]
+                .copy_from_slice(&[0x83, 0x0a, 0x1c, 0x48, 0xb1, 0xa3, 0xc8]);
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_callsign_raw(0, side, MemoryCallsign::Your, *b"ABCDEFGH")
+            });
+            image
+                .set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater2, [b' '; 8])
+                .unwrap();
+            image.memory[t + 22..t + 29]
+                .copy_from_slice(&[0x83, 0x0a, 0x1c, 0x48, 0xb1, 0xa3, 0xc8]);
+            image
+                .set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater1, *b"RPT123 B")
+                .unwrap();
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater1, *b"RPT123 G")
+            });
+            // Preserve an unrelated nonalphabetic raw Your window on a repeater edit.
+            image.memory[t + 8..t + 15].fill(0xff);
+            image
+                .set_physical_memory_callsign_raw(0, side, MemoryCallsign::Repeater2, [b' '; 8])
+                .unwrap();
+            assert_eq!(&image.memory[t + 8..t + 15], &[0xff; 7]);
+            image.memory[t + 4] = 0x70;
+            scalar_error(&mut image, false, |i| {
+                i.set_physical_memory_callsign_raw(0, side, MemoryCallsign::Your, *b"ABCDEFGH")
+            });
+            scalar_error(&mut image, true, |i| {
+                i.set_physical_memory_callsign_raw(0, side, MemoryCallsign::Your, [0; 8])
+            });
+        }
+    }
+
+    #[test]
+    fn canonical_home_ntp_and_payload_comment_preserve_raw_metadata_and_neighbors() {
+        let mut expected = synthetic_memory();
+        for (i, byte) in expected[..IMAGE_BYTES - 16].iter_mut().enumerate() {
+            *byte = (73 * i + 19) as u8;
+        }
+        expected[0x355a1] = 6;
+        expected[0x392f6..0x392fa].fill(0);
+        expected[0x396be..0x396fe].fill(0xff);
+        expected[0x35591..0x355a1].fill(0xff);
+        // Independent Python struct/hashlib, not product setters or serializer:
+        // pattern (73*i+19)%256, internal6/signature, Home0 and raw FF text.
+        // Final splices are LE470000000, b'time.Example-0.test'.ljust(64,b' '),
+        // b'CQ / test! 01'.ljust(16,b' '); header raw comment remains 82 A0.
+        let source = fixture_with_memory(&expected, "A2B67E1FF0A95BEC262171A1B6238964");
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "4BC27EAEE87DC4A0C4980A35F49BC52E"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        assert_eq!(image.home_frequency_hz(), Ok(None));
+        assert_eq!(image.ntp_server_raw(), &[0xff; 64]);
+        assert_eq!(image.clone_comment_raw(), &[0xff; 16]);
+        assert_eq!(
+            image.ntp_server_raw().as_ptr(),
+            image.memory()[0x396be..].as_ptr()
+        );
+        assert_eq!(
+            image.clone_comment_raw().as_ptr(),
+            image.memory()[0x35591..].as_ptr()
+        );
+        macro_rules! rejected {
+            ($operation:expr,$kind:ident,$offset:literal) => {{
+                let before=image.memory().to_vec();
+                let serialized=image.to_bytes();
+                let error=$operation.unwrap_err();
+                assert!(matches!(error,Error::$kind {line,..} if line==5+$offset/32));
+                assert_setting_state(&image,&source,&before);
+                assert_eq!(image.to_bytes(),serialized);
+            }};
+        }
+        for (value, bytes) in [
+            (None, [0, 0, 0, 0]),
+            (Some(30_000), [0x30, 0x75, 0, 0]),
+            (Some(199_999_999), [0xff, 0xc1, 0xeb, 0x0b]),
+            (Some(400_000_000), [0, 0x84, 0xd7, 0x17]),
+            (Some(470_000_000), [0x80, 0xa1, 3, 0x1c]),
+            (None, [0, 0, 0, 0]),
+        ] {
+            image.set_home_frequency_hz(value).unwrap();
+            expected[0x392f6..0x392fa].copy_from_slice(&bytes);
+            assert_eq!(image.home_frequency_hz(), Ok(value));
+            assert_setting_state(&image, &source, &expected);
+        }
+        for bad in [
+            0,
+            1,
+            29_999,
+            200_000_000,
+            399_999_999,
+            470_000_001,
+            u32::MAX,
+        ] {
+            rejected!(image.set_home_frequency_hz(Some(bad)), Invalid, 0x392f6);
+        }
+        for bad in [1, 29_999, 200_000_000, 399_999_999, 470_000_001, u32::MAX] {
+            // Test setup only; the public setter never repairs unknown Home Hz.
+            image.memory[0x392f6..0x392fa].copy_from_slice(&bad.to_le_bytes());
+            rejected!(image.home_frequency_hz(), Unsupported, 0x392f6);
+            rejected!(image.set_home_frequency_hz(None), Unsupported, 0x392f6);
+            rejected!(
+                image.set_home_frequency_hz(Some(30_000)),
+                Unsupported,
+                0x392f6
+            );
+            rejected!(image.set_home_frequency_hz(Some(0)), Invalid, 0x392f6);
+            image.memory[0x392f6..0x392fa].fill(0);
+        }
+        let full_ntp = "A".repeat(64);
+        for text in ["", full_ntp.as_str(), "-.", "time.Example-0.test", ""] {
+            image.set_ntp_server_ascii(text).unwrap();
+            expected[0x396be..0x396fe].fill(b' ');
+            expected[0x396be..0x396be + text.len()].copy_from_slice(text.as_bytes());
+            assert_eq!(image.ntp_server_raw(), &expected[0x396be..0x396fe]);
+            assert_setting_state(&image, &source, &expected);
+        }
+        let over_ntp = "A".repeat(65);
+        for text in [
+            over_ntp.as_str(),
+            "with space",
+            "bad_",
+            "a/b",
+            "é",
+            "a\0b",
+            "\n",
+        ] {
+            rejected!(image.set_ntp_server_ascii(text), Invalid, 0x396be);
+        }
+        for text in ["", "ABCD EFGH-01/234", "A  B!", ""] {
+            image.set_clone_comment_canonical_ascii(text).unwrap();
+            expected[0x35591..0x355a1].fill(b' ');
+            expected[0x35591..0x35591 + text.len()].copy_from_slice(text.as_bytes());
+            assert_eq!(image.clone_comment_raw(), &expected[0x35591..0x355a1]);
+            assert_setting_state(&image, &source, &expected);
+        }
+        let over_comment = "A".repeat(17);
+        for text in [
+            over_comment.as_str(),
+            " leading",
+            "trailing ",
+            " ",
+            "\0",
+            "a\nb",
+            "é",
+            "\x7f",
+        ] {
+            rejected!(
+                image.set_clone_comment_canonical_ascii(text),
+                Invalid,
+                0x35591
+            );
+        }
+        // Explicit text replacement accepts unknown current bytes without decoding.
+        image.memory[0x396be..0x396fe].fill(0xff);
+        image.memory[0x35591..0x355a1].fill(0xff);
+        expected[0x396be..0x396fe].fill(0xff);
+        expected[0x35591..0x355a1].fill(0xff);
+        image.set_ntp_server_ascii("time.Example-0.test").unwrap();
+        expected[0x396be..0x396fe].fill(b' ');
+        expected[0x396be..0x396be + 19].copy_from_slice(b"time.Example-0.test");
+        assert_setting_state(&image, &source, &expected);
+        image
+            .set_clone_comment_canonical_ascii("CQ / test! 01")
+            .unwrap();
+        expected[0x35591..0x355a1].fill(b' ');
+        expected[0x35591..0x35591 + 13].copy_from_slice(b"CQ / test! 01");
+        assert_setting_state(&image, &source, &expected);
+        image.set_home_frequency_hz(Some(470_000_000)).unwrap();
+        expected[0x392f6..0x392fa].copy_from_slice(&[0x80, 0xa1, 3, 0x1c]);
+        assert_setting_state(&image, &source, &expected);
+        assert_eq!(
+            [
+                image.memory()[0x392fa],
+                image.memory()[0x396fe],
+                image.memory()[0x396ff],
+                image.memory()[0x39700],
+                image.memory()[0x355a1]
+            ],
+            [0x5d, 0x81, 0xca, 0x13, 6]
+        );
+        let output = image.to_bytes();
+        assert_eq!(output.len(), 589_699);
+        assert!(output.ends_with(b"#CD=0C5B263FB7916A5EA19D7D1FFF5F58AC\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "405055D3E819CEE09C9B074C916CADBC"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.home_frequency_hz(), Ok(Some(470_000_000)));
+        assert_eq!(reparsed.ntp_server_raw(), image.ntp_server_raw());
+        assert_eq!(reparsed.clone_comment_raw(), image.clone_comment_raw());
+        assert_eq!(reparsed.to_bytes(), output);
+    }
+
+    fn repeater_map_fixture() -> (Vec<u8>, Vec<u8>) {
+        let mut memory = synthetic_memory();
+        for (i, byte) in memory[..IMAGE_BYTES - 16].iter_mut().enumerate() {
+            *byte = (73 * i + 19) as u8;
+        }
+        memory[0x355a1] = 6;
+        memory[0x3ab82..0x3bf0a].fill(255);
+        memory[0x3ab82..0x3ab88].copy_from_slice(&[2, 0, 0, 0, 1, 0]);
+        memory[0x3bf0a..0x3bf6e].fill(255);
+        memory[0x3bf0a..0x3bf0c].fill(0);
+        memory[0x3bf0a + 98..0x3bf0a + 100].copy_from_slice(&[2, 0]);
+        memory[0x2ea3b..0x2ea3e].copy_from_slice(&[0x82, 0, 255]);
+        memory[0xaa0f..0xaa0f + 52].fill(255);
+        memory[0xaa0f + 104..0xaa0f + 156].fill(0);
+        memory[0x3bf6e..0x3bf6e + 313].fill(0xa0);
+        memory[0x3bf6e + 312] = 0xf8;
+        // Independent Python struct/hashlib: pattern (73*i+19)%256, signature,
+        // internal6, order [2,0,1], group0 start0/group49 start2, USE A0/F8.
+        let source = fixture_with_memory(&memory, "EBD5DA6CD00A0F9AA10336569DFB79E9");
+        (source, memory)
+    }
+
+    #[test]
+    fn repeater_raw_map_names_records_and_use_preserve_all_opaque_bytes() {
+        let (source, mut expected) = repeater_map_fixture();
+        assert_eq!(
+            format!("{:X}", md5::compute(&source)),
+            "647EA2B150A5624C26EC96C397BA3CE7"
+        );
+        let mut image = Icf::parse(&source).unwrap();
+        {
+            let groups = image.repeater_groups().unwrap();
+            assert_eq!(groups.len(), 50);
+            assert_eq!(groups[0].physical_slots(), &[2, 0]);
+            assert_eq!(groups[49].physical_slots(), &[1]);
+            assert!(groups[1..49].iter().all(|g| g.physical_slots().is_empty()));
+            for (g, group) in groups.iter().enumerate() {
+                assert_eq!(
+                    group.name_bytes(),
+                    &expected[0x2ea3b + 16 * g..0x2ea3b + 16 * (g + 1)]
+                );
+                assert_eq!(
+                    group.name_bytes().as_ptr(),
+                    image.memory()[0x2ea3b + 16 * g..].as_ptr()
+                );
+            }
+            assert_eq!(&groups[0].name_bytes()[..3], &[0x82, 0, 255]);
+        }
+        assert_eq!(
+            image.physical_repeater_record_raw(2).unwrap(),
+            Some([0; 52].as_slice())
+        );
+        assert_eq!(
+            image.physical_repeater_record_raw(0).unwrap(),
+            Some([255; 52].as_slice())
+        );
+        assert_eq!(image.physical_repeater_record_raw(2499).unwrap(), None);
+        assert_eq!(image.physical_repeater_use(2499).unwrap(), None); // USE bit is set, but unused.
+        scalar_error(&mut image, false, |i| {
+            i.set_physical_repeater_use(2499, true)
+        });
+        for (p, value) in [(2, true), (0, false), (1, true)] {
+            image.set_physical_repeater_use(p, value).unwrap();
+            let at = 0x3bf6e + (p >> 3);
+            let mask = 1 << (p & 7);
+            expected[at] = (expected[at] & !mask) | if value { mask } else { 0 };
+            assert_setting_state(&image, &source, &expected);
+            assert_eq!(image.physical_repeater_use(p).unwrap(), Some(value));
+        }
+        for (g, text) in [(0, "A Test / Group!!"), (1, " raw "), (1, ""), (49, "last")] {
+            image.set_repeater_group_name_ascii(g, text).unwrap();
+            expected[0x2ea3b + 16 * g..0x2ea3b + 16 * (g + 1)].fill(b' ');
+            expected[0x2ea3b + 16 * g..0x2ea3b + 16 * g + text.len()]
+                .copy_from_slice(text.as_bytes());
+            assert_setting_state(&image, &source, &expected);
+        }
+        let small = image.to_bytes();
+        assert!(small.ends_with(b"#CD=4F758A8B5960356FCD00E6D0FF57A44A\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&small)),
+            "D36F1EA98784BA60D65153C0390093FC"
+        );
+        assert_eq!(Icf::parse(&small).unwrap().to_bytes(), small);
+        // Full-permutation test setup, not a public allocator or map editor.
+        let order: Vec<usize> = (0..2500).map(|j| (73 * j + 19) % 2500).collect();
+        for (row, p) in order.iter().enumerate() {
+            let bytes = (*p as u16).to_le_bytes();
+            image.memory[0x3ab82 + 2 * row..0x3ab84 + 2 * row].copy_from_slice(&bytes);
+            expected[0x3ab82 + 2 * row..0x3ab84 + 2 * row].copy_from_slice(&bytes);
+        }
+        image.memory[0x3bf0a..0x3bf6e].fill(255);
+        expected[0x3bf0a..0x3bf6e].fill(255);
+        for (g, bytes) in [(1, [0, 0]), (49, [0xc3, 9])] {
+            // LE2499
+            image.memory[0x3bf0a + 2 * g..0x3bf0c + 2 * g].copy_from_slice(&bytes);
+            expected[0x3bf0a + 2 * g..0x3bf0c + 2 * g].copy_from_slice(&bytes);
+        }
+        {
+            let groups = image.repeater_groups().unwrap();
+            assert_eq!(groups.len(), 50);
+            assert!(groups[0].physical_slots().is_empty());
+            assert_eq!(groups[1].physical_slots(), &order[..2499]);
+            assert_eq!(groups[49].physical_slots(), &[2446]); // Independent last permutation element.
+            assert_eq!(
+                groups
+                    .iter()
+                    .map(|g| g.physical_slots().len())
+                    .sum::<usize>(),
+                2500
+            );
+        }
+        for p in 0..2500 {
+            let record = image.physical_repeater_record_raw(p).unwrap().unwrap();
+            assert_eq!(record, &expected[0xaa0f + 52 * p..0xaa0f + 52 * (p + 1)]);
+            assert_eq!(record.as_ptr(), image.memory()[0xaa0f + 52 * p..].as_ptr());
+            let at = 0x3bf6e + (p >> 3);
+            let mask = 1 << (p & 7);
+            let old = expected[at] & mask != 0;
+            assert_eq!(image.physical_repeater_use(p).unwrap(), Some(old));
+            for value in [!old, old, p.is_multiple_of(2)] {
+                image.set_physical_repeater_use(p, value).unwrap();
+                expected[at] = (expected[at] & !mask) | if value { mask } else { 0 };
+                assert_setting_state(&image, &source, &expected);
+                assert_eq!(image.physical_repeater_use(p).unwrap(), Some(value));
+            }
+        }
+        assert_eq!(image.memory()[0x3bf6e + 312], 0xf5); // p2499 is bit3; opaque upper nibble stays F.
+        let output = image.to_bytes();
+        assert_eq!(output.len(), 589_699);
+        assert!(output.ends_with(b"#CD=FA3C6E27C39F0548F2D35015D02953E6\r\n"));
+        assert_eq!(
+            format!("{:X}", md5::compute(&output)),
+            "A10A7F7FEEC0409836D9E661B942A93B"
+        );
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert_eq!(reparsed.to_bytes(), output);
+        assert_eq!(
+            reparsed.repeater_groups().unwrap()[49].physical_slots(),
+            &[2446]
+        );
+    }
+
+    #[test]
+    fn repeater_order_start_and_parameter_errors_are_strict_and_state_preserving() {
+        let (source, baseline) = repeater_map_fixture();
+        let mut image = Icf::parse(&source).unwrap();
+        for p in [2500, usize::MAX] {
+            for e in [
+                scalar_error(&mut image, false, |i| {
+                    i.physical_repeater_record_raw(p).map(|_| ())
+                }),
+                scalar_error(&mut image, false, |i| {
+                    i.physical_repeater_use(p).map(|_| ())
+                }),
+                scalar_error(&mut image, false, |i| i.set_physical_repeater_use(p, false)),
+            ] {
+                assert!(matches!(e, Error::Unsupported { line: 5, .. }));
+            }
+        }
+        for g in [50, usize::MAX] {
+            let e = scalar_error(&mut image, false, |i| {
+                i.set_repeater_group_name_ascii(g, "\0")
+            });
+            assert!(matches!(e, Error::Unsupported { line: 5, .. }));
+        }
+        let long = "X".repeat(17);
+        for text in [long.as_str(), "bad\0", "\n", "\x7f", "é"] {
+            let e = scalar_error(&mut image, true, |i| {
+                i.set_repeater_group_name_ascii(49, text)
+            });
+            assert!(matches!(e,Error::Invalid {line,..} if line==5+(0x2ea3b+16*49)/32));
+        }
+        for (at, bytes, error_at) in [
+            (0x3ab82, [0xfe, 0xff], 0x3ab82),
+            (0x3ab82, [0xc4, 9], 0x3ab82), // LE2500
+            (0x3ab84, [2, 0], 0x3ab84),
+            (0x3ab84, [255, 255], 0x3ab86), // A hole before a later live row.
+            (0x3ab82 + 40, [3, 0], 0x3ab82 + 40),
+        ] {
+            image.memory.copy_from_slice(&baseline);
+            image.memory[at..at + 2].copy_from_slice(&bytes);
+            for e in [
+                scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())),
+                scalar_error(&mut image, false, |i| {
+                    i.physical_repeater_record_raw(0).map(|_| ())
+                }),
+                scalar_error(&mut image, false, |i| {
+                    i.physical_repeater_use(0).map(|_| ())
+                }),
+                scalar_error(&mut image, false, |i| i.set_physical_repeater_use(0, true)),
+            ] {
+                assert!(matches!(e,Error::Unsupported {line,..} if line==5+error_at/32));
+            }
+        }
+        for (changes, error_at) in [
+            (vec![(0x3bf0a, [1, 0])], 0x3bf0a),
+            (vec![(0x3bf0a + 98, [0, 0])], 0x3bf0a + 98),
+            (vec![(0x3bf0a + 98, [3, 0])], 0x3bf0a + 98),
+            (vec![(0x3bf0a + 98, [0xc4, 9])], 0x3bf0a + 98),
+            (
+                vec![(0x3bf0a + 2, [2, 0]), (0x3bf0a + 98, [1, 0])],
+                0x3bf0a + 98,
+            ),
+            (vec![(0x3bf0a, [255, 255])], 0x3bf0a + 98),
+        ] {
+            image.memory.copy_from_slice(&baseline);
+            for (at, bytes) in changes {
+                image.memory[at..at + 2].copy_from_slice(&bytes);
+            }
+            let e = scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ()));
+            assert!(matches!(e,Error::Unsupported {line,..} if line==5+error_at/32));
+            // Physical record/USE views intentionally do not validate group starts.
+            assert_eq!(
+                image.physical_repeater_record_raw(0).unwrap(),
+                Some([255; 52].as_slice())
+            );
+            let before = image.memory().to_vec();
+            image.set_physical_repeater_use(0, true).unwrap();
+            let mut expected = before;
+            expected[0x3bf6e] |= 1;
+            assert_setting_state(&image, &source, &expected);
+        }
+        image.memory.copy_from_slice(&baseline);
+        image.memory[0x3bf0a..0x3bf6e].fill(255);
+        scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())); // N>0, no start zero.
+        image.memory[0x3ab82..0x3bf0a].fill(255);
+        image.memory[0x3bf0a..0x3bf0c].fill(0);
+        scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())); // N0 requires all FFFF.
+        image.memory[0x3bf0a..0x3bf6e].fill(255);
+        let mut expected = image.memory().to_vec();
+        let groups = image.repeater_groups().unwrap();
+        assert_eq!(groups.len(), 50);
+        assert!(groups.iter().all(|g| g.physical_slots().is_empty()));
+        assert_eq!(image.physical_repeater_record_raw(0).unwrap(), None);
+        assert_eq!(image.physical_repeater_use(2499).unwrap(), None);
+        scalar_error(&mut image, false, |i| i.set_physical_repeater_use(0, false));
+        image.set_repeater_group_name_ascii(49, "").unwrap();
+        expected[0x2ea3b + 16 * 49..0x2ea3b + 16 * 50].fill(b' ');
+        assert_setting_state(&image, &source, &expected);
+        let output = image.to_bytes();
+        let reparsed = Icf::parse(&output).unwrap();
+        assert_setting_state(&reparsed, &output, &expected);
+        assert!(
+            reparsed
+                .repeater_groups()
+                .unwrap()
+                .iter()
+                .all(|g| g.physical_slots().is_empty())
+        );
+        assert_eq!(reparsed.to_bytes(), output);
     }
 
     fn synthetic_memory() -> Vec<u8> {

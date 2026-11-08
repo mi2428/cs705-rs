@@ -1,5 +1,118 @@
 use super::{Error, Icf, RECORD_BYTES};
 
+impl Icf<'_> {
+    /// Read canonical final Home Hz; zero is empty, not a GUI numeric input.
+    ///
+    /// Static CS-705 evidence: Home store RVA 0x7DC5F, receive ranges 0x1918D0.
+    /// This does not reproduce GUI parsing, clamping, rounding or band selection.
+    ///
+    /// # Errors
+    /// Returns [`Error::Unsupported`] for unknown stored frequencies.
+    pub fn home_frequency_hz(&self) -> Result<Option<u32>, Error> {
+        let value = u32::from_le_bytes(
+            self.memory[0x392f6..0x392fa]
+                .try_into()
+                .expect("four-byte Home frequency"),
+        );
+        match value {
+            0 => Ok(None),
+            30_000..=199_999_999 | 400_000_000..=470_000_000 => Ok(Some(value)),
+            _ => Err(Error::Unsupported {
+                line: 5 + 0x392f6 / RECORD_BYTES,
+                reason: "Home frequency outside canonical ranges",
+            }),
+        }
+    }
+
+    /// Replace only the four stored Home Hz bytes; `None` clears them to zero.
+    ///
+    /// No GUI correction, parent normalization or I/O occurs.
+    ///
+    /// # Errors
+    /// Invalid new values, including `Some(0)`, are rejected before checking the
+    /// current value. Unknown current frequencies are never repaired implicitly.
+    pub fn set_home_frequency_hz(&mut self, value: Option<u32>) -> Result<(), Error> {
+        let raw = match value {
+            None => 0,
+            Some(hz) if matches!(hz, 30_000..=199_999_999 | 400_000_000..=470_000_000) => hz,
+            _ => {
+                return Err(Error::Invalid {
+                    line: 5 + 0x392f6 / RECORD_BYTES,
+                    reason: "new Home frequency outside canonical ranges",
+                });
+            }
+        };
+        self.home_frequency_hz()?;
+        self.memory[0x392f6..0x392fa].copy_from_slice(&raw.to_le_bytes());
+        Ok(())
+    }
+
+    /// Return all 64 stored NTP server bytes without decoding or trimming.
+    pub fn ntp_server_raw(&self) -> &[u8] {
+        &self.memory[0x396be..0x396fe]
+    }
+
+    /// Store 0..=64 ASCII letters, digits, hyphens or dots, space-padded to 64 bytes.
+    ///
+    /// Static canonical-byte subset: RVA 0x72FBE -> 0x47FD0. This is not GUI
+    /// normalization or DNS/IP validation. Unknown current bytes may be explicitly
+    /// replaced. No other bytes change and no network or device I/O occurs.
+    ///
+    /// # Errors
+    /// Returns [`Error::Invalid`] for invalid length/alphabet before any copy.
+    pub fn set_ntp_server_ascii(&mut self, value: &str) -> Result<(), Error> {
+        let bytes = value.as_bytes();
+        if bytes.len() > 64
+            || !bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.'))
+        {
+            return Err(Error::Invalid {
+                line: 5 + 0x396be / RECORD_BYTES,
+                reason: "NTP server requires 0..=64 ASCII letters, digits, hyphens or dots",
+            });
+        }
+        let mut field = [b' '; 64];
+        field[..bytes.len()].copy_from_slice(bytes);
+        self.memory[0x396be..0x396fe].copy_from_slice(&field);
+        Ok(())
+    }
+
+    /// Return the exact 16-byte payload clone comment, not the raw header comment.
+    pub fn clone_comment_raw(&self) -> &[u8] {
+        &self.memory[0x35591..0x355a1]
+    }
+
+    /// Store canonical printable ASCII, space-padded to the 16-byte payload field.
+    ///
+    /// Static byte-entry subset: RVA 0x76673 -> 0x47FD0. Empty text is allowed;
+    /// nonempty text has no leading/trailing spaces. Interior spaces and ASCII
+    /// punctuation are preserved. Unlike GUI normalization, this rejects rather
+    /// than trims/clips/corrects input. Unknown current bytes may be replaced.
+    /// Header [`Self::comment_bytes`] is never synchronized; no I/O occurs.
+    ///
+    /// # Errors
+    /// Returns [`Error::Invalid`] for invalid length/alphabet or edge spaces,
+    /// before any image, metadata or original-source bytes change.
+    pub fn set_clone_comment_canonical_ascii(&mut self, value: &str) -> Result<(), Error> {
+        let bytes = value.as_bytes();
+        if bytes.len() > 16
+            || !bytes.iter().all(|b| (0x20..=0x7e).contains(b))
+            || bytes.first() == Some(&b' ')
+            || bytes.last() == Some(&b' ')
+        {
+            return Err(Error::Invalid {
+                line: 5 + 0x35591 / RECORD_BYTES,
+                reason: "clone comment requires 0..=16 printable ASCII bytes without edge spaces",
+            });
+        }
+        let mut field = [b' '; 16];
+        field[..bytes.len()].copy_from_slice(bytes);
+        self.memory[0x35591..0x355a1].copy_from_slice(&field);
+        Ok(())
+    }
+}
+
 // Numeric fields are stored settings only, based on static CS-705 1.30 evidence.
 // They have not been compared with the original GUI. No I/O or parent/mode
 // normalization occurs. Read/write RVAs accompany the literal offsets below.
