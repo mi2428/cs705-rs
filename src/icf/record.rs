@@ -1286,6 +1286,40 @@ pub fn decode_history_into(
     Ok(())
 }
 
+/// 73D9 reflector is a read-only raw8 history load, with no current-list lookup.
+/// FF clears validity only. Non-FF physical bytes are not clamped to five slots.
+pub fn load_reflector_storage_into(
+    image: &super::Icf<'_>,
+    index: u32,
+    holder: &mut DecodedRecord,
+) -> Result<(), Error> {
+    let (map, count) = history_map(0x14)?;
+    if index as usize >= count {
+        return Err(Error::Invalid {
+            line: 5,
+            reason: "reflector logical row outside dataset",
+        });
+    }
+    let physical = *image
+        .memory()
+        .get(map + index as usize)
+        .ok_or(Error::Invalid {
+            line: 5,
+            reason: "reflector map byte unavailable",
+        })?;
+    let raw = if physical == 255 {
+        None
+    } else {
+        let at = 0x32aed + 8 * usize::from(physical);
+        Some(image.memory().get(at..at + 8).ok_or(Error::Invalid {
+            line: 5,
+            reason: "reflector physical payload unavailable",
+        })?)
+    };
+    holder.set_header(0x14, index, holder.binding());
+    decode_history_base_into(holder, 0x14, raw)
+}
+
 /// Decode a physical Rx record after its REVERSE rank-map lookup (6C57..71F2).
 /// State, raw48, message20 and GPS92 are separate same-physical-row sources.
 /// This codec does not set validity/header or perform the adapter's first-match
@@ -1792,6 +1826,51 @@ mod tests {
         let before = h.clone();
         assert!(initial_normal_channel_into(&generation, 2, 5, &mut h).is_err());
         assert_eq!(h.as_bytes(), before.as_bytes());
+    }
+
+    #[test]
+    fn reflector_storage_keeps_raw8_and_unclamped_physical_map_read_only() {
+        let mut memory = vec![0xa6; 0x3c9c0];
+        memory[0x355a1] = 6;
+        memory[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+        memory[0x3c363..0x3c368].copy_from_slice(&[255, 2, 7, 254, 0]);
+        for (physical, raw) in [
+            (2, *b"REF001 \0"),
+            (7, [0x82, 0xa0, b'A', 0, 0x7f, b' ', b'Z', b' ']),
+            (254, *b"UNCLAMP "),
+            (0, *b"ZERO    "),
+        ] {
+            let at = 0x32aed + 8 * physical;
+            memory[at..at + 8].copy_from_slice(&raw);
+        }
+        let image = super::super::Icf::from_memory(memory).unwrap();
+        let before = image.memory().to_vec();
+        for (index, raw) in [
+            (0, None),
+            (1, Some(*b"REF001 \0")),
+            (2, Some([0x82, 0xa0, b'A', 0, 0x7f, b' ', b'Z', b' '])),
+            (3, Some(*b"UNCLAMP ")),
+            (4, Some(*b"ZERO    ")),
+        ] {
+            let mut h = DecodedRecord::from_bytes([0xa6; 616]);
+            h.set_header(2, 17, 0x1234);
+            let mut expected = h.clone();
+            expected.set_header(0x14, index, 0x1234);
+            expected.set_valid(raw.is_some());
+            if let Some(raw) = raw {
+                expected.as_mut_bytes()[0x18c..0x194].copy_from_slice(&raw);
+            }
+            load_reflector_storage_into(&image, index, &mut h).unwrap();
+            assert_eq!(h.as_bytes(), expected.as_bytes());
+            assert_eq!(h.as_bytes()[0x194], 0xa6);
+            assert_eq!(image.memory(), before);
+        }
+        let mut h = DecodedRecord::from_bytes([0xa6; 616]);
+        let before = h.clone();
+        for index in [5, u32::MAX] {
+            assert!(load_reflector_storage_into(&image, index, &mut h).is_err());
+            assert_eq!(h.as_bytes(), before.as_bytes());
+        }
     }
 
     #[test]
