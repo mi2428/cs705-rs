@@ -144,6 +144,23 @@ fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class
         }
     }
     let q = context(16);
+    assert!(
+        icf::frequency::Ranges::unpopulated()
+            .default_source_selector(None)
+            .is_err()
+    );
+    let captured = icf::frequency::Ranges::generate(&context(1), None).unwrap();
+    assert_eq!(captured.default_source_selector(None).unwrap(), 1);
+    let captured_host = icf::frequency::Ranges::generate(&q, Some(0x411)).unwrap();
+    assert_eq!(captured_host.default_source_selector(None).unwrap(), 0);
+    assert_eq!(
+        captured_host.default_source_selector(Some(0x409)).unwrap(),
+        0
+    );
+    let mut partial = icf::frequency::Ranges::unpopulated();
+    assert!(partial.regenerate(16, &q, None).is_err());
+    assert!(partial.default_source_selector(None).is_err());
+    assert_eq!(partial.default_source_selector(Some(0x409)).unwrap(), 1);
     assert!(icf::frequency::f20c(&q, None, 0).is_err());
     assert_eq!(
         icf::frequency::f20c(&q, Some(0x411), 3).unwrap(),

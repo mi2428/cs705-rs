@@ -295,6 +295,14 @@ impl Ranges {
     pub fn source_q(&self) -> Option<&[u8; 24]> {
         self.source_q.as_ref()
     }
+    /// Resolve the captured B selector, never a later live Q. An unpopulated
+    /// Rust owner has no captured source and cannot imply the native source0.
+    pub fn default_source_selector(&self, system_langid: Option<u16>) -> Result<usize, Error> {
+        if self.source_q.is_none() {
+            return Err(invalid("B source selector has not been captured"));
+        }
+        source_selector(self.selected, system_langid)
+    }
     pub fn is_complete(&self) -> bool {
         self.complete
     }
