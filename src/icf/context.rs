@@ -86,6 +86,35 @@ impl Context {
         check == (packed & !0x49).count_ones() % 8
     }
 
+    /// 5641C's native metadata producer. Full DWORD/byte values are shifted and
+    /// ADDED with32bit wrap; unknown bytes are not bool-masked. Checksum uses
+    /// only kind's low5/C's low2 bits, but the full ten semantic byte values.
+    /// Padding and the three non-comparison option bytes are not serialized.
+    pub fn encode_packed(&self) -> u32 {
+        let kind = u32::from_le_bytes(self.raw[..4].try_into().unwrap());
+        let c = u32::from_le_bytes(self.raw[8..12].try_into().unwrap());
+        let mut check = (kind & 31).count_ones() + (c & 3).count_ones();
+        let mut packed = (kind << 18).wrapping_add(c << 16);
+        for (at, bit) in [
+            (4, 25),
+            (5, 24),
+            (12, 8),
+            (13, 7),
+            (14, 29),
+            (15, 26),
+            (16, 27),
+            (17, 15),
+            (18, 14),
+            (19, 11),
+        ] {
+            let value = u32::from(self.raw[at]);
+            check += value;
+            packed = packed.wrapping_add(value << bit);
+        }
+        check &= 7;
+        packed.wrapping_add((check & 1) | ((check & 2) << 2) | ((check & 4) << 4))
+    }
+
     /// Registry caller5565B's actual failure correction: only kind becomes16.
     pub fn adopt_registry_packed(&mut self, packed: u32) -> bool {
         let valid = self.decode_packed(packed);
@@ -169,6 +198,35 @@ fn invalid(reason: &'static str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_pack_uses_live_full_fields_wrapping_addition_and_original_checksum_inputs() {
+        for (kind, c, at, value, expected) in [
+            (1_u32, 0_u32, 4, 0, 0x0004_0001_u32),
+            (31, 0, 4, 0, 0x007c_0041),
+            (0, 3, 4, 0, 0x0003_0008),
+            (0, 0, 4, 2, 0x0400_0008),
+            (0, 0, 19, 255, 0x0007_f849),
+            (0xffff_ffff, 0, 4, 0, 0xfffc_0041),
+        ] {
+            let mut raw = [0; 24];
+            raw[..4].copy_from_slice(&kind.to_le_bytes());
+            raw[8..12].copy_from_slice(&c.to_le_bytes());
+            raw[at] = value;
+            raw[6] = 0xa6;
+            raw[7] = 0x7f;
+            raw[20..].fill(255);
+            assert_eq!(Context::from_bytes(raw).encode_packed(), expected);
+        }
+        for packed in [0, 0x40001, 0x40808, 0x40001149, 0x3fff_ffff] {
+            let mut q = Context::before_registry();
+            q.decode_packed(packed);
+            let canonical = q.encode_packed();
+            let mut roundtrip = Context::before_registry();
+            assert!(roundtrip.decode_packed(canonical));
+            assert_eq!(roundtrip.fields(), q.fields());
+        }
+    }
 
     #[test]
     fn constructor_and_header_adoption_keep_known_initialization_and_opaque_options_separate() {
