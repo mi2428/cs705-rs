@@ -929,15 +929,16 @@ pub fn encode_pair_into(
     Ok(())
 }
 
-/// Kind18/raw10 load (7514..7569): raw mode byte0 -> holder+44, raw+2 -> +138,
-/// raw+6 -> +3C, +38=trunc(signed index/3), valid=1. It does NOT use mode+58's
-/// lookup or touch the opaque raw byte1. Header and unrelated fields survive.
+/// Kind18/raw10 load (7514..7582): raw mode byte0 -> holder+44, raw+2 -> +138,
+/// raw+6 -> +3C, +38=trunc(signed index/3). Valid requires all three fields
+/// nonzero; invalid keeps their values. No mode+58 lookup or opaque byte1 read.
+/// Header and all unrelated fields/flag bits survive.
 pub fn decode_mode_pair_into(holder: &mut DecodedRecord, raw: &[u8; 10]) {
     holder.bytes[0x138..0x13c].copy_from_slice(&raw[2..6]);
     holder.bytes[0x3c..0x40].copy_from_slice(&raw[6..10]);
     holder.put_word(0x44, u32::from(raw[0]));
     holder.put_word(0x38, ((holder.index() as i32) / 3) as u32);
-    holder.set_valid(true);
+    holder.set_valid(holder.word(0x44) != 0 && holder.word(0x138) != 0 && holder.word(0x3c) != 0);
 }
 
 /// Kind18 save (816C..81C7) stores +138/raw2, +3C/raw6, then low8 +44/raw0.
@@ -1853,6 +1854,37 @@ mod tests {
         );
         assert_eq!(h.as_bytes(), &before);
         assert_eq!(raw, [0x93; 8]);
+    }
+
+    #[test]
+    fn mode_pair_zero_fields_clear_only_valid_and_preserve_payload() {
+        for flags in [0xa4, 0xa5] {
+            for (dup, low, high, valid) in [
+                (0u8, 0u32, 0u32, false),
+                (0, 100_000, 200_000, false),
+                (1, 0, 200_000, false),
+                (1, 100_000, 0, false),
+                (1, 100_000, 200_000, true),
+            ] {
+                let mut h = DecodedRecord::from_bytes([0xa4; 616]);
+                h.set_header(0x18, 11, 0x8765_4321);
+                h.bytes[12] = flags;
+                let mut expected = *h.as_bytes();
+                expected[12] = flags & !1 | u8::from(valid);
+                expected[0x44..0x48].copy_from_slice(&u32::from(dup).to_le_bytes());
+                expected[0x138..0x13c].copy_from_slice(&low.to_le_bytes());
+                expected[0x3c..0x40].copy_from_slice(&high.to_le_bytes());
+                expected[0x38..0x3c].copy_from_slice(&3u32.to_le_bytes());
+                let mut raw = [0x93; 10];
+                raw[0] = dup;
+                raw[2..6].copy_from_slice(&low.to_le_bytes());
+                raw[6..10].copy_from_slice(&high.to_le_bytes());
+                let saved = raw;
+                decode_mode_pair_into(&mut h, &raw);
+                assert_eq!(h.as_bytes(), &expected);
+                assert_eq!(raw, saved);
+            }
+        }
     }
 
     #[test]
