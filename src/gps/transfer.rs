@@ -5,6 +5,7 @@
 
 use super::operations::{self, Record};
 use crate::csv::{self, control::Counts, payload};
+use crate::icf::record::{DecodedRecord, decode_gps_into};
 use crate::icf::{Error as ImageError, Icf};
 
 const ALARM: usize = 0x3c622;
@@ -89,17 +90,14 @@ pub fn export_csv(
                 let raw = image.physical_gps_record_raw(p)?.ok_or(Failure::Text(
                     csv::Error::SourceUnavailable("GPS exported physical record disappeared"),
                 ))?;
-                let mut h = [0; 616];
-                h[12] = 1;
-                for (destination, source, n) in [
-                    (0x25a, 0, 4),
-                    (0x25e, 4, 4),
-                    (0x254, 8, 6),
-                    (0x264, 14, 4),
-                    (0x244, 18, 16),
-                ] {
-                    h[destination..destination + n].copy_from_slice(&raw[source..source + n]);
-                }
+                let raw: &[u8; 34] = raw.try_into().map_err(|_| {
+                    Failure::Text(csv::Error::Invalid(
+                        "GPS physical record must have 34 bytes",
+                    ))
+                })?;
+                let mut h = DecodedRecord::from_bytes([0; 616]);
+                h.set_valid(true);
+                decode_gps_into(&mut h, raw, g as u32);
                 let memory = image.memory();
                 let offset = i16::from_le_bytes([memory[0x396ff], memory[0x39700]]);
                 let alarm = memory[ALARM] == 3
@@ -119,28 +117,20 @@ pub fn export_csv(
                     memory_selection_column: false,
                     memory_pair: false,
                 };
-                let bytes = payload::build(
+                let bytes = payload::build_portable(
                     payload::Kind::Gps,
-                    payload::Holder::new(&h).map_err(Failure::Text)?,
+                    payload::Holder::new(h.as_bytes()).map_err(Failure::Text)?,
                     c,
-                    |r| match r.adapter {
-                        payload::Adapter::Group => csv::table::gps_group_text(g as u32),
-                        payload::Adapter::Alarm => Ok(if alarm {
-                            b"ON".to_vec()
-                        } else {
-                            b"OFF".to_vec()
-                        }),
-                        _ => {
-                            // Date and Time read the live offset independently.
-                            let memory = image.memory();
-                            native(payload::Request {
-                                utc_offset_minutes: i16::from_le_bytes([
-                                    memory[0x396ff],
-                                    memory[0x39700],
-                                ]),
-                                ..r
-                            })
-                        }
+                    |r| {
+                        // Date and Time read the live offset independently.
+                        let memory = image.memory();
+                        native(payload::Request {
+                            utc_offset_minutes: i16::from_le_bytes([
+                                memory[0x396ff],
+                                memory[0x39700],
+                            ]),
+                            ..r
+                        })
                     },
                 )
                 .map_err(Failure::Text)?;
@@ -215,6 +205,55 @@ pub fn import_decoded(
     image: &mut Icf<'_>,
     scope: Scope,
     rows: impl IntoIterator<Item = Result<Parsed, csv::Error>>,
+    alarm_seen: bool,
+) -> Import {
+    let mut rows = rows.into_iter();
+    import_rows(image, scope, |_| rows.next(), alarm_seen)
+}
+
+/// Real CSV byte -> value -> 83FDC finalized row -> image path. Header failure
+/// precedes target deletion; advancing rows/finalizers follows the deletion.
+pub fn import_csv(
+    image: &mut Icf<'_>,
+    scope: Scope,
+    source: &[u8],
+    options: super::parser::Options<'_>,
+    alarm_seen: bool,
+) -> Import {
+    let mut rows = match super::parser::Rows::new(source, options) {
+        Ok(rows) => rows,
+        Err(error) => {
+            return Import {
+                counts: Counts::default(),
+                rows_read: 0,
+                applied: 0,
+                failure: Some(Failure::Text(error)),
+            };
+        }
+    };
+    let mut reader_alarm_seen = alarm_seen;
+    import_rows(
+        image,
+        scope,
+        |image| {
+            rows.next().map(|draft| {
+                let mut draft = draft?;
+                let offset = i16::from_le_bytes([image.memory()[0x396ff], image.memory()[0x39700]]);
+                draft.finalize(
+                    matches!(scope, Scope::Whole),
+                    offset,
+                    &mut reader_alarm_seen,
+                )
+            })
+        },
+        alarm_seen,
+    )
+}
+
+fn import_rows(
+    image: &mut Icf<'_>,
+    scope: Scope,
+    mut next: impl FnMut(&Icf<'_>) -> Option<Result<Parsed, csv::Error>>,
     mut alarm_seen: bool,
 ) -> Import {
     let mut out = Import {
@@ -242,7 +281,7 @@ pub fn import_decoded(
                 image.patch_memory(&[(NAMES + 16 * (g - 1), &[b' '; 16])])?;
             }
         }
-        for row in rows {
+        while let Some(row) = next(image) {
             out.rows_read += 1;
             let row = row.map_err(Failure::Text)?;
             if !row.record.valid {
@@ -327,6 +366,50 @@ mod tests {
             corrections: 0,
             alarm: false,
         }
+    }
+    #[test]
+    fn csv_bytes_finalize_before_image_apply_and_header_failure_does_not_clear() {
+        let mut image = image();
+        image
+            .patch_memory(&[(0x396ff, &60_i16.to_le_bytes())])
+            .unwrap();
+        let options = super::super::parser::Options {
+            locale: csv::Locale::copied(b'.', b';'),
+            datetime: csv::datetime::Context {
+                short_date: b"yyyy/mm/dd",
+                date_separator: b'/',
+                time_separator: b':',
+                decimal_separator: b'.',
+                am: b"AM",
+                pm: b"PM",
+                current_year: 2026,
+                two_digit_window: 50,
+                primary_language: 0x11,
+                eras: &[],
+            },
+            hemispheres: *b"NE",
+            group_name_seed: [b' '; 16],
+        };
+        let input=b"Group;Group Name;Name;Date;Time;Latitude;Longitude;Altitude;Alarm\nA;G;FIRST;2000/01/02;0:30:00;0;0;1;ON\nA;G;BAD;;; ;0;;ON\nA;G;12345678901234567;;;0;0;;ON\n";
+        let out = import_csv(&mut image, Scope::Whole, input, options.clone(), false);
+        assert!(out.failure.is_none());
+        assert_eq!(
+            (
+                out.rows_read,
+                out.applied,
+                out.counts.c2,
+                out.counts.c3,
+                out.counts.c4
+            ),
+            (3, 2, 1, 3, 2)
+        );
+        let rows = operations::copy(&image, 1, 0, 1).unwrap();
+        assert_eq!(&rows[0].bytes[8..14], &[1, 1, 0, 0x23, 0x30, 0]);
+        assert_eq!(&image.memory()[ALARM..ALARM + 4], &[3, 1, 0, 0]);
+        let before = image.memory().to_vec();
+        let out = import_csv(&mut image, Scope::Whole, b"Name\nX\n", options, false);
+        assert!(out.failure.is_some());
+        assert_eq!(image.memory(), before);
     }
     #[test]
     fn original_import_clears_first_and_error_keeps_applied_prefix() {

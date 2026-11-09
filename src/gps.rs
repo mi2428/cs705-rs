@@ -16,6 +16,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 pub mod operations;
+pub mod parser;
 pub mod transfer;
 
 const HEADER: &[u8] = b"Group,Group Name,Name,Date,Time,Latitude,Longitude,Altitude,Alarm\r\n";
