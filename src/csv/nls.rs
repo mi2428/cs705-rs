@@ -4,7 +4,51 @@
 //! The preceding476E4 sanitation belongs to its caller and must already have
 //! happened before map_copy_back; this function does not claim that whole editor.
 
-use super::{Error, is_lead, trim_fixed_spaces};
+use super::{Error, clip_dbcs, is_lead, trim_fixed_spaces};
+
+/// 476E4 walks logical bytes, not a C-prefix. Valid DBCS pairs are kept without
+/// checking assigned CP932 codepoints. An invalid lead/trail pair replaces BOTH
+/// bytes; isolated leads and invalid single bytes replace one. Return indicates
+/// a replacement path, not a native full-EAX result or an accepted editor event.
+pub fn sanitize(bytes: &mut [u8], replacement: u8) -> bool {
+    let mut at = 0;
+    let mut changed = false;
+    while at < bytes.len() {
+        let byte = bytes[at];
+        if is_lead(byte) {
+            if at + 1 == bytes.len() {
+                bytes[at] = replacement;
+                changed = true;
+                at += 1;
+            } else if matches!(bytes[at+1],0x40..=0x7e|0x80..=0xfc) {
+                at += 2;
+            } else {
+                bytes[at] = replacement;
+                bytes[at + 1] = replacement;
+                changed = true;
+                at += 2;
+            }
+        } else {
+            if !matches!(byte,0x20..=0x7e|0xa1..=0xdf) {
+                bytes[at] = replacement;
+                changed = true;
+            }
+            at += 1;
+        }
+    }
+    changed
+}
+
+/// Mode1 whole-name grammar, not CSV B70E4: sanitize before trim/overwidth-only
+/// clipping, so even an exact-width isolated lead is repaired here.
+pub fn name_candidate(shared: &mut [u8], maximum: usize) -> Result<Vec<u8>, Error> {
+    if shared.len() > 1024 * 1024 {
+        return Err(Error::Limit("name source exceeds 1 MiB"));
+    }
+    sanitize(shared, b' ');
+    let candidate = trim_candidate(shared);
+    Ok(clip_dbcs(&candidate, maximum).0.to_vec())
+}
 
 /// LCID0411/flags600000 request with explicit2n capacities. `native` can return
 /// zero after partial writes; its result is retained but never gates copy-back.
@@ -105,11 +149,100 @@ pub fn callsign_fixed(
     native: impl FnMut(&[u8], &mut [u8]) -> Result<i32, Error>,
 ) -> Result<([u8; 8], bool), Error> {
     let clipped = shared.len() > 8;
+    sanitize(shared, 0);
+    compact_zero(shared);
     let _native_result = map_copy_back(shared, native)?;
     let mut raw = [b' '; 8];
     let n = shared.len().min(8);
     raw[..n].copy_from_slice(&shared[..n]);
     Ok((raw, clipped))
+}
+
+/// LCMap's portable ASCII domain only. High bytes still require actual NLS
+/// output; they are not UTF-8 decoded or silently passed through as ASCII.
+pub fn ascii_map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
+    if !source.is_ascii() {
+        return Err(Error::SourceUnavailable(
+            "callsign NLS mapping for non-ASCII bytes",
+        ));
+    }
+    if destination.len() < source.len() {
+        return Err(Error::Invalid("callsign mapping destination width"));
+    }
+    destination[..source.len()].copy_from_slice(source);
+    i32::try_from(source.len()).map_err(|_| Error::Limit("callsign NLS result length"))
+}
+
+/// Captured descriptor flags relevant to96308, not keyboard/acceptance gates.
+#[derive(Debug, Clone, Copy)]
+pub struct Profile<'a> {
+    pub uppercase: bool,
+    pub keep_kana: bool,
+    pub keep_spaces: bool,
+    pub punctuation_exceptions: &'a [u8],
+    pub maximum: usize,
+}
+
+fn profile_bytes(bytes: &mut [u8], profile: Profile<'_>) {
+    let replacement = if profile.keep_spaces { b' ' } else { 0 };
+    if !profile.keep_kana {
+        for byte in bytes.iter_mut() {
+            if (0xa1..=0xdf).contains(byte) {
+                *byte = replacement;
+            }
+        }
+        if replacement == 0 {
+            compact_zero(bytes);
+        }
+    }
+    if !profile.keep_spaces {
+        for byte in bytes.iter_mut() {
+            if *byte == b' ' {
+                *byte = 0;
+            }
+        }
+        compact_zero(bytes);
+    }
+    for byte in bytes.iter_mut() {
+        if byte.is_ascii_punctuation() && !profile.punctuation_exceptions.contains(byte) {
+            *byte = replacement;
+        }
+    }
+    if replacement == 0 {
+        compact_zero(bytes);
+    }
+}
+
+/// Mode0's ordered normalizer. LCMap copy-back mutates the shared input before
+/// any later failure. Additional Upper separates a new n-byte buffer; without
+/// Upper, later byte filters still mutate the caller's shared allocation.
+pub fn whole_text(
+    shared: &mut [u8],
+    profile: Profile<'_>,
+    map: impl FnMut(&[u8], &mut [u8]) -> Result<i32, Error>,
+    upper: impl FnMut(&mut [u8]) -> Result<u32, Error>,
+) -> Result<Vec<u8>, Error> {
+    if shared.len() > 1024 * 1024 {
+        return Err(Error::Limit("whole text source exceeds 1 MiB"));
+    }
+    let replacement = if profile.keep_spaces { b' ' } else { 0 };
+    sanitize(shared, replacement);
+    if replacement == 0 {
+        compact_zero(shared);
+    }
+    // 47B20/47BE8 has its own zero-fill sanitation before native mapping.
+    sanitize(shared, 0);
+    compact_zero(shared);
+    let _result = map_copy_back(shared, map)?;
+    let candidate = if profile.uppercase {
+        let mut own = uppercase_copy(shared, upper)?;
+        profile_bytes(&mut own, profile);
+        trim_candidate(&own)
+    } else {
+        profile_bytes(shared, profile);
+        trim_candidate(shared)
+    };
+    Ok(clip_dbcs(&candidate, profile.maximum).0.to_vec())
 }
 
 /// 84708's final fold is C + bool(C + name_changed), with DWORD wrapping.
@@ -173,5 +306,78 @@ mod tests {
         assert_eq!(call, *b"A B /9Z ");
         assert_eq!(callsign_correction_count(2, false), 3);
         assert_eq!(callsign_correction_count(u32::MAX, true), u32::MAX);
+    }
+
+    #[test]
+    fn mode1_name_repairs_exact_width_lead_but_csv_fixed_text_does_not() {
+        let mut input = *b"A\x81";
+        assert_eq!(name_candidate(&mut input, 2).unwrap(), b"A");
+        assert_eq!(input, *b"A ");
+        assert_eq!(super::super::fixed_text::<2>(b"A\x81"), (*b"A\x81", false));
+        let mut raw = *b"A\x82\0TAIL\x80";
+        assert!(sanitize(&mut raw, b' '));
+        assert_eq!(raw, *b"A  TAIL ");
+        let mut raw = [0x81, 0x40, 0x81, 0x7f, 0xa1, 0xf0];
+        sanitize(&mut raw, b' ');
+        assert_eq!(raw, [0x81, 0x40, b' ', b' ', 0xa1, b' ']);
+    }
+    #[test]
+    fn descriptor_filters_and_native_failure_preserve_shared_update_boundaries() {
+        let profile = Profile {
+            uppercase: true,
+            keep_kana: false,
+            keep_spaces: true,
+            punctuation_exceptions: b"/",
+            maximum: 8,
+        };
+        let mut shared = *b"ab!c";
+        let candidate = whole_text(
+            &mut shared,
+            profile,
+            |source, dst| {
+                dst.copy_from_slice(source);
+                Ok(0)
+            },
+            |dst| {
+                dst.copy_from_slice(b"AB!C");
+                Ok(0)
+            },
+        )
+        .unwrap();
+        assert_eq!(candidate, b"AB C");
+        assert_eq!(shared, *b"ab!c");
+        let mut shared = *b"A\0B";
+        assert!(
+            whole_text(
+                &mut shared,
+                profile,
+                |_, _| Err(Error::Operation("injected map failure")),
+                |_| panic!()
+            )
+            .is_err()
+        );
+        assert_eq!(shared, *b"A B");
+        let mut shared = *b"ab\\ c";
+        let profile = Profile {
+            uppercase: false,
+            keep_kana: false,
+            keep_spaces: false,
+            punctuation_exceptions: b"/",
+            maximum: 16,
+        };
+        assert_eq!(
+            whole_text(
+                &mut shared,
+                profile,
+                |source, dst| {
+                    dst.copy_from_slice(source);
+                    Ok(0)
+                },
+                |_| panic!()
+            )
+            .unwrap(),
+            b"abc"
+        );
+        assert_eq!(shared, *b"abc  ");
     }
 }

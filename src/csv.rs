@@ -99,27 +99,55 @@ pub fn is_lead(byte: u8) -> bool {
 }
 
 /// Split logical bytes, preserving quotes, empty tails and illegal DBCS trails.
-pub fn split_cells(line: &[u8], separator: u8) -> Vec<&[u8]> { Cells::new(line,separator).collect() }
+pub fn split_cells(line: &[u8], separator: u8) -> Vec<&[u8]> {
+    Cells::new(line, separator).collect()
+}
 
-struct Cells<'a>{line:&'a[u8],separator:u8,start:usize,at:usize,done:bool}
-impl<'a> Cells<'a>{fn new(line:&'a[u8],separator:u8)->Self{Self{line,separator,start:0,at:0,done:false}}}
-impl<'a> Iterator for Cells<'a>{
-    type Item=&'a[u8];
-    fn next(&mut self)->Option<Self::Item>{
-        if self.done{return None;}
-        while self.at<self.line.len(){
-            if is_lead(self.line[self.at]){self.at+=2;}else{
-                let at=self.at;self.at+=1;
-                if self.line[at]==self.separator{let cell=&self.line[self.start..at];self.start=self.at;return Some(cell);}
+struct Cells<'a> {
+    line: &'a [u8],
+    separator: u8,
+    start: usize,
+    at: usize,
+    done: bool,
+}
+impl<'a> Cells<'a> {
+    fn new(line: &'a [u8], separator: u8) -> Self {
+        Self {
+            line,
+            separator,
+            start: 0,
+            at: 0,
+            done: false,
+        }
+    }
+}
+impl<'a> Iterator for Cells<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        while self.at < self.line.len() {
+            if is_lead(self.line[self.at]) {
+                self.at += 2;
+            } else {
+                let at = self.at;
+                self.at += 1;
+                if self.line[at] == self.separator {
+                    let cell = &self.line[self.start..at];
+                    self.start = self.at;
+                    return Some(cell);
+                }
             }
         }
-        self.done=true;Some(&self.line[self.start..])
+        self.done = true;
+        Some(&self.line[self.start..])
     }
 }
 
 /// None is an absent header column; a present short row returns Some(empty).
 pub fn column(line: &[u8], index: Option<usize>, separator: u8) -> Option<&[u8]> {
-    index.map(|index| Cells::new(line,separator).nth(index).unwrap_or(b""))
+    index.map(|index| Cells::new(line, separator).nth(index).unwrap_or(b""))
 }
 
 /// Byte header matching with caller-supplied CharLowerBuffA-equivalent output.
@@ -132,12 +160,12 @@ pub fn find_column_with(
 ) -> Result<Option<usize>, Error> {
     let label = lower(trim(label))?;
     let header = lower(header)?;
-    Ok(Cells::new(&header,separator).position(|cell|trim(cell)==label))
+    Ok(Cells::new(&header, separator).position(|cell| trim(cell) == label))
 }
 
 /// ASCII-only case mapping is explicitly selected, not a CP932/NLS claim.
 pub fn find_column_ascii(header: &[u8], label: &[u8], separator: u8) -> Option<usize> {
-    Cells::new(header,separator).position(|cell|trim(cell).eq_ignore_ascii_case(trim(label)))
+    Cells::new(header, separator).position(|cell| trim(cell).eq_ignore_ascii_case(trim(label)))
 }
 
 /// Bounded loaded text. Empty physical rows are skipped only after the header.
@@ -157,11 +185,15 @@ impl<'a> Reader<'a> {
             return Err(Error::Invalid("uncopied CSV locale"));
         }
         let source = source.split(|b| *b == 0).next().unwrap_or(b"");
-        let mut header=None;
-        let mut rows=Vec::new();
-        let mut push_line=|line:&'a[u8]|->Result<(),Error>{
-            if header.is_none(){header=Some(line);}else if !line.is_empty(){
-                if rows.len()==100000{return Err(Error::Limit("more than 100000 nonempty CSV rows"));}
+        let mut header = None;
+        let mut rows = Vec::new();
+        let mut push_line = |line: &'a [u8]| -> Result<(), Error> {
+            if header.is_none() {
+                header = Some(line);
+            } else if !line.is_empty() {
+                if rows.len() == 100000 {
+                    return Err(Error::Limit("more than 100000 nonempty CSV rows"));
+                }
                 rows.push(line);
             }
             Ok(())
@@ -219,8 +251,15 @@ fn trim_fixed_spaces(mut source: &[u8]) -> &[u8] {
 /// DBCS-safe byte clipping only when over width. Clipping alone is counted.
 pub fn fixed_text<const N: usize>(source: &[u8]) -> ([u8; N], bool) {
     let source = trim_fixed_spaces(source);
-    let clipped = source.len() > N;
-    let mut len = source.len().min(N);
+    let (source, clipped) = clip_dbcs(source, N);
+    let mut output = [b' '; N];
+    output[..source.len()].copy_from_slice(source);
+    (output, clipped)
+}
+
+fn clip_dbcs(source: &[u8], maximum: usize) -> (&[u8], bool) {
+    let clipped = source.len() > maximum;
+    let mut len = source.len().min(maximum);
     if clipped {
         let mut at = 0;
         while at < len {
@@ -235,9 +274,7 @@ pub fn fixed_text<const N: usize>(source: &[u8]) -> ([u8; N], bool) {
             }
         }
     }
-    let mut output = [b' '; N];
-    output[..len].copy_from_slice(&source[..len]);
-    (output, clipped)
+    (&source[..len], clipped)
 }
 
 /// B71E0/B62E8: precision-s C-prefix, both delimiters to spaces, TrimRight.
@@ -319,11 +356,14 @@ mod tests {
         assert_eq!(column(b"a", None, b','), None);
         assert!(Reader::new(b"", locale).is_err());
         assert_eq!(Reader::new(b"\n", locale).unwrap().header(), b"");
-        let empty_lines=b"\n".repeat(1_000_001);
-        assert!(Reader::new(&empty_lines,locale).unwrap().rows().is_empty());
-        let excess=[b"H\n".as_slice(),&b"x\n".repeat(100001)].concat();
-        assert!(matches!(Reader::new(&excess,locale),Err(Error::Limit(_))));
-        assert_eq!(column(b"a,b,c",Some(usize::MAX),b','),Some(b"".as_slice()));
+        let empty_lines = b"\n".repeat(1_000_001);
+        assert!(Reader::new(&empty_lines, locale).unwrap().rows().is_empty());
+        let excess = [b"H\n".as_slice(), &b"x\n".repeat(100001)].concat();
+        assert!(matches!(Reader::new(&excess, locale), Err(Error::Limit(_))));
+        assert_eq!(
+            column(b"a,b,c", Some(usize::MAX), b','),
+            Some(b"".as_slice())
+        );
     }
     #[test]
     fn clipping_counts_and_export_are_not_rfc_csv() {

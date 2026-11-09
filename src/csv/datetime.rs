@@ -174,7 +174,9 @@ pub fn parse_date_with(
         if offset > 0 {
             if context.primary_language == 0x12 {
                 if year <= 99 {
-                    year = year.wrapping_add((i32::from(context.current_year).wrapping_add(offset) / 100) * 100);
+                    year = year.wrapping_add(
+                        (i32::from(context.current_year).wrapping_add(offset) / 100) * 100,
+                    );
                 }
                 year = year.wrapping_sub(offset);
             } else {
@@ -428,6 +430,77 @@ pub fn effective_offset(minutes: i16) -> Result<i16, Error> {
     Ok(if minutes < 0 { -effective } else { effective })
 }
 
+/// BAA10..BAE83, distinct from display's percent-X/default99 BCD conversion.
+/// Missing time keeps a nonmissing BCD date and reports a correction even when
+/// bytes do not change. The date bound is tested BEFORE local-to-UTC shifting.
+/// An offset EncodeTime failure retains any preceding date repair.
+pub fn finalize_gps_raw(raw: &mut [u8; 6], minutes: i16) -> Result<bool, Error> {
+    fn bcd(bytes: &[u8]) -> bool {
+        bytes.iter().all(|b| *b < 0xa0 && *b & 15 < 10)
+    }
+    if !bcd(&raw[3..]) {
+        raw.fill(0x99);
+        return Ok(true);
+    }
+    if raw[3..] == [0x99; 3] {
+        if !bcd(&raw[..3]) {
+            raw[..3].fill(0x99);
+            return Ok(true);
+        }
+        return Ok(raw[..3] != [0x99; 3]);
+    }
+    let mut corrected = false;
+    let has_date = if !bcd(&raw[..3]) {
+        raw[..3].fill(0x99);
+        corrected = true;
+        false
+    } else {
+        raw[..3] != [0x99; 3]
+    };
+    let (date, time) = decode_raw(*raw);
+    if !valid_time(time) {
+        raw.fill(0x99);
+        return Ok(true);
+    }
+    let offset = effective_offset(minutes)?;
+    if has_date {
+        if !valid_date(date) {
+            raw[..3].fill(0x99);
+            return Ok(true);
+        }
+        let key = (date.year, date.month, date.day);
+        if !((2000, 1, 2)..=(2099, 12, 30)).contains(&key) {
+            raw.fill(0x99);
+            return Ok(true);
+        }
+        let (date, time) = shift_minutes(date, time, -offset)?;
+        raw.copy_from_slice(&[
+            encode_bcd(date.day),
+            encode_bcd(date.month),
+            encode_bcd((date.year % 100) as u8),
+            encode_bcd(time.hour),
+            encode_bcd(time.minute),
+            encode_bcd(time.second),
+        ]);
+    } else {
+        let (_, time) = shift_minutes(
+            Date {
+                year: 2000,
+                month: 10,
+                day: 10,
+            },
+            time,
+            -offset,
+        )?;
+        raw[3..].copy_from_slice(&[
+            encode_bcd(time.hour),
+            encode_bcd(time.minute),
+            encode_bcd(time.second),
+        ]);
+    }
+    Ok(corrected)
+}
+
 /// Native date token request. Era/day/month captions depend on actual runtime
 /// locale/API outputs, not on a guessed English/Japanese calendar table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -625,6 +698,47 @@ pub fn timestamp(raw: [u8; 3], offset: i16, separators: [u8; 2]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn baa10_missing_bcd_bounds_offset_order_and_partial_failure_match_literals() {
+        for (input, offset, expected, changed) in [
+            ([2, 1, 0, 0, 0x30, 0], 60, [1, 1, 0, 0x23, 0x30, 0], false),
+            ([1, 1, 0, 0, 0, 0], 0, [0x99; 6], true),
+            ([0x31, 0x12, 0x99, 0, 0, 0], 0, [0x99; 6], true),
+            ([0xff, 0xff, 0xff, 0x99, 0x99, 0x99], 1440, [0x99; 6], true),
+            (
+                [0, 0, 0, 0x99, 0x99, 0x99],
+                1440,
+                [0, 0, 0, 0x99, 0x99, 0x99],
+                true,
+            ),
+            (
+                [0x99, 0x99, 0x99, 0, 0x30, 0],
+                60,
+                [0x99, 0x99, 0x99, 0x23, 0x30, 0],
+                false,
+            ),
+            (
+                [0xff, 0xff, 0xff, 0, 0x30, 0],
+                60,
+                [0x99, 0x99, 0x99, 0x23, 0x30, 0],
+                true,
+            ),
+            (
+                [0x31, 2, 0x26, 0, 0x30, 0],
+                60,
+                [0x99, 0x99, 0x99, 0, 0x30, 0],
+                true,
+            ),
+            ([2, 1, 0, 0x24, 0, 0], 1440, [0x99; 6], true),
+        ] {
+            let mut raw = input;
+            assert_eq!(finalize_gps_raw(&mut raw, offset).unwrap(), changed);
+            assert_eq!(raw, expected);
+        }
+        let mut raw = [0xff, 0xff, 0xff, 0, 0x30, 0];
+        assert!(finalize_gps_raw(&mut raw, 1440).is_err());
+        assert_eq!(raw, [0x99, 0x99, 0x99, 0, 0x30, 0]);
+    }
     fn context() -> Context<'static> {
         Context {
             short_date: b"yyyy/mm/dd",
@@ -699,8 +813,13 @@ mod tests {
             )
         );
         assert_eq!(fixed_time(t, 0), b"233045");
-        let extreme=[Era{name:Some(b"NAME"),offset:i32::MAX}];c.eras=&extreme;c.primary_language=0x12;
-        assert_eq!(parse_date(b"AM0/1/1",&c).unwrap().year,2049);
+        let extreme = [Era {
+            name: Some(b"NAME"),
+            offset: i32::MAX,
+        }];
+        c.eras = &extreme;
+        c.primary_language = 0x12;
+        assert_eq!(parse_date(b"AM0/1/1", &c).unwrap().year, 2049);
     }
 
     #[test]

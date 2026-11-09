@@ -457,14 +457,58 @@ pub fn build(
     join(&cells, c.separator, true)
 }
 
-/// Finite signed-minute UTC formatter. The original 7FFF sentinel's literal is
-/// an explicit provider request until its source is supplied; never guessed.
+/// Portable static-label profile. Only calendar, overlay and not-yet-modeled
+/// profiles reach runtime; the raw builder remains available for explicit live
+/// resources without silently overriding them with a built-in profile.
+pub fn build_portable(
+    kind: Kind,
+    h: Holder<'_>,
+    c: Context<'_>,
+    mut runtime: impl FnMut(Request<'_>) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<u8>, Error> {
+    build(kind, h, c, |request| {
+        match super::table::portable_label(kind, &request, c.decimal)? {
+            Some(label) => Ok(label),
+            None => runtime(request),
+        }
+    })
+}
+
+/// 8E37C reads live name/call arrays directly for the same row. Shared type0D
+/// projection is only a bridge to the builder; header/validity is not a gate.
+pub fn callsign_row(
+    image: &crate::icf::Icf<'_>,
+    index: usize,
+    c: Context<'_>,
+) -> Result<Vec<u8>, Error> {
+    if index >= 300 {
+        return Err(Error::Invalid("CSV callsign row outside 0..300"));
+    }
+    let memory = image.memory();
+    let name: &[u8; 16] = memory[0x2f703 + 16 * index..0x2f703 + 16 * (index + 1)]
+        .try_into()
+        .expect("UR name width");
+    let call: &[u8; 8] = memory[0x2eda3 + 8 * index..0x2eda3 + 8 * (index + 1)]
+        .try_into()
+        .expect("UR call width");
+    let mut holder = crate::icf::record::reset_holder(0x0d, index as u32, 0);
+    crate::icf::record::decode_callsign_into(&mut holder, name, call);
+    build(
+        Kind::Callsign,
+        Holder::new(holder.as_bytes())?,
+        Context {
+            row: index as u32,
+            ..c
+        },
+        |_| Err(Error::Invalid("unexpected callsign formatter request")),
+    )
+}
+
+/// B9990's signed-minute formatter, including the 7FFF literal and hour low8.
 /// Other raw values are not clamped to canonical setter bounds.
 pub fn utc_text(minutes: i32) -> Result<Vec<u8>, Error> {
     if minutes == 0x7fff {
-        return Err(Error::SourceUnavailable(
-            "UTC sentinel native output required",
-        ));
+        return Ok(b"--:--".to_vec());
     }
     let n = minutes.unsigned_abs();
     Ok(format!(
@@ -476,7 +520,7 @@ pub fn utc_text(minutes: i32) -> Result<Vec<u8>, Error> {
         } else {
             ""
         },
-        n / 60,
+        (n / 60) as u8,
         n % 60
     )
     .into_bytes())
@@ -541,6 +585,54 @@ fn pressure(n: u32, point: u8) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn callsign_live_arrays_and_portable_labels_do_not_use_history_or_type_guards() {
+        let mut raw = [0; 616];
+        raw[..12].fill(0xff);
+        raw[0x26..0x36].fill(b' ');
+        raw[0x26..0x2a].copy_from_slice(b"NAME");
+        raw[0x88..0x90].copy_from_slice(b"RIGHT   ");
+        raw[0x18c..0x194].copy_from_slice(b"WRONG   ");
+        assert_eq!(
+            build(
+                Kind::Callsign,
+                Holder::new(&raw).unwrap(),
+                Context {
+                    row: 0,
+                    ..context()
+                },
+                |_| panic!()
+            )
+            .unwrap(),
+            b"00;NAME;RIGHT\r\n"
+        );
+        let mut memory = vec![0; 0x3c9c0];
+        memory[0x355a1] = 6;
+        memory[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+        let name = 0x2f703 + 16 * 299;
+        let call = 0x2eda3 + 8 * 299;
+        memory[name..name + 16].fill(b' ');
+        memory[name..name + 4].copy_from_slice(b"LIVE");
+        memory[call..call + 8].copy_from_slice(b"SAMEGEN ");
+        let image = crate::icf::Icf::from_memory(memory).unwrap();
+        assert_eq!(
+            callsign_row(&image, 299, context()).unwrap(),
+            b"299;LIVE;SAMEGEN\r\n"
+        );
+        assert_eq!(utc_text(32767).unwrap(), b"--:--");
+        assert_eq!(utc_text(32766).unwrap(), b"+34:06");
+        let request = Request {
+            adapter: Adapter::ToneFrequency,
+            source: &50_u32.to_le_bytes(),
+            utc_offset_minutes: 0,
+        };
+        assert_eq!(
+            super::super::table::portable_label(Kind::Repeater, &request, b',')
+                .unwrap()
+                .unwrap(),
+            b"150,0Hz"
+        );
+    }
     fn context() -> Context<'static> {
         Context {
             separator: b';',

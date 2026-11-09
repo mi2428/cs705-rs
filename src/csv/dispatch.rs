@@ -74,6 +74,26 @@ pub struct Binding {
     pub separator: u8,
 }
 impl Binding {
+    /// Built-in ASCII label profile with the required-column rule owned by
+    /// ImportKind. Keep parser-local schema order separate from native caches.
+    pub fn builtin(
+        header: &[u8],
+        separator: u8,
+        labels: &[&[u8]],
+        kind: ImportKind,
+    ) -> Result<Self, Error> {
+        let required: Result<Vec<_>, _> = kind
+            .required_labels()
+            .iter()
+            .map(|required| {
+                labels
+                    .iter()
+                    .position(|label| label == required)
+                    .ok_or(Error::Invalid("required import label absent from schema"))
+            })
+            .collect();
+        Self::ascii(header, separator, labels, &required?)
+    }
     /// Labels are caller's actual resource bytes in callback lookup order.
     /// Every lookup re-runs native lower, preserving separate source generations.
     pub fn new(

@@ -49,7 +49,7 @@ const MAX_ROWS: usize = 2500;
 
 // Public frequencies in tenths of Hz, sorted from the Icom IC-705 Advanced
 // Manual, printed pages 2-14 and 2-17 (Selectable tone frequencies).
-const REPEATER_TONES: [u16; 50] = [
+pub(crate) const REPEATER_TONES: [u16; 50] = [
     670, 693, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974, 1000, 1035, 1072, 1109, 1148, 1188,
     1230, 1273, 1318, 1365, 1413, 1462, 1514, 1567, 1598, 1622, 1655, 1679, 1713, 1738, 1773, 1799,
     1835, 1862, 1899, 1928, 1966, 1995, 2035, 2065, 2107, 2181, 2257, 2291, 2336, 2418, 2503, 2541,

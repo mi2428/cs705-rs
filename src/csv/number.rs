@@ -208,15 +208,77 @@ pub fn frequency_text(hz: u32, point: u8) -> Vec<u8> {
     out
 }
 
-/// B65AC/B68B8's scale/bias then signed64 truncation and low32 projection.
-/// Final band/range validation is a separate record operation. Nonfinite or
-/// signed64 overflow is an explicit safe-API error, not native x87 indefinite.
+/// B65AC: parse failure is0; scale/spill outside the unsigned DWORD range is0
+/// BEFORE adding0.5. The following record-level band check is separate.
 pub fn frequency_hz(source: &[u8], point: u8) -> Result<u32, Error> {
-    let value = (decimal(trim(source), point)? * 1_000_000.0 + 0.5).trunc();
-    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
-        return Err(Error::Conversion("frequency signed64 overflow"));
+    mhz_hz(source, point, 0)
+}
+/// B68B8 differs only in its empty/invalid parse result FFFFFFFF.
+pub fn offset_hz(source: &[u8], point: u8) -> Result<u32, Error> {
+    mhz_hz(source, point, u32::MAX)
+}
+fn mhz_hz(source: &[u8], point: u8, invalid: u32) -> Result<u32, Error> {
+    let value = match decimal(trim(source), point) {
+        Ok(value) => value * 1_000_000.0,
+        Err(Error::Conversion(_)) => return Ok(invalid),
+        Err(error) => return Err(error),
+    };
+    Ok(if (0.0..=f64::from(u32::MAX)).contains(&value) {
+        (value + 0.5).trunc() as u32
+    } else {
+        0
+    })
+}
+
+/// Finite CRT decimal-prefix profile used by CSV tone's already-filtered input
+/// and numeric resource labels. Unlike D5560, this stops at the first foreign
+/// byte and uses an independently supplied CRT point. Exponent/hex/NaN profiles
+/// are explicitly outside this helper, not silently modeled as the full CRT.
+pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
+    if source.len() > 4096 {
+        return Err(Error::Limit("CRT finite prefix exceeds 4096 bytes"));
     }
-    Ok((value as i64) as u32)
+    let source = source.split(|b| *b == 0).next().unwrap_or(b"");
+    let mut at = 0;
+    while source.get(at).is_some_and(|b| matches!(*b, 9..=13 | 32)) {
+        at += 1;
+    }
+    let start = at;
+    if matches!(source.get(at), Some(b'+' | b'-')) {
+        at += 1;
+    }
+    let mut digits = 0;
+    while source.get(at).is_some_and(u8::is_ascii_digit) {
+        at += 1;
+        digits += 1;
+    }
+    if source.get(at) == Some(&point) {
+        at += 1;
+        while source.get(at).is_some_and(u8::is_ascii_digit) {
+            at += 1;
+            digits += 1;
+        }
+    }
+    if matches!(source.get(at), Some(b'e' | b'E' | b'x' | b'X')) {
+        return Err(Error::SourceUnavailable(
+            "CRT exponent or hex profile requires explicit conversion output",
+        ));
+    }
+    if digits == 0 {
+        return Ok(0.0);
+    }
+    let bytes: Vec<_> = source[start..at]
+        .iter()
+        .map(|b| if *b == point { b'.' } else { *b })
+        .collect();
+    let value: f64 = std::str::from_utf8(&bytes)
+        .map_err(|_| Error::Conversion("CRT prefix bytes"))?
+        .parse()
+        .map_err(|_| Error::Conversion("CRT prefix number"))?;
+    if !value.is_finite() {
+        return Err(Error::Conversion("CRT prefix nonfinite"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -265,6 +327,8 @@ mod tests {
         assert_eq!(altitude_text(i32::MIN, b'.'), b"-65455301.6");
         assert_eq!(frequency_text(u32::MAX, b','), b"4294,967295");
         assert_eq!(frequency_hz(b"145.125000", b'.').unwrap(), 145125000);
-        assert_eq!(frequency_hz(b"-1", b'.').unwrap(), 4293967297);
+        assert_eq!(frequency_hz(b"-1", b'.').unwrap(), 0);
+        assert_eq!(offset_hz(b"bad", b'.').unwrap(), u32::MAX);
+        assert_eq!(offset_hz(b"4295", b'.').unwrap(), 0);
     }
 }
