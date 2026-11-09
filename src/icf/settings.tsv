@@ -177,3 +177,13 @@ A2-H56095-15	CL_Common_Scope_WaterfallSpeed	36e	3972a	2
 A2-H56095-16	CL_Common_Scope_WaterfallSizeExpand	36f	39738	2
 A2-H56095-17	CL_Common_Scope_WaterfallPeakColorLevel	370	39729	7
 A2-H56095-18	CL_Common_Scope_WaterfallMarkerAutohide	371	39739	1
+A2-H54848-26	CL_Common_Dimmer_AutoAdj	212	3969e	1
+A2-H56399-15	CL_Common_Con_UsbSend	2fb	39346	4
+A2-H56399-16	CL_Common_Con_UsbKeying_CW	2fc	39347	4
+A2-H56399-17	CL_Common_Con_UsbKeying_RTTY	2fd	39348	4
+A2-H56399-24	CL_Common_Con_USB2Func	30f	39353	3
+A2-H56399-25	CL_Common_Con_GPSOut	311	39355	1
+A2-H56202-01	CL_Common_Network_WLAN	316	39359	1	14
+A2-H56202-02	CL_Common_Network_ConnectionType	317	39a05	1
+A2-H56202-04	CL_Common_Network_DHCP	318	3935a	1
+A2-H56207-14	rtty_twin_peak	2e0	399a0	1
