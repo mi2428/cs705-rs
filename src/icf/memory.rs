@@ -8,6 +8,8 @@ use super::{
     Error, Icf, MEMORY_CHANNEL_BYTES, MEMORY_CHANNEL_COUNT, MEMORY_EMPTY_FLAGS, RECORD_BYTES,
 };
 
+pub mod special;
+
 /// Stored side of an occupied physical slot; Split requires the SPLIT flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemorySide {

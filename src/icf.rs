@@ -15,6 +15,8 @@ mod groups;
 mod image;
 mod memory;
 mod messages;
+pub mod record;
+pub mod record_image;
 mod repeaters;
 pub mod rows;
 pub mod settings;
@@ -50,6 +52,7 @@ pub use dsp::{
 };
 pub use gps::{GpsAlarm, GpsAltitude, GpsCoordinate, GpsDate, GpsGroup, GpsTime};
 pub use groups::MemoryGroup;
+pub use memory::special;
 pub use memory::{
     MemoryCallsign, MemoryDigitalSquelch, MemoryDuplex, MemoryFilter, MemoryMode, MemorySelection,
     MemorySide, MemoryTone,
