@@ -6,6 +6,114 @@
 use cs705::{clone, gps, icf, repeater};
 
 #[test]
+fn home_dr_l30_membership_does_not_inherit_the_common_context_bypass() {
+    let mut raw = [0; 24];
+    raw[..4].copy_from_slice(&16u32.to_le_bytes());
+    let q = icf::context::Context::from_bytes(raw);
+    let ranges = icf::frequency::Ranges::generate(&q, Some(0x411)).unwrap();
+    for (frequency, expected) in [
+        (29_999, false),
+        (30_000, true),
+        (199_999_999, true),
+        (200_000_000, false),
+        (399_999_999, false),
+        (400_000_000, true),
+        (470_000_000, true),
+        (470_000_001, false),
+    ] {
+        assert_eq!(ranges.eb98(frequency), expected);
+        assert!(!ranges.eb64(&q, frequency));
+    }
+}
+
+#[test]
+fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
+    use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
+
+    // Arbitrary holder DWORDs are intentional. Lookup and raw storage are not
+    // canonical typed-enum validation, and must not panic on unknown values.
+    let mut state = 0x0705_0616_u32;
+    for case in 0..256 {
+        let mut bytes = [0; 616];
+        for byte in &mut bytes {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *byte = (state >> 24) as u8;
+        }
+        let mut holder = DecodedRecord::from_bytes(bytes);
+        holder.set_valid(case % 2 == 0);
+        let header: [u8; 12] = holder.as_bytes()[..12].try_into().unwrap();
+        let mut raw_channel = [case as u8; 83];
+        let mut flag = 0xa5;
+        let before = holder.clone();
+        assert!(
+            record::encode_channel_into(
+                &mut holder,
+                &mut raw_channel,
+                usize::MAX,
+                Some(&mut flag),
+                |_| panic!("invalid destination side must not call a writer"),
+            )
+            .is_err()
+        );
+        assert!(holder == before);
+        assert_eq!(raw_channel, [case as u8; 83]);
+        assert_eq!(flag, 0xa5);
+        assert!(record::decode_channel_into(&mut holder, &raw_channel, 2, None).is_err());
+        assert!(holder == before);
+
+        for side in 0..2 {
+            let mut stores = 0;
+            record::encode_channel_into(
+                &mut holder,
+                &mut raw_channel,
+                side,
+                Some(&mut flag),
+                |event| {
+                    if let ChannelWrite::Body { offset, bytes, .. } = event {
+                        assert!(offset.checked_add(bytes.len()).is_some_and(|end| end <= 83));
+                    }
+                    stores += 1;
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(stores == 1, !holder.valid());
+            record::decode_channel_into(&mut holder, &raw_channel, side, Some(flag)).unwrap();
+            assert_eq!(&holder.as_bytes()[..12], &header);
+        }
+
+        let mut raw_repeater = [case as u8; 52];
+        let mut stores = 0;
+        record::encode_repeater_into(&holder, &mut raw_repeater, |event| {
+            if let RepeaterWrite::Body { offset, bytes, .. } = event {
+                assert!(offset.checked_add(bytes.len()).is_some_and(|end| end <= 52));
+            }
+            stores += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            stores > 0,
+            "repeater saver does not gate on holder validity"
+        );
+        record::decode_repeater_into(&mut holder, &raw_repeater, &[0xff; 7], u32::MAX, u32::MAX);
+        assert_eq!(&holder.as_bytes()[..12], &header);
+
+        let mut raw_gps = [case as u8; 34];
+        let mut stores = 0;
+        record::encode_gps_into(&holder, &mut raw_gps, |offset, bytes| {
+            assert!(offset.checked_add(bytes.len()).is_some_and(|end| end <= 34));
+            stores += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(stores == 0, !holder.valid());
+        record::decode_gps_into(&mut holder, &raw_gps, u32::MAX);
+        assert_eq!(&holder.as_bytes()[..12], &header);
+    }
+}
+
+#[test]
 fn working_group_length_is_the_last_nonempty_ordinal_not_descriptor_count() {
     // Synthetic blank topology, independent of factory images and parser fixtures.
     let mut memory = vec![0; 0x3c9c0];

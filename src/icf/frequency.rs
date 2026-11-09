@@ -466,6 +466,10 @@ impl Ranges {
         common_bad(Some(&self.frequency_context(q_kind(live_q))), frequency)
             .expect("bound native B lists")
     }
+    /// EB98 tests L30 membership even when EB64 bypasses on live kind>=16.
+    pub fn eb98(&self, frequency: u32) -> bool {
+        hit(self.list(Container::L30), frequency)
+    }
     pub fn f32c(&self, live_q: &Context, frequency: u32) -> bool {
         q_kind(live_q) < 16 && !hit(self.list(Container::LD0), frequency)
     }
