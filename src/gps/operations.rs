@@ -345,10 +345,10 @@ pub fn carry(
             old
         };
         put_word(image, ALARM + 2, next as u16)?;
+        // BA16 CBD4D is inside the type3/same-group guard. Both directions
+        // notify here even when the selected alarm position is unchanged.
+        notify(image, Event::sync(0x39))?;
     }
-    // BA16: both alarm branches and both directions issue synchronous event39,
-    // even when the resulting alarm bytes happen to be unchanged.
-    notify(image, Event::sync(0x39))?;
     Ok(true)
 }
 
@@ -514,5 +514,82 @@ mod tests {
                 selection: (0, 2)
             }
         );
+    }
+
+    #[test]
+    fn carry_notification_uses_alarm_guard_even_without_position_change() {
+        fn fixture(alarm: [u8; 4]) -> Icf<'static> {
+            let mut i = image();
+            i.patch_memory(&[
+                (ORDER, &[7, 0, 2, 0, 9, 0, 4, 0, 11, 0]),
+                (STARTS + 4, &[0, 0]),
+                (ALARM, &alarm),
+            ])
+            .unwrap();
+            for (index, p) in [7, 2, 9, 4, 11].into_iter().enumerate() {
+                i.patch_memory(&[(RECORDS + 34 * p, &[b'A' + index as u8; 34])])
+                    .unwrap();
+            }
+            i
+        }
+        for direction in [-1, 0] {
+            for alarm in [[0, 0, 0, 0], [3, 1, 4, 0], [3, 2, 4, 0]] {
+                let mut i = fixture(alarm);
+                let mut events = Vec::new();
+                assert!(
+                    carry(&mut i, 2, 1, 2, direction, |_, event| {
+                        events.push(event);
+                        Ok(())
+                    })
+                    .unwrap()
+                );
+                assert_eq!(events.len(), usize::from(alarm[0] == 3 && alarm[1] == 2));
+                for event in events {
+                    assert_eq!(
+                        event,
+                        Event {
+                            id: 0x39,
+                            synchronous: true,
+                            arg1: 0,
+                            arg2: 0
+                        }
+                    );
+                }
+                assert_eq!(&i.memory()[ALARM..ALARM + 4], &alarm);
+                let contents: Vec<_> = [7, 2, 9, 4, 11]
+                    .into_iter()
+                    .map(|p| i.memory()[RECORDS + 34 * p])
+                    .collect();
+                assert_eq!(
+                    contents,
+                    if direction < 0 {
+                        b"BCADE".to_vec()
+                    } else {
+                        b"ADBCE".to_vec()
+                    }
+                );
+            }
+        }
+        let mut i = fixture([3, 2, 1, 0]);
+        let before = i.memory().to_vec();
+        assert!(
+            carry(&mut i, 2, 1, 2, 0, |_, _| Err(argument(
+                "injected alarm notification failure"
+            )))
+            .is_err()
+        );
+        assert_ne!(i.memory(), before);
+        assert_eq!(word(&i, ALARM + 2), 2);
+        let mut i = fixture([0; 4]);
+        assert!(
+            carry(&mut i, 2, 1, 2, 0, |_, _| panic!(
+                "unrelated alarm must not notify"
+            ))
+            .unwrap()
+        );
+        let mut i = fixture([3, 2, 1, 0]);
+        let before = i.memory().to_vec();
+        assert!(!carry(&mut i, 2, 0, 0, -1, |_, _| panic!()).unwrap());
+        assert_eq!(i.memory(), before);
     }
 }

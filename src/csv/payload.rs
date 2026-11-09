@@ -172,6 +172,13 @@ pub fn build(
     }
     match kind {
         Kind::Memory => {
+            // 8B5F8 normalizes only this local low-byte missing-value gate.
+            // Mode's provider below must still receive the original fullDWORD.
+            let gate_mode = match h.b(0x58) {
+                9 => 8,
+                14 => 13,
+                mode => mode,
+            };
             let prefix = !c.memory_pair || h.b(0x24) == 0;
             if prefix {
                 if c.memory_group_columns {
@@ -205,7 +212,7 @@ pub fn build(
             } else {
                 vec![Vec::new(); 6]
             });
-            if valid && h.d(0x58) == 0x0d {
+            if valid && gate_mode == 0x0d {
                 cells.extend([
                     a!(Tone, 0x68, 4),
                     a!(ToneFrequency, 0x6c, 4),
@@ -216,7 +223,7 @@ pub fn build(
             } else {
                 cells.extend(vec![Vec::new(); 5]);
             }
-            if valid && h.d(0x58) == 0x10 {
+            if valid && gate_mode == 0x10 {
                 cells.extend([
                     a!(DigitalSquelch, 0x80, 4),
                     h.d(0x84).to_string().into_bytes(),
@@ -235,8 +242,8 @@ pub fn build(
                 });
             }
             let mut out = join(&cells, c.separator, !c.memory_pair || h.b(0x24) != 0)?;
-            if c.memory_pair && h.b(0x24) == 0 {
-                out.push(c.separator);
+            if c.memory_pair && h.b(0x24) != 0 {
+                out.insert(0, c.separator);
             }
             return Ok(out);
         }
@@ -308,7 +315,7 @@ pub fn build(
             cells.extend([
                 number(c.row.wrapping_add(c.number_base)),
                 text!(0x26, 16),
-                call!(0x18c, 8),
+                call!(0x88, 8),
             ]);
         }
         Kind::Repeater => {
@@ -690,5 +697,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn memory_gate_remaps_low_byte_without_changing_full_mode_or_split_boundaries() {
+        let mut bytes = [0; 616];
+        bytes[12] = 1;
+        for (mode, fm, dv) in [
+            (0x0d, true, false),
+            (0x0e, true, false),
+            (0x10, false, true),
+            (0x11, false, false),
+            (0x1000d, true, false),
+            (0x10010, false, true),
+            (9, false, false),
+        ] {
+            let mode: u32 = mode;
+            bytes[0x58..0x5c].copy_from_slice(&mode.to_le_bytes());
+            let output = build(Kind::Memory, Holder::new(&bytes).unwrap(), context(), |r| {
+                if r.adapter == Adapter::Mode {
+                    assert_eq!(r.source, &mode.to_le_bytes());
+                }
+                Ok(format!("{:?}", r.adapter).into_bytes())
+            })
+            .unwrap();
+            let cells = crate::csv::split_cells(&output[..output.len() - 2], b';');
+            assert_eq!(cells.len(), 18);
+            assert_eq!(!cells[8].is_empty(), fm);
+            assert_eq!(!cells[13].is_empty(), dv);
+        }
+        bytes[12] = 0;
+        let invalid = build(
+            Kind::Memory,
+            Holder::new(&bytes).unwrap(),
+            context(),
+            |_| panic!(),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::csv::split_cells(&invalid[..invalid.len() - 2], b';').len(),
+            18
+        );
+        bytes[12] = 1;
+        bytes[0x58..0x5c].copy_from_slice(&0x0e_u32.to_le_bytes());
+        let mut c = context();
+        c.memory_pair = true;
+        let base = build(Kind::Memory, Holder::new(&bytes).unwrap(), c, |_| {
+            Ok(b"X".to_vec())
+        })
+        .unwrap();
+        assert!(!base.ends_with(b";"));
+        assert!(!base.ends_with(b"\r\n"));
+        bytes[0x24] = 1;
+        let other = build(Kind::Memory, Holder::new(&bytes).unwrap(), c, |_| {
+            Ok(b"X".to_vec())
+        })
+        .unwrap();
+        assert_eq!(other[0], b';');
+        assert!(other.ends_with(b"\r\n"));
     }
 }
