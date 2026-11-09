@@ -1,29 +1,37 @@
-//! Pure structural frames and statically recovered CS-705 clone address plans.
+//! CS-705 1.30 clone bytes, profiles, image conversion and synchronous sessions.
 //!
-//! This is not ordinary CI-V, a transfer session, or authorization to access a
-//! radio. The frame codec supports the two-FE prefix and 1..=64-byte data blocks;
-//! profiles, extra preambles and E1 metadata remain unsupported. Separate address
-//! plans imply neither image conversion nor receive-order or session guarantees.
-//! Callers must validate data against their own capacity/ranges. No ICF image
-//! length is used here. An E6 acknowledgement does not establish safe recovery.
-//!
-//! Unlike the original receive-length gate, this structural codec accepts valid
-//! short E4 frames, including one-byte blocks without escapes. It rejects the
-//! original's noncanonical escapes rather than reproducing permissive parsing.
-//! Original-application and hardware compatibility have not been established.
+//! No port is enumerated or opened here. [`Transport`] adapts an already opened
+//! caller-owned connection. Static source fidelity is not hardware validation:
+//! E6 success does not establish flash persistence, physical compatibility,
+//! safe power-off, recovery or permission to operate a radio.
+//! Wire parsing preserves the source's permissive FF escape rule; checked image
+//! bounds and explicit profiles are separate safety boundaries. See [`Extractor`]
+//! for the original last-completed-frame query/ACK semantics.
 
 use std::fmt;
 use std::ops::Range;
 
 mod plan;
-pub use plan::{read_range, write_blocks};
+pub use plan::{read_range, write_blocks, write_blocks_with_cap};
+mod profile;
+pub use profile::{ContextFields, IMAGE_CAPACITY, Identity, IdentityGate, Profile};
+mod image;
+pub use image::convert_image;
+mod session;
+pub use session::{
+    Echo, Failure, Operation, Outcome, Session, SessionConfig, State, Transport, TransportSettings,
+    WriteDisposition,
+};
+pub mod search;
+mod stream;
+pub use stream::{Extractor, decode_hex_script, script_token};
 
 // Static evidence: CS-705 1.30 CS705.exe SHA-256
 // e9439e1413e1258be77e6ef2188b72276dd714642e3858f4690e5d45653aeca3.
 // Request RVAs 0x1696A/0x16DC4/0x1706D -> queue 0x15528 -> WriteFile 0x15772.
 // E4: builder 0x172E2..0x1770A, escape 0x1581C, decoder 0x180DC..0x1837D.
 // E5: 0x1785C/0x17F7E; E6: 0x1799B..0x17AA6. These are not live captures.
-const MAX_FRAME_BYTES: usize = 6 + 2 * (4 + 1 + 64 + 1);
+const MAX_FRAME_BYTES: usize = 6 + 2 * (4 + 1 + 255 + 1);
 const REQUEST_ID: [u8; 4] = [0x40, 0x75, 0, 0];
 const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -50,10 +58,14 @@ impl Direction {
 pub enum Error {
     /// A structural boundary, direction, escape, length or address is invalid.
     Invalid(&'static str),
-    /// A command outside this established subset was encountered.
+    /// A command outside the recovered clone command family was encountered.
     UnsupportedCommand(u8),
     /// The unescaped E4 body does not sum to zero modulo 256.
     ChecksumMismatch,
+    /// A decoded byte window overflows the u32 address representation.
+    AddressOverflow,
+    /// The original decoder would access beyond its decoded vector.
+    SourceBounds,
     /// An E6 response contained a nonzero status; it is not an acknowledgement.
     Rejected(u8),
 }
@@ -66,6 +78,8 @@ impl fmt::Display for Error {
                 write!(f, "unsupported clone command {command:02X}")
             }
             Self::ChecksumMismatch => f.write_str("clone data checksum mismatch"),
+            Self::AddressOverflow => f.write_str("clone data address overflow"),
+            Self::SourceBounds => f.write_str("clone decoded vector access boundary"),
             Self::Rejected(status) => write!(f, "clone E6 status {status:02X}"),
         }
     }
@@ -82,11 +96,14 @@ pub enum Frame {
     Read,
     /// E3 request with the same fixed identity; PC to radio only.
     Write,
+    /// E1 raw big-endian model/revision and opaque tail; no BCD rejection.
+    Response(Identity),
     /// E4 data in either direction. The payload contains untransformed memory.
     Data {
         /// A byte address, encoded big-endian on the wire.
         address: u32,
-        /// Between one and 64 memory bytes, before XOR 80 and escaping.
+        /// Zero to 255 memory bytes, before XOR 80 and escaping. Normal sends
+        /// use cap 64; the original receive decoder has no <=64 gate.
         payload: Vec<u8>,
     },
     /// E5 with the fixed brand and an uppercase two-character hex block count.
@@ -94,6 +111,8 @@ pub enum Frame {
         /// The E4 block count modulo 256, not the number of payload bytes.
         block_count: u8,
     },
+    /// Source C30==0: brand without the optional ASCII count.
+    EndUncounted,
     /// Exactly E6 00, radio to PC only; not proof of settings or power state.
     Acknowledgement,
 }
@@ -103,15 +122,16 @@ impl Frame {
     ///
     /// # Errors
     ///
-    /// Rejects incompatible directions, data lengths outside 1..=64 and an
+    /// Rejects incompatible directions, data lengths above 255 and an
     /// exclusive data end that overflows u32. It does not infer allowed ranges.
     pub fn encode(&self, direction: Direction) -> Result<Vec<u8>, Error> {
         let command = match self {
             Self::Identify => 0xe0,
             Self::Read => 0xe2,
             Self::Write => 0xe3,
+            Self::Response(_) => 0xe1,
             Self::Data { .. } => 0xe4,
-            Self::End { .. } => 0xe5,
+            Self::End { .. } | Self::EndUncounted => 0xe5,
             Self::Acknowledgement => 0xe6,
         };
         check_direction(command, direction)?;
@@ -120,6 +140,11 @@ impl Frame {
         wire.push(command);
         match self {
             Self::Identify | Self::Read | Self::Write => wire.extend_from_slice(&REQUEST_ID),
+            Self::Response(identity) => {
+                wire.extend_from_slice(&identity.model.to_be_bytes());
+                wire.extend_from_slice(&identity.revision.to_be_bytes());
+                wire.extend_from_slice(&identity.tail);
+            }
             Self::Data { address, payload } => {
                 block_end(*address, payload.len())?;
                 let mut body = address.to_be_bytes().to_vec();
@@ -139,20 +164,27 @@ impl Frame {
                 wire.push(HEX[usize::from(block_count >> 4)]);
                 wire.push(HEX[usize::from(block_count & 15)]);
             }
+            Self::EndUncounted => wire.extend_from_slice(b"Icom Inc."),
             Self::Acknowledgement => wire.push(0),
         }
         wire.push(0xfd);
         Ok(wire)
     }
 
-    /// Decode one complete frame with exactly two leading FE bytes and one FD.
+    /// Decode a complete wire frame, including optional additional FE preambles.
     ///
     /// # Errors
     ///
-    /// Rejects extra frames/preambles, wrong direction, unknown commands/identity,
-    /// noncanonical escapes, malformed lengths, checksum errors, address overflow
-    /// and every nonzero E6 status. Data addresses still require caller validation.
+    /// Repeated FF bytes keep escape pending; the next non-FF is ORed with F0.
+    /// A trailing FF is discarded, as at RVA 180DC. Structural parsing accepts
+    /// short/zero-length blocks; the source read-state length gate is separate.
+    /// Bounds, checksum, direction and request identity remain checked.
     pub fn decode(wire: &[u8], direction: Direction) -> Result<Self, Error> {
+        let preambles = wire.iter().take_while(|&&b| b == 0xfe).count();
+        if preambles < 2 {
+            return Err(Error::Invalid("frame prefix"));
+        }
+        let wire = &wire[preambles - 2..];
         if !(6..=MAX_FRAME_BYTES).contains(&wire.len()) {
             return Err(Error::Invalid("frame length"));
         }
@@ -181,25 +213,17 @@ impl Frame {
                     _ => Self::Write,
                 })
             }
-            0xe4 => {
-                let body = unescape(body)?;
-                if body.len() < 6 || body.len() != usize::from(body[4]) + 6 {
-                    return Err(Error::Invalid("data length"));
-                }
-                let address = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
-                block_end(address, usize::from(body[4]))?;
-                if sum(&body) != 0 {
-                    return Err(Error::ChecksumMismatch);
-                }
-                Ok(Self::Data {
-                    address,
-                    payload: body[5..body.len() - 1]
-                        .iter()
-                        .map(|byte| byte ^ 0x80)
-                        .collect(),
-                })
-            }
+            0xe4 => decode_data_body(body),
+            0xe1 if body.len() >= 4 => Ok(Self::Response(Identity {
+                model: u16::from_be_bytes([body[0], body[1]]),
+                revision: u16::from_be_bytes([body[2], body[3]]),
+                tail: body[4..].to_vec(),
+            })),
+            0xe1 => Err(Error::Invalid("identity response length")),
             0xe5 => {
+                if body == b"Icom Inc." {
+                    return Ok(Self::EndUncounted);
+                }
                 let count = body
                     .strip_prefix(b"Icom Inc.")
                     .filter(|count| count.len() == 2)
@@ -250,7 +274,7 @@ impl Frame {
 
 fn check_direction(command: u8, direction: Direction) -> Result<(), Error> {
     match (command, direction) {
-        (0xe0 | 0xe2 | 0xe3, Direction::FromRadio) | (0xe6, Direction::ToRadio) => {
+        (0xe0 | 0xe2 | 0xe3, Direction::FromRadio) | (0xe1 | 0xe6, Direction::ToRadio) => {
             Err(Error::Invalid("command direction"))
         }
         _ => Ok(()),
@@ -258,12 +282,33 @@ fn check_direction(command: u8, direction: Direction) -> Result<(), Error> {
 }
 
 fn block_end(address: u32, count: usize) -> Result<u32, Error> {
-    if !(1..=64).contains(&count) {
-        return Err(Error::Invalid("data length outside 1..=64"));
+    if count > 255 {
+        return Err(Error::Invalid("data length outside 0..=255"));
     }
     address
         .checked_add(count as u32)
-        .ok_or(Error::Invalid("data address overflow"))
+        .ok_or(Error::AddressOverflow)
+}
+
+// Shared by complete-wire and source processed-vector entry points. Header
+// normalization is caller-specific; payload escaping/checksum must not drift.
+fn decode_data_body(body: &[u8]) -> Result<Frame, Error> {
+    let body = unescape(body)?;
+    if body.len() < 5 {
+        return Err(Error::SourceBounds);
+    }
+    if body.len() < 6 || body.len() != usize::from(body[4]) + 6 {
+        return Err(Error::Invalid("data length"));
+    }
+    let address = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+    if sum(&body) != 0 {
+        return Err(Error::ChecksumMismatch);
+    }
+    block_end(address, usize::from(body[4]))?;
+    Ok(Frame::Data {
+        address,
+        payload: body[5..body.len() - 1].iter().map(|b| b ^ 0x80).collect(),
+    })
 }
 
 fn sum(bytes: &[u8]) -> u8 {
@@ -272,16 +317,14 @@ fn sum(bytes: &[u8]) -> u8 {
 
 fn unescape(bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let mut body = Vec::new();
-    let mut bytes = bytes.iter().copied();
-    while let Some(byte) = bytes.next() {
-        body.push(match byte {
-            0xff => match bytes.next() {
-                Some(low @ 0x0a..=0x0f) => 0xf0 | low,
-                _ => return Err(Error::Invalid("noncanonical escape")),
-            },
-            0xfa..=0xfe => return Err(Error::Invalid("unescaped reserved byte")),
-            _ => byte,
-        });
+    let mut escaped = false;
+    for &byte in bytes {
+        if byte == 0xff {
+            escaped = true;
+            continue;
+        }
+        body.push(if escaped { byte | 0xf0 } else { byte });
+        escaped = false;
     }
     Ok(body)
 }
@@ -309,7 +352,7 @@ impl Framer {
     ///
     /// # Errors
     ///
-    /// Rejects missing/extra FE, premature FD and frames over 146 bytes. An error
+    /// Rejects missing/extra FE, premature FD and frames over 528 bytes. An error
     /// clears the partial frame and consumes the offending byte. Stop corrupt input;
     /// resume only at a new complete two-FE prefix. A completed invalid command
     /// is instead reported by `Frame::decode`; it does not leave partial bytes.
@@ -477,7 +520,14 @@ mod tests {
 
     #[test]
     fn rejects_boundaries_lengths_identity_checksum_and_address_overflow() {
-        for invalid in INVALID_ORACLE {
+        // Source accepts 0 and 65-byte blocks. Those two old strict-only cases
+        // are not protocol defects; image windows are checked by the session.
+        for invalid in [
+            INVALID_ORACLE[0],
+            INVALID_ORACLE[3],
+            INVALID_ORACLE[4],
+            INVALID_ORACLE[5],
+        ] {
             assert!(Frame::decode(&hex(invalid), Direction::ToRadio).is_err());
         }
         let request = hex("FEFEEEEFE040750000FD");
@@ -485,7 +535,6 @@ mod tests {
             assert!(Frame::decode(&request[..length], Direction::ToRadio).is_err());
         }
         for invalid in [
-            [vec![0xfe], request.clone()].concat(),
             [request.clone(), vec![0]].concat(),
             [request.clone(), request].concat(),
             vec![0; MAX_FRAME_BYTES + 1],
@@ -494,7 +543,7 @@ mod tests {
         }
         assert_eq!(
             Frame::decode(&hex("FEFEEFEEE100FD"), Direction::FromRadio),
-            Err(Error::UnsupportedCommand(0xe1))
+            Err(Error::Invalid("identity response length"))
         );
         assert!(Frame::decode(&hex("FEFEEFEEE040750000FD"), Direction::FromRadio).is_err());
         assert!(Frame::decode(&hex("FEFEEEEFE600FD"), Direction::ToRadio).is_err());
@@ -511,7 +560,7 @@ mod tests {
             };
             assert!(Frame::decode(&hex(text), direction).is_err());
         }
-        for (address, count) in [(0, 0), (0, 65), (u32::MAX, 1), (u32::MAX - 63, 64)] {
+        for (address, count) in [(0, 256), (u32::MAX, 1), (u32::MAX - 63, 64)] {
             let frame = Frame::Data {
                 address,
                 payload: vec![0; count],
@@ -528,35 +577,39 @@ mod tests {
     }
 
     #[test]
-    fn only_canonical_reserved_byte_escapes_are_accepted() {
+    fn permissive_source_escapes_are_not_a_strict_grammar() {
         for byte in 0..=255 {
-            if byte < 0xfa {
+            if byte != 0xff {
                 assert_eq!(unescape(&[byte]).unwrap(), [byte]);
             } else {
-                assert!(unescape(&[byte]).is_err());
-                let frame = [
-                    0xfe,
-                    0xfe,
-                    0xee,
-                    0xef,
-                    0xe4,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    byte,
-                    255 - byte,
-                    0xfd,
-                ];
-                assert!(Frame::decode(&frame, Direction::ToRadio).is_err());
+                assert!(unescape(&[byte]).unwrap().is_empty());
             }
-            if (0x0a..=0x0f).contains(&byte) {
+            if byte != 0xff {
                 assert_eq!(unescape(&[0xff, byte]).unwrap(), [0xf0 | byte]);
             } else {
-                assert!(unescape(&[0xff, byte]).is_err());
+                assert!(unescape(&[0xff, byte]).unwrap().is_empty());
             }
         }
+        assert_eq!(unescape(&[0xff, 0xff, 0, 0xff]).unwrap(), [0xf0]);
+        // Old strict-only reject oracles are now affirmative source checks.
+        for (i, n) in [(1, 0), (2, 65)] {
+            assert_eq!(
+                Frame::decode(&hex(INVALID_ORACLE[i]), Direction::ToRadio).unwrap(),
+                Frame::Data {
+                    address: 0,
+                    payload: vec![0; n]
+                }
+            );
+        }
+        let wire = hex("FEFEEEEFE549636F6D20496E632EFD");
+        assert_eq!(
+            Frame::EndUncounted.encode(Direction::ToRadio).unwrap(),
+            wire
+        );
+        assert_eq!(
+            Frame::decode(&wire, Direction::ToRadio).unwrap(),
+            Frame::EndUncounted
+        );
     }
 
     #[test]

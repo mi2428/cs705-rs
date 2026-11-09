@@ -103,7 +103,16 @@ pub fn read_range(selector: u8) -> Result<Range<u32>, Error> {
 /// Returns [`Error::Invalid`] for selectors outside 1..=6 or any mask bit above
 /// bit 4. No selector normalization, default mask or missing-data fill is used.
 pub fn write_blocks(selector: u8, mask: u8) -> Result<Vec<Range<u32>>, Error> {
+    write_blocks_with_cap(selector, mask, 64)
+}
+
+/// The source setter keeps the previous cap for nonpositive inputs. This
+/// checked serialization boundary accepts only a positive, byte-sized cap.
+pub fn write_blocks_with_cap(selector: u8, mask: u8, cap: u32) -> Result<Vec<Range<u32>>, Error> {
     let index = selector_index(selector)?;
+    if !(1..=255).contains(&cap) {
+        return Err(Error::Invalid("chunk cap outside 1..=255"));
+    }
     if mask > 0x1f {
         return Err(Error::Invalid("write mask outside 0..=31"));
     }
@@ -116,7 +125,7 @@ pub fn write_blocks(selector: u8, mask: u8) -> Result<Vec<Range<u32>>, Error> {
     {
         if tag == 5 || mask & (1 << tag) == 0 {
             while address < start {
-                let next = (address + 64 - address % 64).min(start);
+                let next = (address + cap - address % cap).min(start);
                 blocks.push(address..next);
                 address = next;
             }
@@ -195,5 +204,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_positive_byte_cap_preserves_holes_and_absolute_grid() {
+        for cap in 1..=255 {
+            let blocks = write_blocks_with_cap(6, 31, cap).unwrap();
+            assert_eq!(blocks.iter().map(|b| b.end - b.start).sum::<u32>(), 0x3c6df);
+            assert!(blocks.windows(2).all(|p| p[0].end <= p[1].start));
+            assert!(
+                blocks
+                    .iter()
+                    .all(|b| b.start < b.end && b.start / cap == (b.end - 1) / cap)
+            );
+            assert!(
+                blocks
+                    .iter()
+                    .all(|b| b.end <= 0x379b3 || b.start >= 0x379b8)
+            );
+            assert!(
+                blocks
+                    .iter()
+                    .all(|b| b.end <= 0x37dae || b.start >= 0x3808a)
+            );
+        }
+        assert!(write_blocks_with_cap(6, 31, 0).is_err());
+        assert!(write_blocks_with_cap(6, 31, 256).is_err());
     }
 }
