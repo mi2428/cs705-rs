@@ -192,6 +192,29 @@ fn observed_comment_metadata_never_becomes_a_native_reader_acceptance_gate() {
 }
 
 #[test]
+fn explicit_native_checksum_choice_does_not_change_body_metadata_or_reader_gates() {
+    let mut raw = vec![0xa5; 0x3c9c0];
+    raw[0x355a1] = 6;
+    raw[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+    let layout = icf::format::Layout::from_map_revision(6);
+    let canonical = icf::format::write_storage(&raw, layout, b"KEEP", 0x40001).unwrap();
+    let explicit =
+        icf::format::write_storage_with_checksum(&raw, layout, b"KEEP", 0x40001, true).unwrap();
+    assert_eq!(canonical, explicit);
+    let omitted =
+        icf::format::write_storage_with_checksum(&raw, layout, b"KEEP", 0x40001, false).unwrap();
+    let cd = canonical.windows(4).position(|w| w == b"#CD=").unwrap();
+    assert_eq!(&canonical[..cd], omitted);
+    for source in [&canonical, &omitted] {
+        let read = icf::format::read(source).unwrap();
+        assert_eq!(read.status, icf::format::Status::Success);
+        assert_eq!(&read.image[..raw.len()], raw);
+        assert_eq!(read.reader.extra_data, 0x40001);
+        assert_eq!(read.report.source_comment, b"KEEP");
+    }
+}
+
+#[test]
 fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
     use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
 

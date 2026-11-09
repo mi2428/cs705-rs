@@ -180,6 +180,19 @@ pub fn write_storage(
     comment: &[u8],
     extra_data: u32,
 ) -> Result<Vec<u8>, Error> {
+    write_storage_with_checksum(image, layout, comment, extra_data, true)
+}
+
+/// Native13394/1370D writer option. The canonical writer above retains its
+/// original CD behavior; only an explicit native Save decision can omit CD.
+/// This does not alter any reader coverage/revision/signature gate.
+pub fn write_storage_with_checksum(
+    image: &[u8],
+    layout: Layout,
+    comment: &[u8],
+    extra_data: u32,
+    checksum: bool,
+) -> Result<Vec<u8>, Error> {
     if image.len() != layout.storage_len() {
         return Err(Error::Invalid {
             line: 0,
@@ -212,7 +225,9 @@ pub fn write_storage(
         }
         output.extend_from_slice(b"\r\n");
     }
-    write!(output, "#CD={:X}\r\n", digest.finalize()).expect("Vec write cannot fail");
+    if checksum {
+        write!(output, "#CD={:X}\r\n", digest.finalize()).expect("Vec write cannot fail");
+    }
     Ok(output)
 }
 
