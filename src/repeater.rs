@@ -29,6 +29,9 @@ use crate::icf::{
 use std::borrow::Cow;
 use std::fmt;
 
+pub mod staging;
+pub mod fields;
+
 // CS-705 1.30 CS705.exe SHA-256:
 // e9439e1413e1258be77e6ef2188b72276dd714642e3858f4690e5d45653aeca3.
 // Header RVA 0x8E50C, raw-cell split RVA 0x46970, Name width RVA 0x8F385.
@@ -296,7 +299,7 @@ impl<'a> Csv<'a> {
                 reason: "Frequency requires 30000..=1399999999 integer Hz",
             });
         }
-        row.cells[6] = Cow::Owned(format!("{}.{:06}", hz / 1_000_000, hz % 1_000_000).into_bytes());
+        row.cells[6] = Cow::Owned(crate::csv::number::frequency_text(hz, b'.'));
         Ok(())
     }
 
@@ -319,7 +322,7 @@ impl<'a> Csv<'a> {
                 reason: "Offset requires 0..=9999900 integer Hz in steps of 100",
             });
         }
-        row.cells[8] = Cow::Owned(format!("{}.{:06}", hz / 1_000_000, hz % 1_000_000).into_bytes());
+        row.cells[8] = Cow::Owned(crate::csv::number::frequency_text(hz, b'.'));
         Ok(())
     }
 
@@ -600,9 +603,17 @@ impl<'a> Csv<'a> {
                 reason: "CSV Latitude outside degree/tick domain",
             });
         }
-        let fraction = (u32::from(value.thousandths_of_minute) * 50 + 1) / 3;
-        let sign = if value.negative { "-" } else { "" };
-        row.cells[14] = Cow::Owned(format!("{sign}{}.{fraction:06}", value.degrees).into_bytes());
+        let ticks = value.thousandths_of_minute.to_be_bytes();
+        row.cells[14] = Cow::Owned(crate::csv::number::coordinate_text(
+            [
+                value.degrees,
+                ticks[0],
+                ticks[1],
+                if value.negative { b'S' } else { b'N' },
+            ],
+            true,
+            b'.',
+        ));
         Ok(())
     }
 
@@ -628,9 +639,17 @@ impl<'a> Csv<'a> {
                 reason: "CSV Longitude outside degree/tick domain",
             });
         }
-        let fraction = (u32::from(value.thousandths_of_minute) * 50 + 1) / 3;
-        let sign = if value.negative { "-" } else { "" };
-        row.cells[15] = Cow::Owned(format!("{sign}{}.{fraction:06}", value.degrees).into_bytes());
+        let ticks = value.thousandths_of_minute.to_be_bytes();
+        row.cells[15] = Cow::Owned(crate::csv::number::coordinate_text(
+            [
+                value.degrees,
+                ticks[0],
+                ticks[1],
+                if value.negative { b'W' } else { b'E' },
+            ],
+            false,
+            b'.',
+        ));
         Ok(())
     }
 

@@ -15,6 +15,9 @@ use crate::icf::{GpsAltitude, GpsCoordinate};
 use std::borrow::Cow;
 use std::fmt;
 
+pub mod operations;
+pub mod transfer;
+
 const HEADER: &[u8] = b"Group,Group Name,Name,Date,Time,Latitude,Longitude,Altitude,Alarm\r\n";
 
 /// Structural or editing errors; reasons never include user cell contents.
@@ -238,11 +241,18 @@ impl<'a> Csv<'a> {
                 reason: "GPS coordinate outside degree/tick domain",
             });
         }
-        // Nearest microdegree on the integer tick grid; division by 3 has no half ties.
-        let fraction = (u32::from(value.thousandths_of_minute) * 50 + 1) / 3;
-        let sign = if value.negative { "-" } else { "" };
-        row.cells[column] =
-            Cow::Owned(format!("{sign}{}.{fraction:06}", value.degrees).into_bytes());
+        let ticks = value.thousandths_of_minute.to_be_bytes();
+        let direction = match (column == 5, value.negative) {
+            (true, false) => b'N',
+            (true, true) => b'S',
+            (false, false) => b'E',
+            (false, true) => b'W',
+        };
+        row.cells[column] = Cow::Owned(crate::csv::number::coordinate_text(
+            [value.degrees, ticks[0], ticks[1], direction],
+            column == 5,
+            b'.',
+        ));
         Ok(())
     }
 
@@ -257,13 +267,9 @@ impl<'a> Csv<'a> {
             .rows
             .get_mut(index)
             .ok_or(Error::RowIndexOutOfBounds { index })?;
-        let bytes = match value {
-            GpsAltitude::Unknown => Vec::new(),
-            GpsAltitude::TenthsOfFoot(n) if (-328084..=328084).contains(&n) => {
-                let metres = (n.unsigned_abs() * 3048 + 5000) / 10000;
-                let sign = if n < 0 && metres != 0 { "-" } else { "" };
-                format!("{sign}{}.{}", metres / 10, metres % 10).into_bytes()
-            }
+        let raw = match value {
+            GpsAltitude::Unknown => i32::MAX,
+            GpsAltitude::TenthsOfFoot(n) if (-328084..=328084).contains(&n) => n,
             _ => {
                 return Err(Error::Unsupported {
                     line: index + 2,
@@ -271,7 +277,7 @@ impl<'a> Csv<'a> {
                 });
             }
         };
-        row.cells[7] = Cow::Owned(bytes);
+        row.cells[7] = Cow::Owned(crate::csv::number::altitude_text(raw, b'.'));
         Ok(())
     }
 

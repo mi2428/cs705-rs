@@ -1,12 +1,15 @@
-//! Native, offline IC-705 configuration tools.
+//! CS-705 1.30 configuration formats, record editing and clone protocols.
 //!
-//! This experimental crate handles the established [`icf`] subset, limited lossless
-//! CSV column editing in [`repeater`] and [`gps`], and pure [`clone`] frames.
-//! It does not implement full CS-705 compatibility, transfers or device access.
+//! Canonical ICF validation and original-source reader semantics are separate
+//! APIs. CSV codecs preserve byte strings and explicit locale inputs; clone
+//! sessions use caller-owned transports and never discover or open devices.
+//! Static-source fidelity is scoped by each operation's contract, not a claim of
+//! complete application compatibility, radio suitability or hardware validation.
 
 #![forbid(unsafe_code)]
 
 pub mod clone;
+pub mod csv;
 pub mod gps;
 pub mod icf;
 pub mod repeater;
