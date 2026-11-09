@@ -87,6 +87,9 @@ pub struct Report {
     pub records: usize,
     /// Number of bytes written before stopping, including duplicate addresses.
     pub bytes_written: usize,
+    /// Observed #Comment payload for lossless document metadata. It does not
+    /// participate in native parsing/gates; the native reader ignores this key.
+    pub source_comment: Vec<u8>,
 }
 
 impl Default for Reader {
@@ -145,6 +148,7 @@ impl Reader {
             metadata_before_data: None,
             records: 0,
             bytes_written: 0,
+            source_comment: Vec::new(),
         };
         report.status = self.read_inner(image, fragments, required, &mut report);
         if report.status != Status::Success {
@@ -185,6 +189,9 @@ impl Reader {
             };
             let line = c_prefix(fragment);
             if line.first() == Some(&b'#') {
+                if let Some(comment) = line.strip_prefix(b"#Comment=") {
+                    report.source_comment = comment.strip_suffix(b"\n").unwrap_or(comment).to_vec();
+                }
                 if contains(&line[1..], b"MapRev=") {
                     self.map_revision = decimal_prefix(line.get(8..).unwrap_or_default());
                 } else if contains(&line[1..], b"EtcData=") {

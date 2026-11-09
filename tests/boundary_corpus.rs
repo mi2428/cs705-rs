@@ -178,6 +178,20 @@ fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class
 }
 
 #[test]
+fn observed_comment_metadata_never_becomes_a_native_reader_acceptance_gate() {
+    let plain = icf::format::read(b"40750001\n#MapRev=6\n#EtcData=00000000\nBROKEN\n").unwrap();
+    let observed=icf::format::read(b"40750001\n#MapRev=6\n#Comment=FIRST\0ignored\n#EtcData=00000000\nBROKEN\n#Comment=UNREACHED\n").unwrap();
+    assert_eq!(observed.report.source_comment, b"FIRST");
+    assert_eq!(observed.status, plain.status);
+    assert_eq!(observed.image, plain.image);
+    assert_eq!(observed.reader, plain.reader);
+    assert_eq!(observed.report.bytes_written, 0);
+    let observed = icf::format::read(b"40750001\n#Comment=FIRST\n#Comment=LAST\n").unwrap();
+    assert_eq!(observed.report.source_comment, b"LAST");
+    assert_eq!(observed.status, icf::format::Status::Signature);
+}
+
+#[test]
 fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
     use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
 
