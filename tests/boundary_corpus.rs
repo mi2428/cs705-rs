@@ -27,6 +27,35 @@ fn home_dr_l30_membership_does_not_inherit_the_common_context_bypass() {
 }
 
 #[test]
+fn scan_selected_raw_projection_and_late_source_failure_keep_distinct_boundaries() {
+    let mut raw = vec![0xa5; 0x3c9c0];
+    raw[0x355a1] = 6;
+    raw[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+    let base = icf::Icf::from_memory(raw.clone()).unwrap();
+    for candidate in [-1, 0, 24, 25, 31, 32, 255, 256, i32::MIN, i32::MAX] {
+        let mut image = base.clone();
+        let mut expected = raw.clone();
+        expected[0x37802] = (0xa5 & !0x7c) | ((candidate as u8 & 31) << 2);
+        icf::special::select_scan_raw(&mut image, &[], candidate, false).unwrap();
+        assert_eq!(image.memory(), expected);
+    }
+    let mut image = base.clone();
+    assert!(icf::special::select_scan(&mut image, &[], 25, false).is_err());
+    assert_eq!(image.memory(), raw);
+    let mut image = base.clone();
+    let mut expected = raw.clone();
+    expected[0x37802] = (0xa5 & !0x7c) | (31 << 2);
+    expected[0x37807] = 0xa4;
+    assert!(icf::special::select_scan_raw(&mut image, &[], -1, true).is_err());
+    assert_eq!(image.memory(), expected);
+    let mut generation = vec![0; 0x37814];
+    generation[0x37810..].copy_from_slice(&[1, 2, 3, 4]);
+    icf::special::select_scan_raw(&mut image, &generation, -1, true).unwrap();
+    expected[0x37810..0x37814].copy_from_slice(&[1, 2, 3, 4]);
+    assert_eq!(image.memory(), expected);
+}
+
+#[test]
 fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
     use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
 

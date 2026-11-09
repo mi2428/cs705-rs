@@ -248,11 +248,24 @@ impl CompactChannel {
     /// Decode one exact raw36 window. Address, dataset and generation selection
     /// remain caller-owned; this is the same codec used by read, not a new path.
     pub fn decode(b: &[u8; 36]) -> Result<Self, Error> {
+        Self::decode_valid(b, word32(b, 0)? != u32::MAX)
+    }
+    /// Shared raw36 entry with caller-owned validity, including a valid MAX
+    /// frequency. All field decoding remains in the single bound decoder.
+    pub fn decode_valid(raw: &[u8; 36], valid: bool) -> Result<Self, Error> {
+        Self::decode_bound(Some(raw), valid)
+    }
+    /// Checked shared-kind19/1A/1B entry: validity comes from the caller's real
+    /// external flag, not frequency. Invalid skips the source entirely; valid
+    /// requires a supplied raw36 even when frequency itself is FFFFFFFF.
+    /// The same field decoder serves normal compact and shared records.
+    pub fn decode_bound(source: Option<&[u8; 36]>, valid: bool) -> Result<Self, Error> {
+        if !valid {
+            return Ok(Self::empty());
+        }
+        let b = source.ok_or(invalid("valid compact record requires its raw36 source"))?;
         let mut h = Self::empty();
         h.frequency_hz = word32(b, 0)?;
-        if h.frequency_hz == u32::MAX {
-            return Ok(h);
-        }
         h.valid = true;
         h.mode = decode_mode(b[4] >> 4);
         h.filter = u32::from(b[4] & 15);
@@ -628,8 +641,23 @@ pub fn scan_suitable_rows(
 
 pub fn select_scan(image: &mut Icf<'_>, g: &[u8], row: usize, reset: bool) -> Result<(), Error> {
     index(row, 25)?;
+    select_scan_raw(image, g, row as i32, reset)
+}
+
+/// AA658's accepted selected candidate bypasses the normal25-row menu domain.
+/// Its low5 bits are stored before any conditional reset or G source read.
+pub fn select_scan_raw(
+    image: &mut Icf<'_>,
+    g: &[u8],
+    candidate: i32,
+    reset: bool,
+) -> Result<(), Error> {
     let old = byte(image.memory(), 0x37802)?;
-    put_byte(image, 0x37802, (old & !0x7c) | ((row as u8 & 31) << 2))?;
+    put_byte(
+        image,
+        0x37802,
+        (old & !0x7c) | ((candidate as u8 & 31) << 2),
+    )?;
     if reset {
         let old = byte(image.memory(), 0x37807)?;
         put_byte(image, 0x37807, old & !1)?;
@@ -2532,6 +2560,19 @@ mod tests {
         old[..4].copy_from_slice(&123u32.to_le_bytes());
         old[4] = 0x71;
         old[6] = 0xa5;
+        assert!(!CompactChannel::decode_bound(None, false).unwrap().valid);
+        assert!(CompactChannel::decode_bound(None, true).is_err());
+        let mut shared = old;
+        shared[..4].fill(255);
+        assert!(!CompactChannel::decode(&shared).unwrap().valid);
+        let forced = CompactChannel::decode_bound(Some(&shared), true).unwrap();
+        assert_eq!(CompactChannel::decode_valid(&shared, true).unwrap(), forced);
+        assert!(!CompactChannel::decode_valid(&shared, false).unwrap().valid);
+        assert!(forced.valid);
+        assert_eq!(
+            (forced.frequency_hz, forced.mode, forced.filter),
+            (u32::MAX, 13, 1)
+        );
         for fail in 0..=2 {
             let mut h = CompactChannel::decode(&old).unwrap();
             h.frequency_hz = 456;
