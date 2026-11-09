@@ -29,8 +29,8 @@ impl Icf<'_> {
     /// No GUI correction, parent normalization or I/O occurs.
     ///
     /// # Errors
-    /// Invalid new values, including `Some(0)`, are rejected before checking the
-    /// current value. Unknown current frequencies are never repaired implicitly.
+    /// Invalid new values, including `Some(0)`, are rejected before any write.
+    /// A legal explicit replacement does not require a recognized old frequency.
     pub fn set_home_frequency_hz(&mut self, value: Option<u32>) -> Result<(), Error> {
         let raw = match value {
             None => 0,
@@ -42,7 +42,6 @@ impl Icf<'_> {
                 });
             }
         };
-        self.home_frequency_hz()?;
         self.memory[0x392f6..0x392fa].copy_from_slice(&raw.to_le_bytes());
         Ok(())
     }
@@ -159,8 +158,8 @@ macro_rules! bounded_byte {
             #[doc = concat!("Change only the stored ", $unit, " byte. No I/O.")]
             ///
             /// # Errors
-            /// Rejects an invalid new value with [`Error::Invalid`] before checking
-            /// the current value. An unsupported current value is not repaired.
+            /// Rejects an invalid new value with [`Error::Invalid`] before writing.
+            /// A legal explicit replacement accepts an unknown old value.
             /// All errors preserve every image, metadata and original-source byte.
             pub fn $set(&mut self, value: u8) -> Result<(), Error> {
                 if !($min..=$max).contains(&value) {
@@ -169,7 +168,6 @@ macro_rules! bounded_byte {
                         reason: concat!(stringify!($get), " new value outside supported range"),
                     });
                 }
-                self.$get()?;
                 self.memory[$offset] = (i16::from(value) - $bias) as u8;
                 Ok(())
             }
@@ -200,8 +198,8 @@ macro_rules! bounded_word {
             #[doc = concat!("Change only the two stored little-endian bytes for ", $unit, ". No I/O.")]
             ///
             /// # Errors
-            /// Rejects an invalid new value with [`Error::Invalid`] before checking
-            /// the current word. An unsupported current word is never repaired.
+            /// Rejects an invalid new value with [`Error::Invalid`] before writing.
+            /// A legal explicit replacement accepts an unknown old word.
             /// Errors preserve all memory, metadata and original source bytes.
             pub fn $set(&mut self, value: $ty) -> Result<(), Error> {
                 if !($min..=$max).contains(&value) $(|| value % $step != 0)? {
@@ -210,7 +208,6 @@ macro_rules! bounded_word {
                         reason: concat!(stringify!($get), " new value outside supported range or step"),
                     });
                 }
-                self.$get()?;
                 self.memory[$offset..$offset + 2].copy_from_slice(&value.to_le_bytes());
                 Ok(())
             }
@@ -348,8 +345,8 @@ impl Icf<'_> {
     /// Change only the stored notch position byte, using position+128. No I/O.
     ///
     /// # Errors
-    /// Returns [`Error::Invalid`] for -128 before checking the current raw byte.
-    /// An unsupported current value is never repaired; errors change no bytes.
+    /// Returns [`Error::Invalid`] for -128 without changing any bytes.
+    /// A legal explicit replacement accepts an unknown old byte.
     pub fn set_manual_notch_position(&mut self, value: i8) -> Result<(), Error> {
         if value == i8::MIN {
             return Err(Error::Invalid {
@@ -357,7 +354,6 @@ impl Icf<'_> {
                 reason: "manual_notch_position new value outside -127..=127",
             });
         }
-        self.manual_notch_position()?;
         self.memory[0x399a6] = (i16::from(value) + 128) as u8;
         Ok(())
     }
@@ -398,10 +394,8 @@ macro_rules! stored_setting {
             /// All non-target bits, memory, metadata and original source bytes are preserved.
             /// Use [`Self::to_bytes`] to serialize. No I/O occurs.
             ///
-            /// # Errors
-            /// Refuses an unknown current code without changing any bytes.
+            /// An unknown old field code does not block explicit replacement.
             pub fn $set(&mut self, value: $ty) -> Result<(), Error> {
-                self.$get()?;
                 let raw = value as u8;
                 $(let raw = (self.memory[$offset] & !$mask) | ((raw << $shift) & $mask);)?
                 self.memory[$offset] = raw;
@@ -806,11 +800,8 @@ impl Icf<'_> {
     /// Use [`Self::to_bytes`] for the edited image; [`Self::original_bytes`]
     /// continues to return the untouched input. No radio or audio I/O occurs.
     ///
-    /// # Errors
-    ///
-    /// Refuses to overwrite an unsupported existing flag value.
+    /// An unknown old flag does not block explicit replacement.
     pub fn set_key_touch_beep(&mut self, enabled: bool) -> Result<(), Error> {
-        self.key_touch_beep()?;
         self.memory[KEY_TOUCH_BEEP] = u8::from(enabled);
         Ok(())
     }
@@ -836,11 +827,8 @@ impl Icf<'_> {
 
     /// Change only the stored beep-level limit byte.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported existing value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_beep_level_limit(&mut self, enabled: bool) -> Result<(), Error> {
-        self.beep_level_limit()?;
         self.memory[BEEP_LEVEL_LIMIT] = u8::from(enabled);
         Ok(())
     }
@@ -866,11 +854,8 @@ impl Icf<'_> {
 
     /// Change only the stored home-channel beep byte.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported existing value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_home_channel_beep(&mut self, enabled: bool) -> Result<(), Error> {
-        self.home_channel_beep()?;
         self.memory[HOME_CHANNEL_BEEP] = u8::from(enabled);
         Ok(())
     }
@@ -900,11 +885,8 @@ impl Icf<'_> {
     ///
     /// This does not transmit or enforce a transmit limit.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported existing value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_band_edge_beep(&mut self, selection: BandEdgeBeep) -> Result<(), Error> {
-        self.band_edge_beep()?;
         self.memory[BAND_EDGE_BEEP] = selection as u8;
         Ok(())
     }
@@ -933,11 +915,8 @@ impl Icf<'_> {
 
     /// Change only the stored automatic power-off byte, without power I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported existing value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_auto_power_off(&mut self, selection: AutoPowerOff) -> Result<(), Error> {
-        self.auto_power_off()?;
         self.memory[AUTO_POWER_OFF] = selection as u8;
         Ok(())
     }
@@ -966,11 +945,8 @@ impl Icf<'_> {
 
     /// Change only the stored power-save byte, without receive control or I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported existing value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_power_save(&mut self, selection: PowerSave) -> Result<(), Error> {
-        self.power_save()?;
         self.memory[POWER_SAVE] = selection as u8;
         Ok(())
     }
@@ -996,11 +972,8 @@ impl Icf<'_> {
 
     /// Change only the stored quick-split byte, not VFOs or the split offset.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_quick_split(&mut self, enabled: bool) -> Result<(), Error> {
-        self.quick_split()?;
         self.memory[QUICK_SPLIT] = u8::from(enabled);
         Ok(())
     }
@@ -1026,11 +999,8 @@ impl Icf<'_> {
 
     /// Change only the stored split-lock byte, without button or frequency I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_split_lock(&mut self, enabled: bool) -> Result<(), Error> {
-        self.split_lock()?;
         self.memory[SPLIT_LOCK] = u8::from(enabled);
         Ok(())
     }
@@ -1057,14 +1027,11 @@ impl Icf<'_> {
 
     /// Change only the stored received-callsign speech byte, not callsign data.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_received_callsign_speech(
         &mut self,
         selection: ReceivedCallsignSpeech,
     ) -> Result<(), Error> {
-        self.received_callsign_speech()?;
         self.memory[RECEIVED_CALLSIGN_SPEECH] = selection as u8;
         Ok(())
     }
@@ -1090,11 +1057,8 @@ impl Icf<'_> {
 
     /// Change only the stored RX-to-CS speech byte, without audio or recording I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_rx_cs_speech(&mut self, enabled: bool) -> Result<(), Error> {
-        self.rx_cs_speech()?;
         self.memory[RX_CS_SPEECH] = u8::from(enabled);
         Ok(())
     }
@@ -1121,11 +1085,8 @@ impl Icf<'_> {
 
     /// Change only the stored MIC Up/Down speech byte, not channel or VFO data.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_mic_up_down_speech(&mut self, enabled: bool) -> Result<(), Error> {
-        self.mic_up_down_speech()?;
         self.memory[MIC_UP_DOWN_SPEECH] = u8::from(enabled);
         Ok(())
     }
@@ -1151,11 +1112,8 @@ impl Icf<'_> {
 
     /// Change only the stored S-meter level announcement byte, not a master mute.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_s_meter_level_speech(&mut self, enabled: bool) -> Result<(), Error> {
-        self.s_meter_level_speech()?;
         self.memory[S_METER_LEVEL_SPEECH] = u8::from(enabled);
         Ok(())
     }
@@ -1181,11 +1139,8 @@ impl Icf<'_> {
 
     /// Change only the stored mode-change speech byte, not the operating mode.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_mode_speech(&mut self, enabled: bool) -> Result<(), Error> {
-        self.mode_speech()?;
         self.memory[MODE_SPEECH] = u8::from(enabled);
         Ok(())
     }
@@ -1208,11 +1163,8 @@ impl Icf<'_> {
 
     /// Change only the stored speech-language byte, without audio I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_speech_language(&mut self, selection: SpeechLanguage) -> Result<(), Error> {
-        self.speech_language()?;
         self.memory[SPEECH_LANGUAGE] = selection as u8;
         Ok(())
     }
@@ -1235,11 +1187,8 @@ impl Icf<'_> {
 
     /// Change only the stored pronunciation byte, not callsign contents.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_speech_alphabet(&mut self, selection: SpeechAlphabet) -> Result<(), Error> {
-        self.speech_alphabet()?;
         self.memory[SPEECH_ALPHABET] = selection as u8;
         Ok(())
     }
@@ -1262,11 +1211,8 @@ impl Icf<'_> {
 
     /// Change only the stored speech-speed byte, without timers or audio I/O.
     ///
-    /// # Errors
-    ///
-    /// Refuses an unsupported current value without changing any state.
+    /// An unknown old field code does not block explicit replacement.
     pub fn set_speech_speed(&mut self, selection: SpeechSpeed) -> Result<(), Error> {
-        self.speech_speed()?;
         self.memory[SPEECH_SPEED] = selection as u8;
         Ok(())
     }
@@ -1286,7 +1232,6 @@ macro_rules! stored_color {
             }
             /// Change only three COLORREF-order bytes; preserve all other state.
             pub fn $set(&mut self, value: [u8; 3]) -> Result<(), Error> {
-                self.$get()?;
                 self.memory[$at..$at + 3].copy_from_slice(&value);
                 Ok(())
             }
@@ -1566,11 +1511,9 @@ impl Icf<'_> {
 
     /// Change only the two stored mode bytes, preserving Span and every other byte.
     /// No UI refresh flag, defaulting, parent normalization or I/O occurs.
-    /// # Errors
-    /// Validates both current bytes before either write; unknown current codes
-    /// leave the entire state, including prior successful edits, unchanged.
+    /// Both old mode bytes may be unknown; explicit replacement changes only
+    /// these two bytes and preserves all prior edits elsewhere.
     pub fn set_scope_mode(&mut self, value: ScopeMode) -> Result<(), Error> {
-        self.scope_mode()?;
         let (fixed, scroll) = match value {
             ScopeMode::Center => (0, 0),
             ScopeMode::Fixed => (1, 0),

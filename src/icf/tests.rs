@@ -201,6 +201,19 @@ fn scalar_error(
     error
 }
 
+fn scalar_replace(
+    image: &mut Icf<'_>,
+    at: usize,
+    bytes: &[u8],
+    operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
+) {
+    let mut expected = image.memory().to_vec();
+    let source = image.source;
+    expected[at..at + bytes.len()].copy_from_slice(bytes);
+    operation(image).unwrap();
+    assert_setting_state(image, source, &expected);
+}
+
 #[test]
 fn scalar_fm_codec_sweeps_all_500_slots_both_sides_and_preserves_windows() {
     let (source, mut expected) = scalar_memory_fixture();
@@ -464,7 +477,8 @@ fn scalar_guards_ranges_modes_and_masks_reject_without_state_changes() {
             i.set_physical_memory_offset_hz(0, side, value)
         });
         image.memory[30..34].copy_from_slice(&value.to_le_bytes());
-        scalar_error(&mut image, false, |i| {
+        assert!(image.physical_memory_offset_hz(0, side).is_err());
+        scalar_replace(&mut image, 30, &[0; 4], |i| {
             i.set_physical_memory_offset_hz(0, side, 0)
         });
         scalar_error(&mut image, true, |i| {
@@ -539,7 +553,8 @@ fn scalar_guards_ranges_modes_and_masks_reject_without_state_changes() {
     }
     for raw in 3..16 {
         image.memory[5] = 0x70 | raw;
-        scalar_error(&mut image, false, |i| {
+        assert!(image.physical_memory_filter(0, side).is_err());
+        scalar_replace(&mut image, 5, &[0x70], |i| {
             i.set_physical_memory_filter(0, side, MemoryFilter::Filter1)
         });
     }
@@ -548,20 +563,17 @@ fn scalar_guards_ranges_modes_and_masks_reject_without_state_changes() {
         image.memory[6] = raw;
         assert_eq!(image.physical_memory_data(0, side), Ok(raw & 1 != 0));
         if (raw >> 1) & 3 == 3 {
-            scalar_error(&mut image, false, |i| {
-                i.set_physical_memory_duplex(0, side, MemoryDuplex::Off)
-            });
+            assert!(image.physical_memory_duplex(0, side).is_err());
         } else {
             let values = [MemoryDuplex::Off, MemoryDuplex::Minus, MemoryDuplex::Plus];
             assert_eq!(
                 image.physical_memory_duplex(0, side),
                 Ok(values[((raw >> 1) & 3) as usize])
             );
-            image
-                .set_physical_memory_duplex(0, side, MemoryDuplex::Plus)
-                .unwrap();
-            assert_eq!(image.memory[6], (raw & !6) | 4);
         }
+        scalar_replace(&mut image, 6, &[(raw & !6) | 4], |i| {
+            i.set_physical_memory_duplex(0, side, MemoryDuplex::Plus)
+        });
         image.memory[0] = raw;
         image.memory[0x3662d] = raw & !1;
         assert_eq!(image.physical_memory_split(0), Ok(raw & 2 != 0));
@@ -592,7 +604,8 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
     for (side, t) in [(MemorySide::Main, 1), (MemorySide::Split, 0x22)] {
         for bad in [8, 255] {
             image.memory[t + 6] = bad;
-            scalar_error(&mut image, false, |i| {
+            assert!(image.physical_memory_tone(0, side).is_err());
+            scalar_replace(&mut image, t + 6, &[0], |i| {
                 i.set_physical_memory_tone(0, side, MemoryTone::Off)
             });
         }
@@ -602,7 +615,7 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
                 image.memory[t + at] = bad;
                 match at {
                     9 => {
-                        scalar_error(&mut image, false, |i| {
+                        scalar_replace(&mut image, t + at, &[0], |i| {
                             i.set_physical_memory_tx_tone_index(0, side, 0)
                         });
                         scalar_error(&mut image, true, |i| {
@@ -610,7 +623,7 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
                         });
                     }
                     10 => {
-                        scalar_error(&mut image, false, |i| {
+                        scalar_replace(&mut image, t + at, &[0], |i| {
                             i.set_physical_memory_rx_tone_index(0, side, 0)
                         });
                         scalar_error(&mut image, true, |i| {
@@ -618,7 +631,7 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
                         });
                     }
                     _ => {
-                        scalar_error(&mut image, false, |i| {
+                        scalar_replace(&mut image, t + at, &[0], |i| {
                             i.set_physical_memory_dtcs_index(0, side, 0)
                         });
                         scalar_error(&mut image, true, |i| {
@@ -632,7 +645,8 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
         for at in [7, 8] {
             for bad in [2, 255] {
                 image.memory[t + at] = bad;
-                scalar_error(&mut image, false, |i| {
+                assert!(image.physical_memory_dtcs_polarity(0, side).is_err());
+                scalar_replace(&mut image, t + 7, &[0, 0], |i| {
                     i.set_physical_memory_dtcs_polarity(0, side, (false, false))
                 });
             }
@@ -641,14 +655,16 @@ fn scalar_overlay_boundaries_raw_alphabets_and_callsign_coupling_are_strict() {
         image.memory[t + 4] = 0x90;
         for bad in [3, 255] {
             image.memory[t + 6] = bad;
-            scalar_error(&mut image, false, |i| {
+            assert!(image.physical_memory_digital_squelch(0, side).is_err());
+            scalar_replace(&mut image, t + 6, &[0], |i| {
                 i.set_physical_memory_digital_squelch(0, side, MemoryDigitalSquelch::Off)
             });
         }
         image.memory[t + 6] = 0;
         for bad in [100, 255] {
             image.memory[t + 7] = bad;
-            scalar_error(&mut image, false, |i| {
+            assert!(image.physical_memory_digital_code(0, side).is_err());
+            scalar_replace(&mut image, t + 7, &[0], |i| {
                 i.set_physical_memory_digital_code(0, side, 0)
             });
             scalar_error(&mut image, true, |i| {
@@ -786,17 +802,16 @@ fn canonical_home_ntp_and_payload_comment_preserve_raw_metadata_and_neighbors() 
         rejected!(image.set_home_frequency_hz(Some(bad)), Invalid, 0x392f6);
     }
     for bad in [1, 29_999, 200_000_000, 399_999_999, 470_000_001, u32::MAX] {
-        // Test setup only; the public setter never repairs unknown Home Hz.
+        // Unknown stored Hz remain readable as an error until an explicit edit.
         image.memory[0x392f6..0x392fa].copy_from_slice(&bad.to_le_bytes());
         rejected!(image.home_frequency_hz(), Unsupported, 0x392f6);
-        rejected!(image.set_home_frequency_hz(None), Unsupported, 0x392f6);
-        rejected!(
-            image.set_home_frequency_hz(Some(30_000)),
-            Unsupported,
-            0x392f6
-        );
         rejected!(image.set_home_frequency_hz(Some(0)), Invalid, 0x392f6);
-        image.memory[0x392f6..0x392fa].fill(0);
+        image.set_home_frequency_hz(Some(30_000)).unwrap();
+        expected[0x392f6..0x392fa].copy_from_slice(&[0x30, 0x75, 0, 0]);
+        assert_setting_state(&image, &source, &expected);
+        image.set_home_frequency_hz(None).unwrap();
+        expected[0x392f6..0x392fa].fill(0);
+        assert_setting_state(&image, &source, &expected);
     }
     let full_ntp = "A".repeat(64);
     for text in ["", full_ntp.as_str(), "-.", "time.Example-0.test", ""] {
@@ -2735,8 +2750,9 @@ fn edits_only_the_supported_confirmation_beep_byte() {
         image.key_touch_beep(),
         Err(Error::Unsupported { .. })
     ));
-    assert!(image.set_key_touch_beep(false).is_err());
-    assert_eq!(image.to_bytes(), unknown);
+    image.set_key_touch_beep(false).unwrap();
+    assert_eq!(image.to_bytes(), fixture(Some(false)));
+    assert_eq!(image.original_bytes(), unknown);
 }
 
 fn assert_setting_state(image: &Icf<'_>, source: &[u8], memory: &[u8]) {
@@ -2819,14 +2835,15 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
     for unknown in [values.len() as u8, 255] {
         image.memory[offset] = unknown;
         expected[offset] = unknown;
-        let before = image.to_bytes();
         let error = read(image).unwrap_err();
         assert!(matches!(error, Error::Unsupported { line, .. } if line == 5 + offset / 32));
-        for &value in values {
-            assert_eq!(write(image, value), Err(error.clone()));
+        for (raw, &value) in values.iter().enumerate() {
+            image.memory[offset] = unknown;
+            write(image, value).unwrap();
+            expected[offset] = raw as u8;
+            assert_eq!(read(image), Ok(value));
             assert_setting_state(image, source, &expected);
         }
-        assert_eq!(image.to_bytes(), before);
     }
     image.memory[offset] = 0;
     write(image, *values.last().unwrap()).unwrap();
@@ -2835,7 +2852,7 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
 }
 
 #[test]
-fn edits_all_29_stored_settings_and_rejects_unknown_current_codes() {
+fn edits_all_29_stored_settings_and_explicitly_replaces_unknown_current_codes() {
     let (source, mut expected) = expanded_settings_fixture();
     assert_eq!(
         format!("{:X}", md5::compute(&source)),
@@ -3304,7 +3321,6 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
         let serialized = image.to_bytes();
         let error = read(image).unwrap_err();
         assert!(matches!(error,Error::Unsupported {line,..} if line==5+offset/32));
-        assert_eq!(write(image, valid), Err(error));
         assert_setting_state(image, source, &expected);
         // Invalid new input wins even when the stored current value is invalid.
         for &value in invalid {
@@ -3314,12 +3330,17 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
             assert_setting_state(image, source, &expected);
         }
         assert_eq!(image.to_bytes(), serialized);
+        write(image, valid).unwrap();
+        assert_eq!(read(image), Ok(valid));
+        assert_eq!(&image.memory()[..offset], &original[..offset]);
+        assert_eq!(&image.memory()[offset + N..], &original[offset + N..]);
+        assert_eq!(image.original_bytes(), source);
     }
     image.memory[offset..offset + N].copy_from_slice(&original[offset..offset + N]);
 }
 
 #[test]
-fn rejects_numeric_input_then_current_without_changing_any_other_byte() {
+fn rejects_invalid_numeric_input_but_explicitly_replaces_unknown_current() {
     let (source, _) = numeric_settings_fixture();
     let mut image = Icf::parse(&source).unwrap();
     macro_rules! reject {
@@ -4174,30 +4195,19 @@ fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
         let code = usize::from((original & mask) >> shift);
         image.memory[offset] = original;
         expected[offset] = original;
-        let error = if code < values.len() {
+        if code < values.len() {
             assert_eq!(read(image), Ok(values[code]));
-            None
         } else {
             let error = read(image).unwrap_err();
             assert!(matches!(error, Error::Unsupported { line, .. } if line == 5 + offset / 32));
-            Some(error)
-        };
-        let before = error.as_ref().map(|_| image.to_bytes());
+        }
         for (new_code, &value) in values.iter().enumerate() {
             // Each new value is checked against this exact original byte.
             image.memory[offset] = original;
-            if let Some(ref error) = error {
-                assert_eq!(write(image, value), Err(error.clone()));
-                expected[offset] = original;
-            } else {
-                write(image, value).unwrap();
-                expected[offset] = (original & !mask) | ((new_code as u8) << shift);
-                assert_eq!(read(image), Ok(value));
-            }
+            write(image, value).unwrap();
+            expected[offset] = (original & !mask) | ((new_code as u8) << shift);
+            assert_eq!(read(image), Ok(value));
             assert_setting_state(image, source, &expected);
-        }
-        if let Some(before) = before {
-            assert_eq!(image.to_bytes(), before);
         }
     }
 }
@@ -6197,8 +6207,11 @@ fn check_common_setting<T: Copy + fmt::Debug + PartialEq>(
         image.memory[offset] = raw;
         expected[offset] = raw;
         assert_eq!(read(&image), Err(unsupported.clone()));
-        for &(_, value, _) in values {
-            assert_eq!(write(&mut image, value), Err(unsupported.clone()));
+        for &(new_raw, value, _) in values {
+            image.memory[offset] = raw;
+            write(&mut image, value).unwrap();
+            expected[offset] = new_raw;
+            assert_eq!(read(&image), Ok(value));
             assert_setting_state(&image, source, &expected);
         }
     }
@@ -6208,11 +6221,14 @@ fn check_common_setting<T: Copy + fmt::Debug + PartialEq>(
     let mut image = Icf::parse(&source).unwrap();
     expected[offset] = 255;
     assert_eq!(read(&image), Err(unsupported.clone()));
-    for &(_, value, _) in values {
-        assert_eq!(write(&mut image, value), Err(unsupported.clone()));
+    for (index, &(raw, value, _)) in values.iter().enumerate() {
+        image.memory[offset] = 255;
+        write(&mut image, value).unwrap();
+        expected[offset] = raw;
+        assert_eq!(read(&image), Ok(value));
         assert_setting_state(&image, &source, &expected);
+        assert_eq!(image.to_bytes(), fixtures[index]);
     }
-    assert_eq!(image.to_bytes(), source);
 }
 
 #[test]
@@ -6243,17 +6259,18 @@ fn audio_scope_stored_selectors_and_rgb_preserve_all_other_state() {
                 assert_eq!(image.$get(), Ok(value));
                 assert_setting_state(&image, &source, &expected);
             }
-            // Inject unsupported current codes, never use a setter to make
-            // its own expectation. A later error must retain prior edits.
+            // Unknown old codes are not implicitly repaired by getters, but
+            // every legal explicit replacement preserves all other bytes.
             for raw in [$cases.len() as u8, 0xfe, 0xff] {
                 image.memory[$at] = raw; expected[$at] = raw;
-                let before = image.to_bytes();
                 assert!(matches!(image.$get(), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
-                for (_, value) in $cases {
-                    assert!(matches!(image.$set(value), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
+                for (new_raw, value) in $cases {
+                    image.memory[$at] = raw;
+                    image.$set(value).unwrap();
+                    expected[$at] = new_raw;
+                    assert_eq!(image.$get(), Ok(value));
                     assert_setting_state(&image, &source, &expected);
                 }
-                assert_eq!(image.to_bytes(), before);
             }
             image.memory[$at] = 0; expected[$at] = 0;
         };
@@ -6337,12 +6354,7 @@ fn audio_scope_stored_selectors_and_rgb_preserve_all_other_state() {
     image.memory[0x3995e] = 0xfe;
     expected[0x3995e] = 0xfe;
     let before = image.to_bytes();
-    assert!(matches!(
-        image.set_audio_fft_waterfall_display(false),
-        Err(Error::Unsupported { .. })
-    ));
     assert_setting_state(&image, &source, &expected);
-    assert_eq!(image.to_bytes(), before);
     let parsed = Icf::parse(&before).unwrap();
     assert_setting_state(&parsed, &before, &expected);
     assert!(matches!(
@@ -6353,6 +6365,9 @@ fn audio_scope_stored_selectors_and_rgb_preserve_all_other_state() {
         parsed.audio_fft_waveform_color(),
         image.audio_fft_waveform_color()
     );
+    image.set_audio_fft_waterfall_display(false).unwrap();
+    expected[0x3995e] = 0;
+    assert_setting_state(&image, &source, &expected);
     assert_eq!(source, original);
 }
 
@@ -6447,7 +6462,7 @@ fn swr_graph_physical_slots_raw_domains_and_errors_preserve_all_state() {
 }
 
 #[test]
-fn edits_common_settings_and_rejects_every_unknown_current_value() {
+fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
     // Independent Python hashlib expectations for each (offset, raw) below:
     // image = bytearray(i % 256 for i in range(0x3c9c0))
     // image[0x355a1] = 6; image[-16:] = b"IcomCloneFormat3"; image[offset] = raw
@@ -6564,7 +6579,7 @@ fn edits_common_settings_and_rejects_every_unknown_current_value() {
 }
 
 #[test]
-fn edits_split_speech_settings_and_rejects_every_unknown_current_value() {
+fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_value() {
     // Independent Python hashlib/raw-splice recipe, as for the older fields:
     // image = bytearray(i % 256 for i in range(0x3c9c0))
     // image[0x355a1] = 6; image[-16:] = b"IcomCloneFormat3"; image[offset] = raw

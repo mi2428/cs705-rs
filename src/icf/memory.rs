@@ -116,10 +116,10 @@ macro_rules! overlay_enum {
             }
             /// Change only the stored selection byte, not operating state.
             /// # Errors
-            /// Rejects incompatible modes or unknown current codes without changes.
+            /// Rejects unavailable slots/sides or incompatible modes, not unknown
+            /// old field codes. Explicit replacement preserves every other byte.
             pub fn $set(&mut self, slot: usize, side: MemorySide, value: $ty) -> Result<(), Error> {
-                self.$get(slot, side)?;
-                let t = self.memory_side_offset(slot, side)?;
+                let t = self.memory_overlay_offset(slot, side, MemoryMode::$mode)?;
                 self.memory[t + 6] = value as u8;
                 Ok(())
             }
@@ -147,7 +147,8 @@ macro_rules! overlay_index {
             /// Change only this stored index byte; do not apply it to a radio.
             /// # Errors
             /// Invalid new indices are rejected before current-state checks.
-            /// Unknown current indices or incompatible modes are never repaired.
+            /// Unknown old indices do not block replacement; incompatible modes
+            /// and unavailable slots/sides still reject before any store.
             pub fn $set(&mut self, slot: usize, side: MemorySide, value: u8) -> Result<(), Error> {
                 if value > $max {
                     return Err(invalid(concat!(
@@ -155,8 +156,7 @@ macro_rules! overlay_index {
                         " new index outside supported range"
                     )));
                 }
-                self.$get(slot, side)?;
-                let t = self.memory_side_offset(slot, side)?;
+                let t = self.memory_overlay_offset(slot, side, MemoryMode::$mode)?;
                 self.memory[t + $at] = value;
                 Ok(())
             }
@@ -283,7 +283,6 @@ impl Icf<'_> {
                 "physical memory frequency outside 30000..=470000000 Hz",
             ));
         }
-        self.physical_memory_frequency_hz(slot, side)?;
         let t = self.memory_side_offset(slot, side)?;
         self.memory[t..t + 4].copy_from_slice(&value.to_le_bytes());
         Ok(())
@@ -319,7 +318,7 @@ impl Icf<'_> {
 
     /// Change only the filter nibble, not a mode/cache preference or WFM fixed display.
     /// # Errors
-    /// Rejects WFM, unknown modes/filters and unavailable slots/sides without changes.
+    /// Rejects WFM, unknown modes and unavailable slots/sides, not an unknown old filter.
     pub fn set_physical_memory_filter(
         &mut self,
         slot: usize,
@@ -333,7 +332,6 @@ impl Icf<'_> {
                 "physical memory WFM filter editing unsupported",
             ));
         }
-        self.physical_memory_filter(slot, side)?;
         let t = self.memory_side_offset(slot, side)?;
         self.memory[t + 4] = (self.memory[t + 4] & 0xf0) | value as u8;
         Ok(())
@@ -393,14 +391,13 @@ impl Icf<'_> {
 
     /// Change only DUP bits 06, preserving DATA and all opaque control bits.
     /// # Errors
-    /// Rejects unknown current DUP codes or unavailable slots/sides without changes.
+    /// Rejects unavailable slots/sides; an unknown old DUP code may be replaced.
     pub fn set_physical_memory_duplex(
         &mut self,
         slot: usize,
         side: MemorySide,
         value: MemoryDuplex,
     ) -> Result<(), Error> {
-        self.physical_memory_duplex(slot, side)?;
         let t = self.memory_side_offset(slot, side)?;
         self.memory[t + 5] = (self.memory[t + 5] & !6) | ((value as u8) << 1);
         Ok(())
@@ -427,7 +424,7 @@ impl Icf<'_> {
 
     /// Store canonical offset Hz without DUP/SPLIT grey-condition rejection.
     /// # Errors
-    /// Rejects invalid input first, then unknown current values or unavailable sides.
+    /// Rejects invalid input first, then unavailable slots/sides, not unknown old Hz.
     pub fn set_physical_memory_offset_hz(
         &mut self,
         slot: usize,
@@ -439,7 +436,6 @@ impl Icf<'_> {
                 "physical memory offset outside canonical range or step",
             ));
         }
-        self.physical_memory_offset_hz(slot, side)?;
         let t = self.memory_side_offset(slot, side)?;
         self.memory[t + 29..t + 33].copy_from_slice(&value.to_le_bytes());
         Ok(())
@@ -465,17 +461,16 @@ impl Icf<'_> {
         Ok((self.memory[t + 7] != 0, self.memory[t + 8] != 0))
     }
 
-    /// Store both FM polarity bytes in RX,TX order, without canonicalizing unknown bytes.
+    /// Explicitly replace both FM polarity bytes in RX,TX order.
     /// # Errors
-    /// Rejects unknown current bytes or incompatible modes before either byte changes.
+    /// Rejects unavailable slots/sides or incompatible modes before either store.
     pub fn set_physical_memory_dtcs_polarity(
         &mut self,
         slot: usize,
         side: MemorySide,
         value: (bool, bool),
     ) -> Result<(), Error> {
-        self.physical_memory_dtcs_polarity(slot, side)?;
-        let t = self.memory_side_offset(slot, side)?;
+        let t = self.memory_overlay_offset(slot, side, MemoryMode::Fm)?;
         self.memory[t + 7..t + 9].copy_from_slice(&[u8::from(value.0), u8::from(value.1)]);
         Ok(())
     }

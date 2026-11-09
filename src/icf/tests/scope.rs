@@ -60,8 +60,11 @@ fn scope_selectors_literal_domains_and_unknown_current_are_state_preserving() {
                 expected[$at] = raw;
                 assert!(matches!(image.$get(), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
                 assert_setting_state(&image, &source, &expected);
-                for (_, value) in $cases {
-                    assert!(matches!(image.$set(value), Err(Error::Unsupported { line, .. }) if line == 5 + $at / 32));
+                for (new_raw, value) in $cases {
+                    image.memory[$at] = raw;
+                    image.$set(value).unwrap();
+                    expected[$at] = new_raw;
+                    assert_eq!(image.$get(), Ok(value));
                     assert_setting_state(&image, &source, &expected);
                 }
             }
@@ -204,7 +207,7 @@ fn scope_selectors_literal_domains_and_unknown_current_are_state_preserving() {
 }
 
 #[test]
-fn scope_mode_uses_two_nonadjacent_bytes_and_rejects_each_unknown_window() {
+fn scope_mode_uses_two_nonadjacent_bytes_and_explicitly_replaces_unknown_windows() {
     let source = fixture_with_bytes(&INITIAL_SCOPE, SCOPE_CD);
     let original = source.clone();
     let mut expected = scope_memory();
@@ -249,25 +252,27 @@ fn scope_mode_uses_two_nonadjacent_bytes_and_rejects_each_unknown_window() {
             matches!(image.scope_mode(), Err(Error::Unsupported { line, .. }) if line == 5 + error_at / 32)
         );
         assert_setting_state(&image, &source, &expected);
-        for (_, value) in cases {
-            assert!(
-                matches!(image.set_scope_mode(value), Err(Error::Unsupported { line, .. }) if line == 5 + error_at / 32)
-            );
-            assert_eq!(image.scope_span(), Ok(ScopeSpan::K250));
-            assert_setting_state(&image, &source, &expected);
-        }
-        assert_eq!(image.to_bytes(), before);
         let reparsed = Icf::parse(&before).unwrap();
         assert_setting_state(&reparsed, &before, &expected);
         assert!(
             matches!(reparsed.scope_mode(), Err(Error::Unsupported { line, .. }) if line == 5 + error_at / 32)
         );
+        for (next, value) in cases {
+            image.memory[0x377c6] = pair[0];
+            image.memory[0x3808a] = pair[1];
+            image.set_scope_mode(value).unwrap();
+            expected[0x377c6] = next[0];
+            expected[0x3808a] = next[1];
+            assert_eq!(image.scope_mode(), Ok(value));
+            assert_eq!(image.scope_span(), Ok(ScopeSpan::K250));
+            assert_setting_state(&image, &source, &expected);
+        }
     }
     assert_eq!(source, original);
 }
 
 #[test]
-fn scope_rgb_windows_and_eighteen_mixed_edits_roundtrip_without_late_error_mutation() {
+fn scope_rgb_windows_and_eighteen_mixed_edits_preserve_unknowns_until_explicit_replacement() {
     let mut expected = scope_memory();
     let source = fixture_with_memory(&expected, SCOPE_CD);
     let original = source.clone();
@@ -417,21 +422,20 @@ fn scope_rgb_windows_and_eighteen_mixed_edits_roundtrip_without_late_error_mutat
     );
     assert_eq!(parsed.scope_waterfall_marker_autohide(), Ok(true));
 
-    // A later rejected edit retains every earlier successful field change.
+    // Reading/serialization retain unknown codes and earlier successful edits.
     image.memory[0x39736] = 0xfe;
     expected[0x39736] = 0xfe;
-    let before_error = image.to_bytes();
-    for value in [ScopeVbw::Narrow, ScopeVbw::Wide] {
-        assert!(
-            matches!(image.set_scope_vbw(value), Err(Error::Unsupported { line, .. }) if line == 5 + 0x39736 / 32)
-        );
-        assert_setting_state(&image, &source, &expected);
-        assert_eq!(image.to_bytes(), before_error);
-    }
-    let reparsed = Icf::parse(&before_error).unwrap();
-    assert_setting_state(&reparsed, &before_error, &expected);
+    let before = image.to_bytes();
+    let reparsed = Icf::parse(&before).unwrap();
+    assert_setting_state(&reparsed, &before, &expected);
     assert!(
         matches!(reparsed.scope_vbw(), Err(Error::Unsupported { line, .. }) if line == 5 + 0x39736 / 32)
     );
+    for (raw, value) in [(0, ScopeVbw::Narrow), (1, ScopeVbw::Wide)] {
+        image.memory[0x39736] = 0xfe;
+        image.set_scope_vbw(value).unwrap();
+        expected[0x39736] = raw;
+        assert_setting_state(&image, &source, &expected);
+    }
     assert_eq!(source, original);
 }
