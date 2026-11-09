@@ -19,7 +19,7 @@ impl Record {
     pub fn group(&self) -> u32 {
         self.dword(0x20)
     }
-    fn dword(&self, at: usize) -> u32 {
+    pub(crate) fn dword(&self, at: usize) -> u32 {
         u32::from_le_bytes([
             self.bytes[at],
             self.bytes[at + 1],
@@ -27,14 +27,15 @@ impl Record {
             self.bytes[at + 3],
         ])
     }
-    fn put(&mut self, at: usize, n: u32) {
+    pub(crate) fn put(&mut self, at: usize, n: u32) {
         self.bytes[at..at + 4].copy_from_slice(&n.to_le_bytes());
     }
     fn blank_call(&self) -> bool {
         self.bytes[0x160..0x168] == [b' '; 8]
     }
     fn repeatable(&self) -> bool {
-        let k=classify(self);matches!(k,1|3)||(k==2&&self.blank_call())
+        let k = classify(self);
+        matches!(k, 1 | 3) || (k == 2 && self.blank_call())
     }
     fn cloned_with_header(&self, header: [u8; 12]) -> Self {
         let mut row = self.clone();
@@ -44,7 +45,7 @@ impl Record {
 }
 /// Exact C752C identity, not normalized text or a unique hash key.
 pub fn same(a: &Record, b: &Record) -> bool {
-    let k=classify(a);
+    let k = classify(a);
     if k != classify(b) {
         return false;
     }
@@ -67,9 +68,28 @@ pub fn same(a: &Record, b: &Record) -> bool {
 
 /// C72D0: full DWORD kind, strict binary8 call and full DWORD DUP. Invalid and
 /// unknown-kind holders classify0; this is not a type/mode repair operation.
-pub fn classify(row:&Record)->u32{
-    if row.bytes[12]&1==0{return 0;}
-    match row.dword(0x15c){2=>u32::from(row.blank_call()),0|1=>if row.dword(0x44)!=0{2}else{3},3=>if row.dword(0x44)==3{4}else{5},_=>0}
+pub fn classify(row: &Record) -> u32 {
+    if row.bytes[12] & 1 == 0 {
+        return 0;
+    }
+    match row.dword(0x15c) {
+        2 => u32::from(row.blank_call()),
+        0 | 1 => {
+            if row.dword(0x44) != 0 {
+                2
+            } else {
+                3
+            }
+        }
+        3 => {
+            if row.dword(0x44) == 3 {
+                4
+            } else {
+                5
+            }
+        }
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -391,15 +411,20 @@ impl Staging {
     /// Execute selected's typed delete/insert/name/ref phases. Callback errors
     /// return immediately: already performed raw/count/ref/name changes remain.
     /// The callback must call core's typed codec, never memmove52.
-    pub fn flush_selected(
+    pub fn flush_selected<E: From<Error>>(
         &self,
         group: usize,
         old_start: usize,
         old_count: usize,
-        mut apply: impl FnMut(Commit<'_>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        if group >= 50 || old_count > 2500 {
-            return Err(Error::Invalid("selected flush bounds"));
+        mut apply: impl FnMut(Commit<'_>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        if group >= 50
+            || old_start > 2500
+            || old_start
+                .checked_add(old_count)
+                .is_none_or(|end| end > 2500)
+        {
+            return Err(Error::Invalid("selected flush bounds").into());
         }
         for _ in 0..old_count {
             apply(Commit::Delete {
@@ -411,12 +436,17 @@ impl Staging {
         for id in &self.order {
             let row = &self.arena[*id];
             if row.group() == group as u32 {
+                if position >= 2500 {
+                    return Err(Error::Invalid("selected flush insertion outside 0..2500").into());
+                }
                 apply(Commit::Insert {
                     absolute: Some(position),
                     group,
                     record: row,
                 })?;
-                position += 1;
+                position = position
+                    .checked_add(1)
+                    .ok_or_else(|| E::from(Error::Invalid("selected flush insertion overflow")))?;
                 restore |= row.bytes[0x135] != 0;
             }
         }
@@ -426,13 +456,13 @@ impl Staging {
         }
         Ok(())
     }
-    pub fn flush_whole(
+    pub fn flush_whole<E: From<Error>>(
         &self,
         old_total: usize,
-        mut apply: impl FnMut(Commit<'_>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        mut apply: impl FnMut(Commit<'_>) -> Result<(), E>,
+    ) -> Result<(), E> {
         if old_total > 2500 {
-            return Err(Error::Invalid("whole flush old total"));
+            return Err(Error::Invalid("whole flush old total").into());
         }
         for _ in 0..old_total {
             apply(Commit::Delete { absolute: 0 })?;
@@ -454,10 +484,7 @@ impl Staging {
         }
         Ok(())
     }
-    fn flush_names(
-        &self,
-        apply: &mut impl FnMut(Commit<'_>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+    fn flush_names<E>(&self, apply: &mut impl FnMut(Commit<'_>) -> Result<(), E>) -> Result<(), E> {
         for group in 0..50 {
             for byte in 0..16 {
                 apply(Commit::NameByte {
@@ -562,7 +589,24 @@ mod tests {
         r.put(0x17c, use_value);
         r.bytes[0x160..0x168].fill(b' ');
         r.bytes[0x160] = key;
-        match k{0=>r.put(0x15c,2),1=>{r.put(0x15c,2);r.bytes[0x160..0x168].fill(b' ');},2=>{r.put(0x15c,0);r.put(0x44,1);},3=>r.put(0x15c,0),4=>{r.put(0x15c,3);r.put(0x44,3);},5=>r.put(0x15c,3),_=>r.put(0x15c,u32::MAX)}
+        match k {
+            0 => r.put(0x15c, 2),
+            1 => {
+                r.put(0x15c, 2);
+                r.bytes[0x160..0x168].fill(b' ');
+            }
+            2 => {
+                r.put(0x15c, 0);
+                r.put(0x44, 1);
+            }
+            3 => r.put(0x15c, 0),
+            4 => {
+                r.put(0x15c, 3);
+                r.put(0x44, 3);
+            }
+            5 => r.put(0x15c, 3),
+            _ => r.put(0x15c, u32::MAX),
+        }
         r
     }
     #[test]
@@ -608,6 +652,67 @@ mod tests {
         });
         assert!(failure.is_err());
         assert_eq!(actions, [10, 10]);
+    }
+    #[test]
+    fn selected_flush_bounds_empty_endpoint_and_late_failures_do_not_unwind() {
+        let s = Staging::preload(
+            [row(2, b'A', 0, 0), row(2, b'B', 0, 0)],
+            [[b' '; 16]; 50],
+            u16::MAX,
+        )
+        .unwrap();
+        for (start, count) in [(usize::MAX, 0), (1, usize::MAX), (2501, 0), (2499, 2)] {
+            assert!(
+                s.flush_selected::<Error>(2, start, count, |_| panic!(
+                    "invalid old range reached callback"
+                ))
+                .is_err()
+            );
+        }
+        let mut actions = Vec::new();
+        assert!(
+            s.flush_selected(2, 2499, 1, |event| {
+                match event {
+                    Commit::Delete { absolute } => actions.push((b'D', absolute)),
+                    Commit::Insert {
+                        absolute: Some(absolute),
+                        ..
+                    } => actions.push((b'I', absolute)),
+                    _ => panic!("late bound failure must precede names"),
+                }
+                Ok::<_, Error>(())
+            })
+            .is_err()
+        );
+        assert_eq!(actions, [(b'D', 2499), (b'I', 2499)]);
+        let mut inserts = 0;
+        assert!(
+            s.flush_selected(2, 2498, 0, |event| {
+                if let Commit::Insert { .. } = event {
+                    inserts += 1;
+                    if inserts == 2 {
+                        return Err(Error::Operation("injected second insertion failure"));
+                    }
+                }
+                Ok(())
+            })
+            .is_err()
+        );
+        assert_eq!(inserts, 2);
+        assert!(
+            s.flush_selected::<Error>(2, 2500, 0, |_| panic!("full endpoint must not insert"))
+                .is_err()
+        );
+        let empty = Staging::preload([], [[b' '; 16]; 50], u16::MAX).unwrap();
+        let mut names = 0;
+        empty
+            .flush_selected(2, 2500, 0, |event| {
+                assert!(matches!(event, Commit::NameByte { .. }));
+                names += 1;
+                Ok::<_, Error>(())
+            })
+            .unwrap();
+        assert_eq!(names, 800);
     }
     #[test]
     fn whole_outer_erase_bug_keeps_alias_and_counts_events_not_rows() {
