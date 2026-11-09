@@ -593,6 +593,17 @@ fn q_kind(q: &Context) -> i32 {
 /// this bounded API reports that missing source instead of inventing offset0.
 pub fn f20c(live_q: &Context, system_langid: Option<u16>, class: i32) -> Result<u32, Error> {
     let selected = live_q.source_selector(system_langid)?;
+    offset_for_source(selected, class)
+}
+
+/// Shared finite source schema. Callers such as type1D already captured their
+/// actual source selector; F20C instead obtains it from live Q at each query.
+pub fn offset_for_source(selected: u8, class: i32) -> Result<u32, Error> {
+    if selected > 4 {
+        return Err(invalid(
+            "offset source selector requires its actual finite schema",
+        ));
+    }
     Ok(match (class, selected) {
         (0, 0) => 100_000,
         (0, _) => 500_000,

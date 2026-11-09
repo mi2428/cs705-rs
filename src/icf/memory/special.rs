@@ -639,6 +639,11 @@ pub fn scan_suitable_rows(
     Ok(rows)
 }
 
+/// AA658's stored selection includes low5 values25..31 outside the menu rows.
+pub fn selected_scan_raw(image: &[u8]) -> Result<u8, Error> {
+    Ok((byte(image, 0x37802)? >> 2) & 31)
+}
+
 pub fn select_scan(image: &mut Icf<'_>, g: &[u8], row: usize, reset: bool) -> Result<(), Error> {
     index(row, 25)?;
     select_scan_raw(image, g, row as i32, reset)
@@ -1051,7 +1056,7 @@ fn scan_reference(
     paste: bool,
 ) -> Result<(), Error> {
     let old = byte(image.memory(), 0x37802)?;
-    let selected = usize::from((old >> 2) & 31);
+    let selected = usize::from(selected_scan_raw(image.memory())?);
     // 999FC flags0/0/0 uses broad bounds only. Its bad callback is never called.
     let suitable = scan_suitable_rows(image.memory(), image.memory(), false, false, false, |_| {
         unreachable!("specific disabled")

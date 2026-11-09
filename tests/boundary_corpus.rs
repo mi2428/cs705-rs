@@ -38,7 +38,12 @@ fn scan_selected_raw_projection_and_late_source_failure_keep_distinct_boundaries
         expected[0x37802] = (0xa5 & !0x7c) | ((candidate as u8 & 31) << 2);
         icf::special::select_scan_raw(&mut image, &[], candidate, false).unwrap();
         assert_eq!(image.memory(), expected);
+        assert_eq!(
+            icf::special::selected_scan_raw(image.memory()).unwrap(),
+            candidate as u8 & 31
+        );
     }
+    assert!(icf::special::selected_scan_raw(&[]).is_err());
     let mut image = base.clone();
     assert!(icf::special::select_scan(&mut image, &[], 25, false).is_err());
     assert_eq!(image.memory(), raw);
@@ -151,6 +156,8 @@ fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class
     for class in [-1, 4, i32::MIN, i32::MAX] {
         assert!(icf::frequency::f20c(&q, Some(0x411), class).is_err());
     }
+    assert!(icf::frequency::offset_for_source(5, 0).is_err());
+    assert!(icf::frequency::offset_for_source(255, 0).is_err());
 }
 
 #[test]
