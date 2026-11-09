@@ -354,15 +354,16 @@ impl Icf<'_> {
         Ok(())
     }
 
-    /// Read shared selection bits C0.
+    /// Read selection bits C0 from the physical flag, not the record SPLIT byte.
     /// # Errors
     /// Rejects unavailable slots.
     pub fn physical_memory_selection(&self, slot: usize) -> Result<MemorySelection, Error> {
-        let b = self.memory_slot_base(slot)?;
+        self.memory_slot_base(slot)?;
+        let b = MEMORY_EMPTY_FLAGS + slot;
         MemorySelection::decode(self.memory[b] >> 6, b)
     }
 
-    /// Change only selection bits C0, preserving SPLIT and all opaque header bits.
+    /// Change only flag selection bits C0, preserving occupancy and all record bytes.
     /// # Errors
     /// Rejects unavailable slots without changes.
     pub fn set_physical_memory_selection(
@@ -371,7 +372,7 @@ impl Icf<'_> {
         value: MemorySelection,
     ) -> Result<(), Error> {
         self.physical_memory_selection(slot)?;
-        let b = self.memory_slot_base(slot)?;
+        let b = MEMORY_EMPTY_FLAGS + slot;
         self.memory[b] = (self.memory[b] & 0x3f) | ((value as u8) << 6);
         Ok(())
     }
