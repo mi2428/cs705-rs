@@ -3,6 +3,60 @@ mod scope_ref;
 use super::*;
 use std::io::Write;
 
+#[test]
+fn narrow_raw_editor_bridges_keep_full_candidates_mask_opaque_bits_and_typed_validation() {
+    let mut memory = vec![0xa6; IMAGE_BYTES];
+    memory[INTERNAL_MAP_REV] = 6;
+    memory[IMAGE_BYTES - 16..].copy_from_slice(IMAGE_SIGNATURE);
+    let mut image = Icf::from_memory(memory).unwrap();
+    for old in 0..=255_u8 {
+        for candidate in [-1_i32, 0, 1, 2, 3, 7, 0x100, i32::MAX, i32::MIN] {
+            for at in [0x378af, 0x378bf, 0x37804, 0x377c6, 0x3808a] {
+                image.memory[at] = old;
+            }
+            assert_eq!(image.preamp_raw(16).unwrap(), old & 3);
+            for band in 0..17 {
+                image.memory[0x378af + band] = old;
+                assert_eq!(image.attenuator_raw(band).unwrap(), (old >> 2) & 1);
+                if band < 13 {
+                    assert_eq!(image.attenuator(band).unwrap(), old & 4 != 0);
+                } else {
+                    assert!(image.attenuator(band).is_err());
+                }
+            }
+            assert_eq!(image.delta_f_span_raw(), (old >> 1) & 7);
+            assert_eq!(
+                image.scope_mode_raw(),
+                i32::from(old) + 2 * i32::from(old & 1)
+            );
+            let mut expected = image.memory().to_vec();
+            image.set_preamp_raw(0, candidate).unwrap();
+            image.set_attenuator_raw(0, candidate).unwrap();
+            image.set_preamp_raw(16, candidate).unwrap();
+            image.set_delta_f_span_raw(candidate);
+            image.set_scope_mode_raw(candidate);
+            expected[0x378af] = (old & 0xf8) | (candidate as u8 & 3) | ((candidate as u8 & 1) << 2);
+            expected[0x378bf] = (old & 0xfc) | (candidate as u8 & 3);
+            expected[0x37804] = (old & 0xf1) | ((candidate as u8 & 7) << 1);
+            expected[0x377c6] = (candidate & 1) as u8;
+            expected[0x3808a] = (candidate >> 1) as u8;
+            assert_eq!(image.memory(), expected);
+        }
+    }
+    image.set_preamp_raw(16, 3).unwrap();
+    assert!(image.preamp(16).is_err());
+    let before = image.memory().to_vec();
+    assert!(image.preamp_raw(usize::MAX).is_err());
+    assert!(image.preamp(usize::MAX).is_err());
+    assert!(image.attenuator_raw(17).is_err());
+    assert!(image.attenuator_raw(usize::MAX).is_err());
+    assert!(image.attenuator(usize::MAX).is_err());
+    assert!(image.set_preamp_raw(17, 0).is_err());
+    assert!(image.set_attenuator_raw(13, 0).is_err());
+    assert!(image.set_preamp(16, Preamp::Amp2).is_err());
+    assert_eq!(image.memory(), before);
+}
+
 fn rev5_memory() -> Vec<u8> {
     let mut memory: Vec<u8> = (0..IMAGE_BYTES).map(|i| (73 * i + 19) as u8).collect();
     memory[INTERNAL_MAP_REV] = 5;

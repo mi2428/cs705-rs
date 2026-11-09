@@ -1,6 +1,21 @@
 use super::{Error, Icf, RECORD_BYTES};
 
 impl Icf<'_> {
+    /// Raw selected-event dFSpan bits1..3. Unknown7 remains observable/storable.
+    pub fn delta_f_span_raw(&self) -> u8 {
+        (self.memory[0x37804] >> 1) & 7
+    }
+    pub fn set_delta_f_span_raw(&mut self, candidate: i32) {
+        self.memory[0x37804] = (self.memory[0x37804] & 0xf1) | ((candidate as u8 & 7) << 1);
+    }
+    /// Native mode getter uses the FULL fixed byte and scroll lowbit only.
+    pub fn scope_mode_raw(&self) -> i32 {
+        i32::from(self.memory[0x377c6]) + 2 * i32::from(self.memory[0x3808a] & 1)
+    }
+    pub fn set_scope_mode_raw(&mut self, candidate: i32) {
+        self.memory[0x377c6] = (candidate & 1) as u8;
+        self.memory[0x3808a] = (candidate >> 1) as u8;
+    }
     /// Read canonical final Home Hz; zero is empty, not a GUI numeric input.
     ///
     /// Static CS-705 evidence: Home store RVA 0x7DC5F, receive ranges 0x1918D0.
@@ -1514,14 +1529,13 @@ impl Icf<'_> {
     /// Both old mode bytes may be unknown; explicit replacement changes only
     /// these two bytes and preserves all prior edits elsewhere.
     pub fn set_scope_mode(&mut self, value: ScopeMode) -> Result<(), Error> {
-        let (fixed, scroll) = match value {
-            ScopeMode::Center => (0, 0),
-            ScopeMode::Fixed => (1, 0),
-            ScopeMode::ScrollCenter => (0, 1),
-            ScopeMode::ScrollFixed => (1, 1),
+        let candidate = match value {
+            ScopeMode::Center => 0,
+            ScopeMode::Fixed => 1,
+            ScopeMode::ScrollCenter => 2,
+            ScopeMode::ScrollFixed => 3,
         };
-        self.memory[0x377c6] = fixed;
-        self.memory[0x3808a] = scroll;
+        self.set_scope_mode_raw(candidate);
         Ok(())
     }
 }

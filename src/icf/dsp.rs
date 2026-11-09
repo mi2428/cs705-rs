@@ -282,9 +282,9 @@ impl Icf<'_> {
     /// # Errors
     /// Rejects indices outside 0..=16 and unknown codes for the selected band.
     pub fn preamp(&self, band: usize) -> Result<Preamp, Error> {
-        context(band < 17)?;
+        let raw = self.preamp_raw(band)?;
         let at = 0x378af + band;
-        match self.memory[at] & 3 {
+        match raw {
             0 => Ok(Preamp::Off),
             1 => Ok(Preamp::Amp1),
             2 if band <= 12 => Ok(Preamp::Amp2),
@@ -304,7 +304,18 @@ impl Icf<'_> {
                 "upper antenna bands only support preamp Off/Amp1",
             ));
         }
-        self.memory[at] = self.memory[at] & !3 | value as u8;
+        self.set_preamp_raw(band, value as i32)
+    }
+
+    /// Native selected-event storage, including unknown code3; no UI band gate.
+    pub fn preamp_raw(&self, band: usize) -> Result<u8, Error> {
+        context(band < 17)?;
+        Ok(self.memory[0x378af + band] & 3)
+    }
+    pub fn set_preamp_raw(&mut self, band: usize, candidate: i32) -> Result<(), Error> {
+        context(band < 17)?;
+        let at = 0x378af + band;
+        self.memory[at] = (self.memory[at] & !3) | (candidate as u8 & 3);
         Ok(())
     }
 
@@ -313,16 +324,26 @@ impl Icf<'_> {
     /// Rejects unavailable band indices before address arithmetic.
     pub fn attenuator(&self, band: usize) -> Result<bool, Error> {
         context(band < 13)?;
-        Ok(self.memory[0x378af + band] & 4 != 0)
+        Ok(self.attenuator_raw(band)? != 0)
+    }
+
+    /// Native PAMP post-store gray reads ATT bit2 for all17 antenna bands.
+    pub fn attenuator_raw(&self, band: usize) -> Result<u8, Error> {
+        context(band < 17)?;
+        Ok((self.memory[0x378af + band] >> 2) & 1)
     }
 
     /// Replace ATT only, even if the stored PAMP code is unknown.
     /// # Errors
     /// Rejects unavailable band indices before any write.
     pub fn set_attenuator(&mut self, band: usize, value: bool) -> Result<(), Error> {
+        self.set_attenuator_raw(band, i32::from(value))
+    }
+    /// Selected ATT uses just candidate bit0; preserves PAMP and opaque bits.
+    pub fn set_attenuator_raw(&mut self, band: usize, candidate: i32) -> Result<(), Error> {
         context(band < 13)?;
         let at = 0x378af + band;
-        self.memory[at] = self.memory[at] & !4 | (u8::from(value) << 2);
+        self.memory[at] = self.memory[at] & !4 | ((candidate as u8 & 1) << 2);
         Ok(())
     }
 }
