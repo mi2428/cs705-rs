@@ -56,6 +56,67 @@ fn scan_selected_raw_projection_and_late_source_failure_keep_distinct_boundaries
 }
 
 #[test]
+fn auto_repeater_predicates_keep_specific_numeric_and_source_gates_distinct() {
+    use icf::{context::Context, frequency, record};
+    let context = |kind: u32, flag: u8| {
+        let mut raw = [0; 24];
+        raw[..4].copy_from_slice(&kind.to_le_bytes());
+        raw[0x13] = flag;
+        Context::from_bytes(raw)
+    };
+    let q = context(1, 1);
+    let ranges = frequency::Ranges::generate(&q, None).unwrap();
+    let holder = |low: u32, high: u32| {
+        let mut raw = [0; 10];
+        raw[0] = 1;
+        raw[1] = 0xa7;
+        raw[2..6].copy_from_slice(&low.to_le_bytes());
+        raw[6..].copy_from_slice(&high.to_le_bytes());
+        let mut h = record::reset_holder(0x18, 0, 0);
+        record::decode_mode_pair_into(&mut h, &raw);
+        h
+    };
+    for (low, high, specific, numeric) in [
+        (1_000_000, 2_000_000, false, false),
+        (2_000_000, 1_000_000, true, false),
+        (200_000_000, 200_000_001, true, false),
+        (29_999, 30_000, true, true),
+        (470_000_000, 470_000_001, true, true),
+    ] {
+        let h = holder(low, high);
+        let saved = h.clone();
+        assert_eq!(
+            frequency::auto_repeater_bad(&h, &ranges, &q, false, None).unwrap(),
+            specific
+        );
+        assert_eq!(
+            frequency::auto_repeater_bad(&h, &ranges, &q, true, None).unwrap(),
+            numeric
+        );
+        assert_eq!(h.as_bytes(), saved.as_bytes());
+    }
+    let h = holder(200_000_000, 1_000_000);
+    assert!(frequency::auto_repeater_edge_bad(&h, &ranges, &q, true, false, None).unwrap());
+    // A bad low edge suppresses only the ordering warning on the valid high.
+    assert!(!frequency::auto_repeater_edge_bad(&h, &ranges, &q, false, false, None).unwrap());
+    for q in [context(0, 1), context(1, 0), context(1, 2), context(16, 0)] {
+        let h = holder(2_000_000, 1_000_000);
+        assert!(!frequency::auto_repeater_bad(&h, &ranges, &q, false, Some(0x411)).unwrap());
+    }
+    let mut h = holder(0, 0);
+    h.set_valid(false);
+    let q = context(16, 0);
+    assert!(frequency::auto_repeater_bad(&h, &ranges, &q, false, None).is_err());
+    assert!(!frequency::auto_repeater_bad(&h, &ranges, &q, true, None).unwrap());
+    h.set_valid(true);
+    assert!(frequency::auto_repeater_bad(&h, &ranges, &q, true, None).unwrap());
+    let q = context(16, 1);
+    let h = holder(2_000_000, 1_000_000);
+    assert!(frequency::auto_repeater_bad(&h, &ranges, &q, false, Some(0x409)).unwrap());
+    assert!(!frequency::auto_repeater_bad(&h, &ranges, &q, false, Some(0x411)).unwrap());
+}
+
+#[test]
 fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
     use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
 

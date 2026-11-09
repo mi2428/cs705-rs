@@ -892,6 +892,59 @@ pub fn channel_bad(
     Ok(channel_frequency_bad(holder, ranges, live_q)? || (holder.valid() && holder.mode() == 24))
 }
 
+/// C9C80/C9DC8 for one Auto Repeater edge. Native side1 is the low edge.
+/// The specific path captures R before checking Q13/validity; broad reads no Q.
+/// Warning evaluation never changes validity, DUP, endpoints or reserved bytes.
+pub fn auto_repeater_edge_bad(
+    holder: &DecodedRecord,
+    ranges: &Ranges,
+    live_q: &Context,
+    low: bool,
+    numeric_only: bool,
+    system_langid: Option<u16>,
+) -> Result<bool, Error> {
+    if holder.kind() != 0x18 {
+        return Err(invalid("Auto Repeater predicate requires kind18h"));
+    }
+    let frequency = if low {
+        u32::from_le_bytes(holder.as_bytes()[0x138..0x13c].try_into().unwrap())
+    } else {
+        holder_frequency(holder)
+    };
+    if numeric_only {
+        return Ok(holder.valid() && !(30_000..=470_000_000).contains(&frequency));
+    }
+    // 569FC ignores its nominal C argument and queries live Q through100F4.
+    // source_selector is the existing single implementation of that R boundary.
+    let r = live_q.source_selector(system_langid)? == 0;
+    if live_q.as_bytes()[0x13] != 1 || r || !holder.valid() {
+        return Ok(false);
+    }
+    if !low
+        && !auto_repeater_edge_bad(holder, ranges, live_q, true, false, system_langid)?
+        && u32::from_le_bytes(holder.as_bytes()[0x138..0x13c].try_into().unwrap()) > frequency
+    {
+        return Ok(true);
+    }
+    let bounds = ranges.f760(holder.kind(), holder.group() as i32, 0);
+    Ok(!(bounds.low..=bounds.high).contains(&frequency) || ranges.eb64(live_q, frequency))
+}
+
+/// 61E88: the specific C9DA4 and numeric C9DC8 paths both try low, then high
+/// only on false. The shared edge predicate also serves actual field warnings.
+pub fn auto_repeater_bad(
+    holder: &DecodedRecord,
+    ranges: &Ranges,
+    live_q: &Context,
+    numeric_only: bool,
+    system_langid: Option<u16>,
+) -> Result<bool, Error> {
+    Ok(
+        auto_repeater_edge_bad(holder, ranges, live_q, true, numeric_only, system_langid)?
+            || auto_repeater_edge_bad(holder, ranges, live_q, false, numeric_only, system_langid)?,
+    )
+}
+
 /// Borrowed normal/call61CE0 arg0. This boundary requires the real L120 source
 /// at call H38=aux12/13, even after shared bad=true. It cannot synthesize L148
 /// for arbitrary H38. Full-kind consumers use channel_bad with an owned B.
