@@ -117,6 +117,43 @@ fn auto_repeater_predicates_keep_specific_numeric_and_source_gates_distinct() {
 }
 
 #[test]
+fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class() {
+    let context = |kind: u32| {
+        let mut raw = [0; 24];
+        raw[..4].copy_from_slice(&kind.to_le_bytes());
+        icf::context::Context::from_bytes(raw)
+    };
+    for (kind, expected) in [
+        (0, [100_000, 0, 5_000_000, 20_000_000]),
+        (1, [500_000, 600_000, 5_000_000, 12_000_000]),
+        (2, [500_000, 600_000, 7_600_000, 28_000_000]),
+        (4, [500_000, 600_000, 7_600_000, 28_000_000]),
+        (5, [500_000, 600_000, 5_000_000, 0]),
+    ] {
+        let q = context(kind);
+        for (class, expected) in expected.into_iter().enumerate() {
+            assert_eq!(
+                icf::frequency::f20c(&q, None, class as i32).unwrap(),
+                expected
+            );
+        }
+    }
+    let q = context(16);
+    assert!(icf::frequency::f20c(&q, None, 0).is_err());
+    assert_eq!(
+        icf::frequency::f20c(&q, Some(0x411), 3).unwrap(),
+        20_000_000
+    );
+    assert_eq!(
+        icf::frequency::f20c(&q, Some(0x409), 3).unwrap(),
+        12_000_000
+    );
+    for class in [-1, 4, i32::MIN, i32::MAX] {
+        assert!(icf::frequency::f20c(&q, Some(0x411), class).is_err());
+    }
+}
+
+#[test]
 fn raw_record_boundaries_preserve_headers_and_reject_invalid_sides_before_stores() {
     use icf::record::{self, ChannelWrite, DecodedRecord, RepeaterWrite};
 

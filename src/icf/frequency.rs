@@ -586,6 +586,31 @@ impl Ranges {
 fn q_kind(q: &Context) -> i32 {
     i32::from_le_bytes(q.as_bytes()[..4].try_into().expect("Q kind"))
 }
+
+/// F20C's normal four-class offset schema. It selects from LIVE Q through
+/// 56CC8, not the B generation's captured selector. Values are integer Hz.
+/// A class outside the four-entry source row would read adjacent native data;
+/// this bounded API reports that missing source instead of inventing offset0.
+pub fn f20c(live_q: &Context, system_langid: Option<u16>, class: i32) -> Result<u32, Error> {
+    let selected = live_q.source_selector(system_langid)?;
+    Ok(match (class, selected) {
+        (0, 0) => 100_000,
+        (0, _) => 500_000,
+        (1, 0) => 0,
+        (1, _) => 600_000,
+        (2, 2 | 3) => 7_600_000,
+        (2, _) => 5_000_000,
+        (3, 0) => 20_000_000,
+        (3, 1) => 12_000_000,
+        (3, 2 | 3) => 28_000_000,
+        (3, 4) => 0,
+        _ => {
+            return Err(invalid(
+                "F20C class requires source outside its four-entry row",
+            ));
+        }
+    })
+}
 fn first_high(list: &[FrequencyRange], frequency: u32) -> usize {
     list.iter()
         .position(|r| frequency <= r.high)
