@@ -2,6 +2,10 @@
 
 use super::{Error, Icf, RECORD_BYTES};
 
+pub(super) fn keyer_byte(byte: u8) -> bool {
+    byte.is_ascii_uppercase() || byte.is_ascii_digit() || b" *,./?@^".contains(&byte)
+}
+
 fn record(channel: usize, count: usize, base: usize, width: usize) -> Result<usize, Error> {
     if channel >= count {
         return Err(Error::Unsupported {
@@ -38,11 +42,7 @@ impl Icf<'_> {
     /// Rejects invalid channels, alphabet/length or asterisk conflicts before storage.
     pub fn set_keyer_memory(&mut self, channel: usize, value: &[u8]) -> Result<(), Error> {
         let at = record(channel, 8, 0x37158, 70)?;
-        if value.len() > 70
-            || !value
-                .iter()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b" *,./?@^".contains(b))
-        {
+        if value.len() > 70 || !value.iter().copied().all(keyer_byte) {
             return Err(invalid(
                 at,
                 "keyer message outside canonical length or alphabet",
