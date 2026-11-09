@@ -69,20 +69,25 @@ pub fn same(a: &Record, b: &Record) -> bool {
 /// C72D0: full DWORD kind, strict binary8 call and full DWORD DUP. Invalid and
 /// unknown-kind holders classify0; this is not a type/mode repair operation.
 pub fn classify(row: &Record) -> u32 {
-    if row.bytes[12] & 1 == 0 {
+    classify_bytes(&row.bytes)
+}
+/// Same C72D0 classifier for borrowed decoded holders, without a row allocation.
+pub fn classify_bytes(bytes: &[u8; 616]) -> u32 {
+    if bytes[12] & 1 == 0 {
         return 0;
     }
-    match row.dword(0x15c) {
-        2 => u32::from(row.blank_call()),
+    let dword = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("holder DWORD width"));
+    match dword(0x15c) {
+        2 => u32::from(bytes[0x160..0x168] == [b' '; 8]),
         0 | 1 => {
-            if row.dword(0x44) != 0 {
+            if dword(0x44) != 0 {
                 2
             } else {
                 3
             }
         }
         3 => {
-            if row.dword(0x44) == 3 {
+            if dword(0x44) == 3 {
                 4
             } else {
                 5

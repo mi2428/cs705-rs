@@ -32,6 +32,7 @@ use std::fmt;
 pub mod staging;
 pub mod fields;
 pub mod groups;
+pub mod predicate;
 pub mod working;
 
 // CS-705 1.30 CS705.exe SHA-256:
