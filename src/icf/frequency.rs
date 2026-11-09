@@ -970,7 +970,8 @@ pub fn auto_repeater_edge_bad(
     {
         return Ok(true);
     }
-    let bounds = ranges.f760(holder.kind(), holder.group() as i32, 0);
+    let auxiliary = i32::from_le_bytes(holder.as_bytes()[0x38..0x3c].try_into().unwrap());
+    let bounds = ranges.f760(holder.kind(), auxiliary, 0);
     Ok(!(bounds.low..=bounds.high).contains(&frequency) || ranges.eb64(live_q, frequency))
 }
 

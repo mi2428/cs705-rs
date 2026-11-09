@@ -104,6 +104,15 @@ fn auto_repeater_predicates_keep_specific_numeric_and_source_gates_distinct() {
     assert!(frequency::auto_repeater_edge_bad(&h, &ranges, &q, true, false, None).unwrap());
     // A bad low edge suppresses only the ordering warning on the valid high.
     assert!(!frequency::auto_repeater_edge_bad(&h, &ranges, &q, false, false, None).unwrap());
+    for (auxiliary, view_group, bad) in [(0u32, 1, false), (1, 0, true)] {
+        let mut h = holder(1_000_000, 2_000_000);
+        h.as_mut_bytes()[0x38..0x3c].copy_from_slice(&auxiliary.to_le_bytes());
+        h.set_group(view_group);
+        assert_eq!(
+            frequency::auto_repeater_edge_bad(&h, &ranges, &q, true, false, None).unwrap(),
+            bad
+        );
+    }
     for q in [context(0, 1), context(1, 0), context(1, 2), context(16, 0)] {
         let h = holder(2_000_000, 1_000_000);
         assert!(!frequency::auto_repeater_bad(&h, &ranges, &q, false, Some(0x411)).unwrap());
