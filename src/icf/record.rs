@@ -1728,6 +1728,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn initial_normal_f1dc_uses_component_class_not_frequency_efcc() {
+        let generation = vec![0; 0x3c873];
+        // F1DC/F20C literal classes0/1/2. In particular source1/index2 is
+        // 600000, even though EFCC(146520000) would select a different class.
+        for (source, frequencies, offsets) in [
+            (
+                0,
+                [14_100_000, 145_000_000, 433_000_000],
+                [100_000, 0, 5_000_000],
+            ),
+            (
+                1,
+                [14_100_000, 146_520_000, 446_000_000],
+                [500_000, 600_000, 5_000_000],
+            ),
+            (
+                2,
+                [14_100_000, 145_000_000, 435_000_000],
+                [500_000, 600_000, 7_600_000],
+            ),
+            (
+                3,
+                [14_100_000, 145_500_000, 433_500_000],
+                [500_000, 600_000, 7_600_000],
+            ),
+            (
+                4,
+                [14_100_000, 145_000_000, 430_000_000],
+                [500_000, 600_000, 5_000_000],
+            ),
+        ] {
+            for (component, index) in [0, 2, 3].into_iter().enumerate() {
+                let mut h = reset_holder(2, 17, 0x1234);
+                initial_normal_channel_into(&generation, index, source, &mut h).unwrap();
+                assert_eq!((h.kind(), h.index(), h.binding()), (0x1d, index, 0x1234));
+                assert_eq!(
+                    h.channel_field(ChannelField::FrequencyHz),
+                    frequencies[component]
+                );
+                assert_eq!(h.offset_hz(), offsets[component]);
+                assert!(h.valid());
+                assert_eq!(
+                    (h.mode(), h.filter()),
+                    if component == 0 { (1, 1) } else { (13, 0) }
+                );
+            }
+        }
+        let mut h = DecodedRecord::from_bytes([0xa6; 616]);
+        h.set_header(2, 17, 0x1234);
+        h.set_offset_hz(123_456);
+        let mut prefix = h.clone();
+        prefix.set_header(0x1d, 2, 0x1234);
+        prefix.as_mut_bytes()[0x24] = 0;
+        prefix.set_split(0);
+        prefix.set_valid(true);
+        prefix.set_channel_field(ChannelField::FrequencyHz, 146_520_000);
+        prefix.set_mode(13);
+        prefix.set_filter(0);
+        assert!(initial_normal_channel_into(&[], 2, 1, &mut h).is_err());
+        assert_eq!(h.as_bytes(), prefix.as_bytes());
+        assert_eq!(h.offset_hz(), 123_456);
+        let before = h.clone();
+        assert!(initial_normal_channel_into(&generation, 2, 5, &mut h).is_err());
+        assert_eq!(h.as_bytes(), before.as_bytes());
+    }
+
+    #[test]
     fn lookup_all_bytes_and_dword_aliases_match_independent_literal_cases() {
         for byte in 0..=255u8 {
             let mode = match byte {
