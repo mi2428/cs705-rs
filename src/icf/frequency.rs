@@ -595,17 +595,17 @@ fn q_kind(q: &Context) -> i32 {
     i32::from_le_bytes(q.as_bytes()[..4].try_into().expect("Q kind"))
 }
 
-/// F20C's normal four-class offset schema. It selects from LIVE Q through
-/// 56CC8, not the B generation's captured selector. Values are integer Hz.
+/// F20C reads the explicit B object's captured selector through56CC8. Completed
+/// B selectors0..4 never re-read a later live Q or host locale. Values are Hz.
 /// A class outside the four-entry source row would read adjacent native data;
 /// this bounded API reports that missing source instead of inventing offset0.
-pub fn f20c(live_q: &Context, system_langid: Option<u16>, class: i32) -> Result<u32, Error> {
-    let selected = live_q.source_selector(system_langid)?;
-    offset_for_source(selected, class)
+pub fn f20c(ranges: &Ranges, system_langid: Option<u16>, class: i32) -> Result<u32, Error> {
+    let selected = ranges.default_source_selector(system_langid)?;
+    offset_for_source(selected as u8, class)
 }
 
 /// Shared finite source schema. Callers such as type1D already captured their
-/// actual source selector; F20C instead obtains it from live Q at each query.
+/// actual source selector; F20C obtains it from the explicit B owner.
 pub fn offset_for_source(selected: u8, class: i32) -> Result<u32, Error> {
     if selected > 4 {
         return Err(invalid(

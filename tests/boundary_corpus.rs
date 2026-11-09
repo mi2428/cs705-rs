@@ -131,7 +131,7 @@ fn auto_repeater_predicates_keep_specific_numeric_and_source_gates_distinct() {
 }
 
 #[test]
-fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class() {
+fn repeater_offset_schema_uses_captured_b_and_never_guesses_missing_host_or_class() {
     let context = |kind: u32| {
         let mut raw = [0; 24];
         raw[..4].copy_from_slice(&kind.to_le_bytes());
@@ -145,9 +145,10 @@ fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class
         (5, [500_000, 600_000, 5_000_000, 0]),
     ] {
         let q = context(kind);
+        let ranges = icf::frequency::Ranges::generate(&q, None).unwrap();
         for (class, expected) in expected.into_iter().enumerate() {
             assert_eq!(
-                icf::frequency::f20c(&q, None, class as i32).unwrap(),
+                icf::frequency::f20c(&ranges, None, class as i32).unwrap(),
                 expected
             );
         }
@@ -170,18 +171,26 @@ fn repeater_offset_schema_selects_live_q_and_never_guesses_missing_host_or_class
     assert!(partial.regenerate(16, &q, None).is_err());
     assert!(partial.default_source_selector(None).is_err());
     assert_eq!(partial.default_source_selector(Some(0x409)).unwrap(), 1);
-    assert!(icf::frequency::f20c(&q, None, 0).is_err());
+    assert!(icf::frequency::f20c(&partial, None, 0).is_err());
     assert_eq!(
-        icf::frequency::f20c(&q, Some(0x411), 3).unwrap(),
+        icf::frequency::f20c(&partial, Some(0x411), 3).unwrap(),
         20_000_000
     );
     assert_eq!(
-        icf::frequency::f20c(&q, Some(0x409), 3).unwrap(),
+        icf::frequency::f20c(&partial, Some(0x409), 3).unwrap(),
         12_000_000
     );
     for class in [-1, 4, i32::MIN, i32::MAX] {
-        assert!(icf::frequency::f20c(&q, Some(0x411), class).is_err());
+        assert!(icf::frequency::f20c(&captured, Some(0x411), class).is_err());
     }
+    assert_eq!(
+        icf::frequency::f20c(&captured_host, None, 3).unwrap(),
+        20_000_000
+    );
+    assert_eq!(
+        icf::frequency::f20c(&captured_host, Some(0x409), 3).unwrap(),
+        20_000_000
+    );
     assert!(icf::frequency::offset_for_source(5, 0).is_err());
     assert!(icf::frequency::offset_for_source(255, 0).is_err());
 }
@@ -221,6 +230,54 @@ fn explicit_native_checksum_choice_does_not_change_body_metadata_or_reader_gates
         assert_eq!(read.reader.extra_data, 0x40001);
         assert_eq!(read.report.source_comment, b"KEEP");
     }
+}
+
+#[test]
+fn native_initial_channel_uses_captured_source_and_retains_the_pre_template_prefix() {
+    use icf::{
+        context::Context,
+        frequency::Ranges,
+        record::{self, ChannelField as F},
+    };
+    let mut q = [0; 24];
+    q[..4].copy_from_slice(&1u32.to_le_bytes());
+    let ranges = Ranges::generate(&Context::from_bytes(q), None).unwrap();
+    let selected = ranges.default_source_selector(None).unwrap();
+    assert_eq!(selected, 1);
+    let generation = vec![0; 0x3c873];
+    for (index, frequency, mode, filter, offset) in [
+        (0, 14_100_000, 1, 1, 500_000),
+        (2, 146_520_000, 13, 0, 600_000),
+        (3, 446_000_000, 13, 0, 5_000_000),
+    ] {
+        let mut h = record::reset_holder(2, 17, 0x1234);
+        record::initial_normal_channel_into(&generation, index, selected, &mut h).unwrap();
+        assert_eq!((h.kind(), h.index(), h.binding()), (0x1d, index, 0x1234));
+        assert_eq!(
+            (
+                h.channel_field(F::FrequencyHz),
+                h.mode(),
+                h.filter(),
+                h.offset_hz()
+            ),
+            (frequency, mode, filter, offset)
+        );
+        assert!(h.valid());
+        assert_eq!(h.as_bytes()[0x24..0x26], [0, 0]);
+    }
+    let mut h = record::reset_holder(2, 17, 0x1234);
+    assert!(record::initial_normal_channel_into(&[], 2, selected, &mut h).is_err());
+    assert_eq!(
+        (h.kind(), h.index(), h.mode(), h.filter()),
+        (0x1d, 2, 13, 0)
+    );
+    assert_eq!(h.channel_field(F::FrequencyHz), 146_520_000);
+    assert!(h.valid());
+    let before = h.clone();
+    assert!(record::initial_normal_channel_into(&generation, 2, 5, &mut h).is_err());
+    assert_eq!(h.as_bytes(), before.as_bytes());
+    assert_eq!(record::mode_filter_class(0x100, 0x101), 1);
+    assert_eq!(record::mode_filter_class(24, 0), 255);
 }
 
 #[test]

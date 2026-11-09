@@ -446,6 +446,18 @@ const DIGITAL_SQUELCH: [(u8, u8); 3] = [(0, 0), (1, 2), (2, 4)];
 const POLARITY: [(u8, u8); 4] = [(0, 2), (1, 3), (2, 4), (3, 5)];
 // 8AE8/8AD0: repeater type, NOT the polarity table at 19047E.
 const REPEATER_TYPE: [(u8, u8); 4] = [(0, 2), (1, 0), (2, 1), (3, 3)];
+const FILTER_CLASS: [(u8, u8); 10] = [
+    (0, 0),
+    (0, 1),
+    (2, 2),
+    (2, 3),
+    (3, 6),
+    (3, 7),
+    (4, 8),
+    (5, 13),
+    (6, 15),
+    (7, 16),
+];
 
 fn lookup(pairs: &[(u8, u8)], value: u8, encode: bool) -> u8 {
     for &(raw, decoded) in pairs {
@@ -466,6 +478,79 @@ pub fn decode_mode(raw: u8) -> u32 {
 /// miss. This does not apply a destination nibble mask or a mode/DATA guard.
 pub fn encode_mode(decoded: u32) -> u8 {
     lookup(&MODE, decoded as u8, true)
+}
+
+/// 89F8 uses mode/DATA low bytes. Full-mode DATA eligibility is caller-owned.
+pub fn mode_filter_class(mode: u32, data: u32) -> u8 {
+    let class = lookup(&FILTER_CLASS, mode as u8, true);
+    if class == 0 && data as u8 == 1 {
+        1
+    } else {
+        class
+    }
+}
+
+/// 610C type1D. The caller supplies the COMPLETED B generation's source
+/// selector, not live Q. G contributes only the actual36-byte template.
+/// F1DC passes component0/1/2 directly to F20C, not EFCC(frequency).
+/// The shared compact decoder still owns every packed field equation.
+pub fn initial_normal_channel_into(
+    generation: &[u8],
+    index: u32,
+    source_selector: usize,
+    holder: &mut DecodedRecord,
+) -> Result<(), Error> {
+    const FREQUENCIES: [[u32; 3]; 5] = [
+        [14_100_000, 145_000_000, 433_000_000],
+        [14_100_000, 146_520_000, 446_000_000],
+        [14_100_000, 145_000_000, 435_000_000],
+        [14_100_000, 145_500_000, 433_500_000],
+        [14_100_000, 145_000_000, 430_000_000],
+    ];
+    let component = match index {
+        2 => 1,
+        3 => 2,
+        _ => 0,
+    };
+    let frequency = *FREQUENCIES
+        .get(source_selector)
+        .and_then(|r| r.get(component))
+        .ok_or(Error::Invalid {
+            line: 0,
+            reason: "type1D compiled source selector unavailable",
+        })?;
+    holder.set_header(0x1d, index, holder.binding());
+    holder.as_mut_bytes()[0x24] = 0;
+    holder.set_split(0);
+    holder.set_valid(true);
+    holder.set_channel_field(ChannelField::FrequencyHz, frequency);
+    let packed_mode_filter = if component == 0 { 0x11 } else { 0x70 };
+    holder.set_mode(decode_mode(packed_mode_filter >> 4));
+    holder.set_filter(u32::from(packed_mode_filter & 15));
+    let mut template: [u8; 36] = generation
+        .get(0x3c84f..0x3c873)
+        .ok_or(Error::Invalid {
+            line: 0,
+            reason: "type1D live G template unavailable",
+        })?
+        .try_into()
+        .expect("checked36-byte template");
+    template[..4].copy_from_slice(&frequency.to_le_bytes());
+    template[4] = packed_mode_filter;
+    decode_compact_into(
+        holder,
+        &super::special::CompactChannel::decode_valid(&template, true)?,
+        0,
+    );
+    let selected = u8::try_from(source_selector).map_err(|_| Error::Invalid {
+        line: 0,
+        reason: "type1D compiled source selector unavailable",
+    })?;
+    holder.set_offset_hz(super::frequency::offset_for_source(
+        selected,
+        component as i32,
+    )?);
+    Ok(())
 }
 
 /// RVA 0x8A70: stored tone byte to decoded sparse code, or zero-extended FF.
