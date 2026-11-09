@@ -128,6 +128,61 @@ pub fn coordinate(source: &[u8], latitude: bool, point: u8) -> [u8; 4] {
     ]
 }
 
+/// Native9E714 phase2, NOT B8A18/B8D48 CSV decimal-coordinate grammar.
+/// Fixed byte Substrings use188948/StrToIntDef0; separators are not validated.
+/// Degree is stored BEFORE reading live current396B4, so source/read failures
+/// retain that prefix. U1 seconds use byte wrapping, not a floating parser.
+pub fn coordinate_native_phase2(
+    destination: &mut [u8; 4],
+    source: &[u8],
+    current: &[u8],
+) -> Result<(), Error> {
+    let substring = |start: usize, len: usize| {
+        source
+            .get(start..source.len().min(start + len))
+            .unwrap_or_default()
+    };
+    let integer = |text: &[u8]| match int32(text) {
+        Ok(n) => Ok(n),
+        Err(Error::Conversion(_)) => Ok(0),
+        Err(e) => Err(e),
+    };
+    destination[0] = integer(substring(0, 3))? as u8;
+    let unit = *current.get(0x396b4).ok_or(Error::SourceUnavailable(
+        "native coordinate current DMSType byte unavailable",
+    ))?;
+    let (fraction, direction) = match unit {
+        1 => {
+            let minutes = integer(substring(4, 2))? as u16;
+            let seconds = substring(7, 2);
+            let first = *seconds
+                .first()
+                .ok_or(Error::Invalid("coordinate seconds logical index1"))?;
+            let tail = *seconds.get(1).unwrap_or(&0);
+            let n = first
+                .wrapping_sub(b'0')
+                .wrapping_mul(10)
+                .wrapping_add(tail.wrapping_sub(b'0'));
+            let f = if first == 0 {
+                0
+            } else {
+                (1000 * u32::from(n) / 60) % 1000
+            };
+            ((1000 * u32::from(minutes) + f) as u16, 10)
+        }
+        0 => {
+            let mut digits = substring(4, 2).to_vec();
+            digits.extend_from_slice(substring(7, 2));
+            digits.push(b'0');
+            (integer(&digits)? as u16, 10)
+        }
+        _ => ((integer(substring(4, 4))? as u16).wrapping_mul(6), 9),
+    };
+    destination[1..3].copy_from_slice(&fraction.to_be_bytes());
+    destination[3] = *source.get(direction).unwrap_or(&0);
+    Ok(())
+}
+
 /// Fixed six-place finite coordinate output; only the degree FF byte is empty.
 pub fn coordinate_text(value: [u8; 4], latitude: bool, point: u8) -> Vec<u8> {
     if value[0] == 0xff {
@@ -284,6 +339,45 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_phase2_literals_units_short_tail_nul_and_ordered_errors() {
+        let mut current = vec![0; 0x396b5];
+        for (unit, source, expected) in [
+            (0, b"035x12y34zS".as_slice(), [35, 0x30, 0x34, b'S']),
+            (1, b"035x12y34zS", [35, 0x31, 0x16, b'S']),
+            (2, b"139x1234zW", [139, 0x1c, 0xec, b'W']),
+            (255, b"139x1234zw", [139, 0x1c, 0xec, b'w']),
+            (1, b"035x12y3", [35, 0x32, 0xa6, 0]),
+            (1, b"035x12y\0azS", [35, 0x2e, 0xe0, b'S']),
+            (1, b"035x12y/9zS", [35, 0x2f, 0xda, b'S']),
+            (0, b"-01x12y34zs", [255, 0x30, 0x34, b's']),
+            (2, b"$FFx$FFFz\0TAIL", [255, 0x5f, 0xfa, 0]),
+            (2, b"1\0Xx1234zE", [1, 0x1c, 0xec, b'E']),
+            (0, b"badx12y34zS", [0, 0x30, 0x34, b'S']),
+            (0, b"", [0, 0, 0, 0]),
+        ] {
+            current[0x396b4] = unit;
+            let mut raw = [9, 8, 7, 6];
+            coordinate_native_phase2(&mut raw, source, &current).unwrap();
+            assert_eq!(raw, expected);
+        }
+        let mut raw = [9, 8, 7, 6];
+        assert!(matches!(
+            coordinate_native_phase2(&mut raw, b"123x45y67zS", &current[..0x396b4]),
+            Err(Error::SourceUnavailable(_))
+        ));
+        assert_eq!(raw, [123, 8, 7, 6]);
+        current[0x396b4] = 1;
+        for source in [b"123x45".as_slice(), b""] {
+            let mut raw = [9, 8, 7, 6];
+            assert!(matches!(
+                coordinate_native_phase2(&mut raw, source, &current),
+                Err(Error::Invalid(_))
+            ));
+            assert_eq!(raw, [if source.is_empty() { 0 } else { 123 }, 8, 7, 6]);
+        }
+    }
+
     #[test]
     fn decimal_integer_and_low32_are_distinct() {
         for (text, expected) in [
