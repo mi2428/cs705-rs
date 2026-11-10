@@ -238,10 +238,12 @@ pub fn parse_time_with(
     }
     let mut parts = [0_u16; 4];
     let mut at = 0;
+    let mut fields = 0;
     for (i, part) in parts[..3].iter_mut().enumerate() {
         *part = scan(source, &mut at)
             .ok_or(Error::Conversion("time number"))?
             .0;
+        fields += 1;
         spaces(source, &mut at);
         if i < 2 && source.get(at) == Some(&context.time_separator) {
             at += 1;
@@ -250,12 +252,9 @@ pub fn parse_time_with(
         }
     }
     if source.get(at) == Some(&context.decimal_separator) {
-        // Fraction is legal only after the seconds token.
-        let separators = source[..at]
-            .iter()
-            .filter(|b| **b == context.time_separator)
-            .count();
-        if separators != 2 {
+        // Count parsed fields, not matching bytes: a live separator may itself
+        // be a digit consumed by scan. Only a third field admits milliseconds.
+        if fields != 3 {
             return Err(Error::Conversion("time fraction position"));
         }
         at += 1;
@@ -354,8 +353,11 @@ pub fn decode_bcd(byte: u8) -> u8 {
         99
     }
 }
+/// Pack decimal tens/units, retaining the low byte even for values above 99.
+/// Calendar validation remains the caller's gate. A valid-looking output does
+/// not establish valid input; wide intermediates avoid profile-specific panic.
 pub fn encode_bcd(byte: u8) -> u8 {
-    (byte / 10) * 16 + byte % 10
+    (u16::from(byte / 10) * 16 + u16::from(byte % 10)) as u8
 }
 
 /// Raw date order is day/month/year, followed by hour/minute/second.
@@ -698,6 +700,29 @@ pub fn timestamp(raw: [u8; 3], offset: i16, separators: [u8; 2]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn time_fraction_requires_three_scanned_fields_not_two_matching_bytes() {
+        let mut c = context();
+        c.time_separator = b'1';
+        assert!(matches!(parse_time(b"11.1", &c), Err(Error::Conversion(_))));
+        c.time_separator = b':';
+        assert!(parse_time(b"1:2.1", &c).is_err());
+        assert_eq!(parse_time(b"1:2:3.01", &c).unwrap().millisecond, 1);
+        c.time_separator = b'.';
+        assert_eq!(parse_time(b"1.2.3.01", &c).unwrap().millisecond, 1);
+    }
+
+    #[test]
+    fn bcd_encoding_narrows_once_over_the_full_byte_domain() {
+        for n in 0..=u8::MAX {
+            let expected = (u16::from(n / 10) * 16 + u16::from(n % 10)) as u8;
+            assert_eq!(encode_bcd(n), expected);
+            if n < 100 {
+                assert_eq!(decode_bcd(encode_bcd(n)), n);
+            }
+        }
+    }
+
     #[test]
     fn baa10_missing_bcd_bounds_offset_order_and_partial_failure_match_literals() {
         for (input, offset, expected, changed) in [

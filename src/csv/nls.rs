@@ -3,10 +3,22 @@
 //! is cleaned, compacted, then n bytes are copied back into the shared source.
 //! The preceding476E4 sanitation belongs to its caller and must already have
 //! happened before map_copy_back; this function does not claim that whole editor.
+//!
+//! ```text
+//! shared[n] -> src[2n] + dst[2n], both initially space-filled
+//!           -> native write -> clean ALL dst[2n] -> copy first n to shared
+//!           -> optional Upper on a SEPARATE n-byte copy
+//! ```
+//!
+//! An unwritten mapping result therefore copies spaces, while an unwritten
+//! Upper result retains its input copy. API return zero does not prove either
+//! buffer is unwritten. Closure errors preserve earlier shared sanitation.
 
 use super::{Error, clip_dbcs, is_lead, trim_fixed_spaces};
 
+// csv.rs binds this file with #[path], so name the child from this directory.
 #[cfg(windows)]
+#[path = "nls/native.rs"]
 mod native;
 
 /// 476E4 walks logical bytes, not a C-prefix. Valid DBCS pairs are kept without
@@ -217,7 +229,7 @@ pub fn platform_uppercase(bytes: &mut [u8]) -> Result<u32, Error> {
 // Pure preflight is shared with boundary tests that never call Windows APIs.
 #[cfg(any(windows, test))]
 fn native_map_count(source_bytes: usize, destination_bytes: usize) -> Result<i32, Error> {
-    if source_bytes == 0 || source_bytes % 2 != 0 || source_bytes != destination_bytes {
+    if source_bytes == 0 || !source_bytes.is_multiple_of(2) || source_bytes != destination_bytes {
         return Err(Error::Invalid(
             "ANSI mapping requires distinct equal nonempty2n buffers",
         ));

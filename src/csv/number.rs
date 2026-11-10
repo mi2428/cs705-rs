@@ -753,6 +753,40 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
 mod tests {
     use super::*;
     #[test]
+    fn numeric_limits_keep_native_defaults_separate_from_safe_errors() {
+        let maximum = vec![b'0'; 4096];
+        assert_eq!(decimal(&maximum, b'.').unwrap(), 0.0);
+        assert_eq!(int32(&maximum).unwrap(), 0);
+        let overlong = vec![b'0'; 4097];
+        assert!(matches!(decimal(&overlong, b'.'), Err(Error::Limit(_))));
+        assert!(matches!(int32(&overlong), Err(Error::Limit(_))));
+        assert!(matches!(
+            frequency_hz(&overlong, b'.'),
+            Err(Error::Limit(_))
+        ));
+        assert!(matches!(offset_hz(&overlong, b'.'), Err(Error::Limit(_))));
+        let nonfinite = vec![b'9'; 309];
+        assert!(matches!(
+            decimal(&nonfinite, b'.'),
+            Err(Error::Conversion(_))
+        ));
+        assert!(altitude(&nonfinite, b'.').is_err());
+        for text in [b"+1".as_slice(), b"1e9999", b"1..2", b"\xff", b"1\0x"] {
+            assert!(matches!(decimal(text, b'.'), Err(Error::Conversion(_))));
+            assert_eq!(frequency_hz(text, b'.').unwrap(), 0);
+            assert_eq!(offset_hz(text, b'.').unwrap(), u32::MAX);
+        }
+        assert_eq!(int32(b"2147483647\0ignored").unwrap(), i32::MAX);
+        assert!(int32(b"$100000000").is_err());
+        assert_eq!(
+            decimal(b"-0,0", b',').unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(coordinate(b"90.000000", true, b'.'), [90, 0, 0, b'N']);
+        assert_eq!(coordinate(b"90.000001", true, b'.'), [0xff; 4]);
+    }
+
+    #[test]
     fn civ_address_keeps_native_filter_empty_prefix_and_two_digit_limit() {
         for (text, value) in [
             (b"".as_slice(), 2),

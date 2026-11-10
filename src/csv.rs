@@ -5,15 +5,24 @@
 //! No BOM removal, CP932 decoding, quote escaping or host locale lookup occurs.
 //! Native language/era/RTL values are explicit inputs, independent of the copied
 //! CSV decimal/list bytes. The older gps::Csv/repeater::Csv remain local editors.
+//!
+//! file bytes -> first-NUL prefix -> physical lines -> fixed-lead-aware cells
+//!                                                    (quotes stay literal)
+//! output cells -> delimiter join -> logical bytes, including NUL and CR/LF
+//!
+//! Export is not the inverse of import: text replacement, C-prefix truncation
+//! and duplicate enum labels can lose information without rejecting a row.
+//! Bounds and copied-locale validation belong to this safe API, not the source
+//! allocator or a new strict quoted-CSV grammar.
 
 #[path = "csv/channel.rs"]
 pub mod channel;
 #[path = "csv/control.rs"]
 pub mod control;
-#[path = "csv/datetime.rs"]
-pub mod datetime;
 #[path = "csv/date_input.rs"]
 pub mod date_input;
+#[path = "csv/datetime.rs"]
+pub mod datetime;
 #[path = "csv/dispatch.rs"]
 pub mod dispatch;
 #[path = "csv/history.rs"]
@@ -181,13 +190,13 @@ pub struct Reader<'a> {
     locale: Locale,
 }
 impl<'a> Reader<'a> {
-    /// Safe bounds are16 MiB and100000 nonempty data rows; the original allocator
+    /// Safe bounds are 16 MiB and 100000 nonempty data rows; the original allocator
     /// had no corresponding limits. Empty physical rows do not allocate entries.
     pub fn new(source: &'a [u8], locale: Locale) -> Result<Self, Error> {
         if source.len() > 16 * 1024 * 1024 {
             return Err(Error::Limit("input exceeds 16 MiB"));
         }
-        if !matches!(locale.list, b',' | b';') || !matches!(locale.decimal, b'.' | b',') {
+        if locale != Locale::copied(locale.decimal, locale.list) {
             return Err(Error::Invalid("uncopied CSV locale"));
         }
         let source = source.split(|b| *b == 0).next().unwrap_or(b"");
@@ -328,6 +337,25 @@ pub fn join(cells: &[Vec<u8>], separator: u8, crlf: bool) -> Result<Vec<u8>, Err
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reader_rejects_separator_collision_without_recopied_locale() {
+        assert!(matches!(
+            Reader::new(
+                b"H\n1,25",
+                Locale {
+                    decimal: b',',
+                    list: b','
+                }
+            ),
+            Err(Error::Invalid(_))
+        ));
+        for (decimal, list) in [(b'.', b','), (b'.', b';'), (b',', b';')] {
+            assert!(Reader::new(b"H", Locale { decimal, list }).is_ok());
+        }
+        let repaired = Locale::copied(b',', b',');
+        assert_eq!(Reader::new(b"H\n1,25", repaired).unwrap().rows(), [b"1,25"]);
+    }
+
     #[test]
     fn literal_grammar_and_dbcs_boundaries() {
         let locale = Locale::copied(b',', b',');

@@ -1,6 +1,11 @@
 //! 94AAC/4011F0 dispatch and header-cache binding. Runtime context type is not
 //! a stored record type. Unknown contexts select initial slot0 in the original;
 //! this explicit rule does not prove that every context has a registered UI.
+//!
+//! rebind: lower label/header -> write one slot -> next lookup -> predicate
+//! A failed lookup leaves earlier slots and the old predicate observable, but
+//! returns Err before row dispatch. Callers must propagate that error rather
+//! than treating the retained predicate as approval of the new header.
 
 use super::{Error, column, find_column_with, payload::Kind};
 

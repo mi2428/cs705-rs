@@ -55,7 +55,7 @@ pub fn format(
     let mut out = if area {
         Vec::new()
     } else if raw[0] == 0xff {
-        if mode % 2 == 0 {
+        if mode.is_multiple_of(2) {
             b"---".to_vec()
         } else {
             b"--".to_vec()
@@ -64,7 +64,7 @@ pub fn format(
         format!(
             "{:0width$}",
             raw[0],
-            width = if mode % 2 == 0 { 3 } else { 2 }
+            width = if mode.is_multiple_of(2) { 3 } else { 2 }
         )
         .into_bytes()
     };

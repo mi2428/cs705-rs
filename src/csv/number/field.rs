@@ -7,6 +7,8 @@ use super::{Error, frequency_text};
 /// An optional sign prefix precedes the integer field, outside its space width.
 /// force_plus enables both signs, but zero has neither sign. signed_bounds
 /// enables only the negative prefix. No locale, unit, gate or clamp is applied.
+/// The safe API caps padding at 4096 bytes before formatting. Native callers use
+/// widths 1, 3 or 4; their numeric domain and minimum-width behavior are unchanged.
 pub fn scalar(
     value: i32,
     scale: u32,
@@ -19,6 +21,9 @@ pub fn scalar(
         return Err(Error::Invalid(
             "native scalar requires scale=digits=0/1/3/6",
         ));
+    }
+    if integer_width > 4096 {
+        return Err(Error::Limit("native scalar padding exceeds 4096 bytes"));
     }
     let divisor = 10_i32.pow(scale);
     let integer = (value / divisor).wrapping_abs();
@@ -88,6 +93,21 @@ pub fn history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scalar_bounds_padding_before_formatting_without_changing_numeric_gates() {
+        for width in [4097, usize::MAX] {
+            assert!(matches!(
+                scalar(0, 6, 6, width, false, false),
+                Err(Error::Limit(_))
+            ));
+        }
+        assert_eq!(scalar(0, 6, 6, 4096, false, false).unwrap().len(), 4103);
+        assert!(matches!(
+            scalar(0, 2, 2, usize::MAX, false, false),
+            Err(Error::Invalid(_))
+        ));
+    }
 
     #[test]
     fn finite_hz_profiles_keep_padding_signed_split_and_live_copy_bytes() {
