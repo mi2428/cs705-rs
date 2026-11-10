@@ -12,6 +12,7 @@ use super::{Error, Icf};
 
 pub mod digital;
 pub mod extended;
+pub mod gps;
 pub mod network;
 
 /// A contiguous numeric code domain; codes are not physical units or defaults.
