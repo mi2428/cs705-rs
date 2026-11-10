@@ -6,6 +6,8 @@ rust-version = "1.99"
 description = "Native offline CS-705 command line tools"
 publish = false
 
+[workspace]
+
 [[bin]]
 name = "cs705"
 path = "src/main.rs"
