@@ -11,7 +11,10 @@ use super::groups::{
 };
 use crate::icf::{
     Error,
+    context::Context,
+    frequency::Ranges,
     record::{self, DecodedRecord, RepeaterWrite},
+    special::Notification,
 };
 
 const BODY: usize = 0xaa0f;
@@ -306,6 +309,13 @@ pub struct Working {
     original: Option<Vec<u8>>,
 }
 
+/// C7664's signed inclusive absolute range; count is not a loop gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UseRange {
+    pub first: i32,
+    pub last: i32,
+}
+
 /// Actual type22 inputs from569FC and10420. These are runtime Q/host results,
 /// not a generated default image or an arbitrary616-byte row supplied by a CLI.
 #[derive(Debug, Clone, Copy)]
@@ -376,6 +386,87 @@ impl Working {
     }
     pub fn groups(&self) -> Result<Groups, Error> {
         Groups::from_working(&self.memory)
+    }
+
+    /// 630EC -> 7FFA4 range from the first query3F reply's group. A missing or
+    /// out-of-axis reply produces the native zero descriptor, not an empty range.
+    /// In particular, an empty leading group can still visit valid physical0.
+    pub fn bulk_use_range(&self, group: Option<usize>) -> Result<UseRange, Error> {
+        let groups = self.groups()?;
+        let Some(group) = group.filter(|g| *g < 50) else {
+            return Ok(UseRange { first: 0, last: 0 });
+        };
+        Ok(UseRange {
+            first: groups.start(group)? as i32,
+            last: groups.end(group)?.max(0),
+        })
+    }
+
+    /// C7664 shared No/Yes body. Each reached Yes predicate obtains its own live
+    /// B/Q pair; no refresh or synthetic successful predicate is substituted.
+    /// Accepted rows always use the full typed saver, even for an equal USE.
+    /// There is no save/reload, confirmation or rollback. Normal completion queues
+    /// 11(0,0) then13(0,14F), including reversed and all-skipped ranges.
+    pub fn bulk_use<'a>(
+        &mut self,
+        range: UseRange,
+        value: bool,
+        binding: u32,
+        live: impl FnMut() -> Result<(&'a Ranges, &'a Context), Error>,
+        enqueue: impl FnMut(Notification) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.bulk_use_with(range, value, binding, live, enqueue, &mut |_, _| Ok(()))
+    }
+
+    fn bulk_use_with<'a>(
+        &mut self,
+        range: UseRange,
+        value: bool,
+        binding: u32,
+        mut live: impl FnMut() -> Result<(&'a Ranges, &'a Context), Error>,
+        mut enqueue: impl FnMut(Notification) -> Result<(), Error>,
+        before: &mut impl FnMut(usize, &[u8]) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        use crate::icf::record::{ChannelField as C, RepeaterField as R};
+        let mut holder = record::reset_holder(0x0c, 0, binding);
+        for index in range.first..=range.last {
+            self.load_into(index as usize, &mut holder)?;
+            if !holder.valid() {
+                continue;
+            }
+            if value {
+                let hz = holder.channel_field(C::FrequencyHz);
+                if hz == 0 {
+                    continue;
+                }
+                let (ranges, q) = live()?;
+                if ranges.db98(hz).ecdc(q, hz) {
+                    continue;
+                }
+                let (ranges, q) = live()?;
+                if ranges.db98(hz).eb64(q, hz) {
+                    continue;
+                }
+                let kind = super::staging::classify_bytes(holder.as_bytes());
+                let duplex = holder.channel_field(C::Duplex);
+                if (kind == 0 && duplex == 0) || (kind == 1 && duplex != 0) {
+                    continue;
+                }
+            }
+            holder.set_repeater_field(R::Use, u32::from(value));
+            save_row_with(&mut self.memory, index as usize, &holder, true, before)?;
+        }
+        drop(holder);
+        for (event, second) in [(0x11, 0), (0x13, 0x14f)] {
+            enqueue(Notification {
+                event,
+                synchronous: false,
+                first: 0,
+                second,
+                payload: Vec::new(),
+            })?;
+        }
+        Ok(())
     }
 
     fn read<const N: usize>(&self, at: usize) -> Result<[u8; N], Error> {
@@ -631,6 +722,328 @@ impl Working {
 mod tests {
     use super::super::groups::WORKING_BYTES;
     use super::*;
+    use crate::icf::{
+        context::Context,
+        frequency::Ranges,
+        record::{ChannelField as C, RepeaterField as R, RepeaterText as T},
+    };
+
+    fn bulk_fixture() -> Working {
+        let mut memory = vec![0; WORKING_BYTES];
+        memory[COUNTS + 98..COUNTS + 100].copy_from_slice(&12_u16.to_le_bytes());
+        let mut w = Working::from_working(memory).unwrap();
+        for (index, (mode, blank, dup, hz)) in [
+            (2, false, 0, 145_000_000),
+            (2, false, 1, 145_000_000),
+            (2, true, 0, 145_000_000),
+            (2, true, 1, 145_000_000),
+            (0, false, 0, 145_000_000),
+            (0, false, 1, 145_000_000),
+            (1, false, 1, 145_000_000),
+            (3, false, 0, 145_000_000),
+            (3, false, 3, 145_000_000),
+            (2, false, 1, 0),
+            (2, false, 1, 150_000_000),
+            (2, false, 1, 1_400_000_000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut h = record::reset_holder(0x0c, index as u32, 0);
+            h.set_valid(true);
+            h.set_repeater_field(R::Mode, mode);
+            h.set_repeater_text(T::Call, if blank { b"        " } else { b"TEST   B" });
+            h.set_repeater_text(T::Gateway, b"TEST   G");
+            h.set_channel_field(C::Duplex, dup);
+            h.set_channel_field(C::FrequencyHz, hz);
+            w.save(index, &h).unwrap();
+        }
+        w
+    }
+
+    fn bulk_context() -> Context {
+        let mut q = Context::before_registry();
+        let mut fields = q.fields();
+        fields.0[0] = 0;
+        q.adopt(fields);
+        q
+    }
+
+    #[test]
+    fn bulk_use_yes_and_no_keep_distinct_predicates_and_same_value_full_saves() {
+        let q = bulk_context();
+        let ranges = Ranges::generate(&q, None).unwrap();
+        let mut w = bulk_fixture();
+        let before = w.working().to_vec();
+        let mut getters = 0;
+        let mut starts = Vec::new();
+        let mut queued = Vec::new();
+        w.bulk_use_with(
+            UseRange { first: 0, last: 12 },
+            true,
+            0x1234,
+            || {
+                getters += 1;
+                Ok((&ranges, &q))
+            },
+            |event| {
+                queued.push(event);
+                Ok(())
+            },
+            &mut |at, _| {
+                if (BODY..BODY + 52 * 2500).contains(&at) && (at - BODY) % 52 == 18 {
+                    starts.push((at - BODY) / 52);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(starts, [1, 2, 4, 5, 6, 7, 8]);
+        assert_eq!(getters, 21);
+        assert_eq!((w.memory[USE], w.memory[USE + 1]), (0xf6, 1));
+        assert_eq!(&w.memory[..USE], &before[..USE]);
+        assert_eq!(&w.memory[USE + 2..], &before[USE + 2..]);
+        assert_eq!(
+            queued
+                .iter()
+                .map(|e| (e.event, e.synchronous, e.first, e.second))
+                .collect::<Vec<_>>(),
+            [(0x11, false, 0, 0), (0x13, false, 0, 0x14f)]
+        );
+        let mut writes = 0;
+        w.bulk_use_with(
+            UseRange { first: 1, last: 1 },
+            true,
+            0,
+            || Ok((&ranges, &q)),
+            |_| Ok(()),
+            &mut |_, _| {
+                writes += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(writes >= 17);
+        starts.clear();
+        w.bulk_use_with(
+            UseRange { first: 0, last: 12 },
+            false,
+            0,
+            || panic!("No does not read Q/B"),
+            |_| Ok(()),
+            &mut |at, _| {
+                if (BODY..BODY + 52 * 2500).contains(&at) && (at - BODY) % 52 == 18 {
+                    starts.push((at - BODY) / 52);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        // Includes five rows already0, zero frequency and both rejected bands.
+        assert_eq!(starts, (0..12).collect::<Vec<_>>());
+        assert_eq!((w.memory[USE], w.memory[USE + 1]), (0, 0));
+        let mut writes = 0;
+        w.bulk_use_with(
+            UseRange { first: 0, last: 0 },
+            false,
+            0,
+            || panic!(),
+            |_| Ok(()),
+            &mut |_, _| {
+                writes += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(writes >= 17);
+    }
+
+    #[test]
+    fn bulk_use_ranges_keep_u16_counts_empty_leading_group_and_physical_last() {
+        let mut memory = vec![0; WORKING_BYTES];
+        memory[COUNTS + 2..COUNTS + 4].copy_from_slice(&256_u16.to_le_bytes());
+        memory[COUNTS + 98..COUNTS + 100].copy_from_slice(&2244_u16.to_le_bytes());
+        let mut w = Working::from_working(memory).unwrap();
+        assert_eq!(
+            w.bulk_use_range(Some(0)).unwrap(),
+            UseRange { first: 0, last: 0 }
+        );
+        assert_eq!(
+            w.bulk_use_range(Some(1)).unwrap(),
+            UseRange {
+                first: 0,
+                last: 255
+            }
+        );
+        assert_eq!(
+            w.bulk_use_range(Some(2)).unwrap(),
+            UseRange {
+                first: 256,
+                last: 255
+            }
+        );
+        assert_eq!(
+            w.bulk_use_range(Some(49)).unwrap(),
+            UseRange {
+                first: 256,
+                last: 2499
+            }
+        );
+        for group in [None, Some(50), Some(usize::MAX)] {
+            assert_eq!(
+                w.bulk_use_range(group).unwrap(),
+                UseRange { first: 0, last: 0 }
+            );
+        }
+        w.memory[USE] = 1;
+        w.memory[USE + 312] = 0xff;
+        for group in [0, 49] {
+            w.bulk_use(
+                w.bulk_use_range(Some(group)).unwrap(),
+                false,
+                0,
+                || panic!(),
+                |_| Ok(()),
+            )
+            .unwrap();
+        }
+        assert_eq!(w.memory[USE], 0);
+        assert_eq!(w.memory[USE + 312], 0xf0);
+        let mut events = Vec::new();
+        w.bulk_use(
+            UseRange { first: 3, last: 2 },
+            true,
+            0,
+            || panic!(),
+            |e| {
+                events.push(e.event);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(events, [0x11, 0x13]);
+        w.memory[COUNTS + 98..COUNTS + 100].copy_from_slice(&2245_u16.to_le_bytes());
+        assert!(w.bulk_use_range(Some(49)).is_err());
+    }
+
+    #[test]
+    fn bulk_use_live_getters_failures_and_all_skip_queue_keep_prefixes() {
+        let q = bulk_context();
+        let ranges = Ranges::generate(&q, None).unwrap();
+        let mut missing = Context::before_registry();
+        let mut fields = missing.fields();
+        fields.0[0] = 16;
+        missing.adopt(fields);
+        let mut w = bulk_fixture();
+        let mut reads = 0;
+        // 150MHz is excluded by Japan EB64, but the SECOND live Q permits it.
+        w.bulk_use(
+            UseRange {
+                first: 10,
+                last: 10,
+            },
+            true,
+            0,
+            || {
+                reads += 1;
+                Ok((&ranges, if reads == 1 { &q } else { &missing }))
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(reads, 2);
+        assert_eq!(w.memory[USE + 1] & 4, 4);
+        let mut events = Vec::new();
+        w.bulk_use(
+            UseRange {
+                first: 12,
+                last: 12,
+            },
+            true,
+            0,
+            || panic!("invalid row skips getters"),
+            |e| {
+                events.push(e.event);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(events, [0x11, 0x13]);
+        w.memory[USE] = 0xff;
+        let mut queued = 0;
+        assert!(
+            w.bulk_use_with(
+                UseRange { first: 0, last: 1 },
+                false,
+                0,
+                || panic!(),
+                |_| {
+                    queued += 1;
+                    Ok(())
+                },
+                &mut |at, _| if at == BODY + 52 + 18 {
+                    Err(invalid("injected second row save failure"))
+                } else {
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(w.memory[USE], 0xfe);
+        assert_eq!(queued, 0);
+        assert!(
+            w.bulk_use_with(
+                UseRange { first: 1, last: 1 },
+                false,
+                0,
+                || panic!(),
+                |_| panic!("failed saver skips queue"),
+                &mut |at, _| if at == BODY + 52 + 42 {
+                    Err(invalid("injected post-USE latitude failure"))
+                } else {
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(w.memory[USE], 0xfc);
+        assert!(
+            w.bulk_use(
+                UseRange {
+                    first: 2499,
+                    last: 2500
+                },
+                false,
+                0,
+                || panic!(),
+                |_| {
+                    queued += 1;
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(queued, 0);
+        events.clear();
+        assert!(
+            w.bulk_use(
+                UseRange { first: 0, last: -1 },
+                false,
+                0,
+                || panic!(),
+                |e| {
+                    if e.event == 0x13 {
+                        Err(invalid("injected second queue failure"))
+                    } else {
+                        events.push(e.event);
+                        Ok(())
+                    }
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(events, [0x11]);
+    }
     fn fixture() -> Working {
         let mut memory = vec![0xa5; WORKING_BYTES];
         memory[COUNTS..COUNTS + 100].fill(0);

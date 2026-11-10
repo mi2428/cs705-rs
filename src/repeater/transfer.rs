@@ -75,7 +75,7 @@ pub struct Export {
     pub failure: Option<Failure>,
 }
 
-/// Storage-ICF root for the explicit portable-ASCII profile. Real stage8
+/// Storage-ICF root using Windows NLS or portable ASCII elsewhere. Real stage8
 /// expansion precedes staging; conversion back preserves the caller's metadata
 /// and the committed working prefix even when the import report contains Err.
 pub fn import_csv(
@@ -98,7 +98,7 @@ pub fn import_csv(
         Ok(working) => working,
         Err(error) => return failure(Failure::Image(error)),
     };
-    let mut out = import_working_csv(&mut working, scope, source, options, csv::nls::ascii_map);
+    let mut out = import_working_csv(&mut working, scope, source, options, csv::nls::platform_map);
     let saved = working.to_icf();
     match saved.and_then(|saved| image.patch_memory(&[(0, saved.memory())])) {
         Ok(()) => {}
@@ -621,6 +621,38 @@ mod tests {
             unwritten: None,
         }
     }
+
+    #[test]
+    fn repeater_default_platform_nls_consumer() {
+        let working = image();
+        let mut storage = working.to_icf().unwrap();
+        let default = default();
+        let time = datetime();
+        let parser = options(&default, &time);
+        let out = import_csv(
+            &mut storage,
+            Scope::Whole,
+            b"Repeater Call Sign;Frequency;Dup;Mode\n\x82\x60\x82\x61\x82\x50;145;DUP-;DV\n",
+            &mut import_options(&parser, ImportMode::Replace),
+        );
+        #[cfg(windows)]
+        {
+            assert!(out.failure.is_none(), "{:?}", out.failure);
+            assert_eq!(out.applied, 1);
+            assert_eq!(
+                storage.physical_repeater(0).unwrap().unwrap().repeater_call,
+                *b"AB1     "
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(matches!(
+                out.failure,
+                Some(Failure::Text(csv::Error::SourceUnavailable(_)))
+            ));
+            assert_eq!(out.applied, 0);
+        }
+    }
     fn old_image() -> Working {
         let mut image = image();
         image
@@ -783,6 +815,36 @@ mod tests {
         assert_eq!(out.applied, 2);
         assert_eq!(read_record(&image, 0, &parser).unwrap().dword(0x17c), 0);
         assert_eq!(read_record(&image, 1, &parser).unwrap().dword(0x17c), 1);
+        let mut reads = 0;
+        let mut read = |raw, index| {
+            assert_eq!((raw, index), (0x12345678, 7));
+            reads += 1;
+            Ok(old.clone())
+        };
+        let mut options = import_options(&parser, ImportMode::PreserveUse);
+        options.unwritten = Some(UnwrittenSource {
+            source: PreserveSource {
+                raw: 0x12345678,
+                first: 7,
+                last: 7,
+                unwritten: true,
+            },
+            read_budget: 2,
+            read: &mut read,
+        });
+        let mut image = super::tests::image();
+        let out = import_working_csv(
+            &mut image,
+            Scope::Whole,
+            REPLACEMENT,
+            &mut options,
+            csv::nls::ascii_map,
+        );
+        assert!(out.failure.is_none(), "{:?}", out.failure);
+        assert_eq!(reads, 2);
+        for index in 0..2 {
+            assert_eq!(read_record(&image, index, &parser).unwrap().dword(0x17c), 0);
+        }
         let mut options = import_options(&parser, ImportMode::PreserveUse);
         let mut read = |_, _| panic!("empty source range does not read an image");
         options.unwritten = Some(UnwrittenSource {

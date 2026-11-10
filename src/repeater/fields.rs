@@ -137,6 +137,84 @@ pub enum Field {
     Tone,
     ToneFrequency,
 }
+impl Field {
+    fn key(self) -> u16 {
+        match self {
+            Self::Mode => 0x146,
+            Self::Duplex => 0x14b,
+            Self::Tone => 0x14d,
+            Self::ToneFrequency => 0x14e,
+        }
+    }
+}
+
+/// C78C0's input gate is distinct from the caller's placeholder/helper branch.
+/// Mode still consumes explicit selected events; K4 DUP discards their result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    Open,
+    DisplayOnly,
+    Placeholder,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaintMeta {
+    pub gate: Gate,
+    /// C7800 style only, not the separate blocked-input color request.
+    pub gray: bool,
+}
+impl PaintMeta {
+    pub fn placeholder(self) -> Option<&'static [u8]> {
+        (self.gate == Gate::Placeholder).then_some(b"---".as_slice())
+    }
+}
+
+/// Read native row paint gates without an edit snapshot, B, Q or frequency class.
+/// The caller retains typed values and native labels whenever no placeholder is
+/// returned. Invalid-row blanking belongs to its existing row/view loader.
+pub fn paint_meta(
+    holder: &crate::icf::record::DecodedRecord,
+    key: u16,
+) -> Result<PaintMeta, Error> {
+    if holder.kind() != 0x0c {
+        return Err(Error::Invalid("repeater paint requires a type0C holder"));
+    }
+    paint_meta_bytes(holder.as_bytes(), key)
+}
+
+pub(crate) fn paint_meta_bytes(bytes: &[u8; 616], key: u16) -> Result<PaintMeta, Error> {
+    if !(0x144..=0x153).contains(&key) {
+        return Err(Error::Invalid(
+            "repeater paint key outside native row fields",
+        ));
+    }
+    let k = super::staging::classify_bytes(bytes);
+    let value = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("holder DWORD"));
+    let gate = match key {
+        0x146 => Gate::DisplayOnly,
+        0x14b => match k {
+            0 | 2 => Gate::Open,
+            4 => Gate::DisplayOnly,
+            _ => Gate::Placeholder,
+        },
+        0x147 | 0x14c if !matches!(k, 0 | 2 | 4) => Gate::Placeholder,
+        0x148 if !matches!(k, 0 | 4) => Gate::Placeholder,
+        0x14d | 0x14e if !matches!(k, 2 | 3) => Gate::Placeholder,
+        _ => Gate::Open,
+    };
+    let frequency_gray =
+        matches!(k, 0 | 4) && (value(0x3c) == 0 || value(0x44) == 0 || value(0x17c) == 0);
+    let gray = match key {
+        0x14a => frequency_gray,
+        0x14b if gate == Gate::Open => frequency_gray,
+        0x14c if gate == Gate::Open => frequency_gray || value(0x44) == 0,
+        0x14e if gate == Gate::Open => !matches!(value(0x174), 1 | 2),
+        0x14f => matches!(k, 0 | 4) && (value(0x3c) == 0 || value(0x44) == 0),
+        0x151 | 0x152 => value(0x180) == 0,
+        _ => false,
+    };
+    Ok(PaintMeta { gate, gray })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Blocked,
@@ -201,14 +279,11 @@ pub fn select(
     mut save_reload: impl FnMut(&mut Record) -> Result<(), Error>,
     mut style: impl FnMut(&Record) -> Result<(), Error>,
 ) -> Result<Outcome, Error> {
-    let k = classify(row);
-    let blocked = match field {
-        Field::Mode => false,
-        Field::Duplex => !matches!(k, 0 | 2),
-        Field::Tone | Field::ToneFrequency => !matches!(k, 2 | 3),
-    };
+    let gate = paint_meta_bytes(&row.bytes, field.key())?.gate;
+    // Mode ignores C78C0's return and still consumes its selected helper result.
+    let blocked = field != Field::Mode && gate != Gate::Open;
     let outcome = if blocked {
-        if field == Field::Duplex && k == 4 {
+        if gate == Gate::DisplayOnly {
             Outcome::DisplayOnly
         } else {
             Outcome::Blocked
@@ -299,6 +374,72 @@ pub fn select_utc_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readonly_meta_uses_native_field_gates_without_edit_sources() {
+        use crate::icf::record::{self, ChannelField as C, RepeaterField as R, RepeaterText as T};
+        use Gate::{DisplayOnly as D, Open as O, Placeholder as P};
+        let mut h = record::reset_holder(0x0c, 0, 0);
+        let keys = [0x147, 0x148, 0x14c, 0x14d, 0x14e, 0x14b, 0x146];
+        for (k, mode, dup, blank, expected) in [
+            (0, 2, 0, false, [O, O, O, P, P, O, D]),
+            (1, 2, 1, true, [P, P, P, P, P, P, D]),
+            (2, 0, 1, false, [O, P, O, O, O, O, D]),
+            (3, 0, 0, false, [P, P, P, O, O, P, D]),
+            (4, 3, 3, false, [O, O, O, P, P, D, D]),
+            (5, 3, 0, false, [P, P, P, P, P, P, D]),
+        ] {
+            h.set_repeater_field(R::Mode, mode);
+            h.set_channel_field(C::Duplex, dup);
+            h.set_repeater_text(T::Call, if blank { b"        " } else { b"CALL    " });
+            assert_eq!(super::super::staging::classify_bytes(h.as_bytes()), k);
+            for (key, gate) in keys.into_iter().zip(expected) {
+                let meta = paint_meta(&h, key).unwrap();
+                assert_eq!(meta.gate, gate, "K{k}, key{key:04X}");
+                assert_eq!(meta.placeholder(), (gate == P).then_some(b"---".as_slice()));
+            }
+        }
+        for (mode, hz, duplex, used, gray) in [
+            (2, 0, 1, 1, true),
+            (2, 145_000_000, 0, 1, true),
+            (2, 145_000_000, 1, 0, true),
+            (2, 145_000_000, 1, 1, false),
+            (3, 0, 3, 1, true),
+            (3, 145_000_000, 3, 0, true),
+            (3, 145_000_000, 3, 1, false),
+            (0, 0, 1, 1, false),
+            (3, 0, 0, 0, false),
+        ] {
+            h.set_repeater_field(R::Mode, mode);
+            h.set_channel_field(C::FrequencyHz, hz);
+            h.set_channel_field(C::Duplex, duplex);
+            h.set_repeater_field(R::Use, used);
+            let meta = paint_meta(&h, 0x14a).unwrap();
+            assert_eq!(meta.gray, gray);
+            assert_eq!(meta.placeholder(), None);
+        }
+        h.set_repeater_field(R::Mode, 2);
+        h.set_channel_field(C::FrequencyHz, 145_000_000);
+        h.set_channel_field(C::Duplex, 0);
+        h.set_repeater_field(R::Use, 1);
+        assert!(paint_meta(&h, 0x14b).unwrap().gray);
+        assert!(paint_meta(&h, 0x14c).unwrap().gray);
+        assert!(paint_meta(&h, 0x14f).unwrap().gray);
+        h.set_channel_field(C::Duplex, 1);
+        assert!(!paint_meta(&h, 0x14b).unwrap().gray);
+        assert!(!paint_meta(&h, 0x14c).unwrap().gray);
+        assert!(!paint_meta(&h, 0x14f).unwrap().gray);
+        h.set_repeater_field(R::Mode, 0);
+        for (tone, gray) in [(0, true), (1, false), (2, false), (3, true)] {
+            h.set_repeater_field(R::Tone, tone);
+            assert_eq!(paint_meta(&h, 0x14e).unwrap().gray, gray);
+        }
+        assert!(paint_meta(&h, 0x151).unwrap().gray);
+        h.set_repeater_field(R::Position, 1);
+        assert!(!paint_meta(&h, 0x152).unwrap().gray);
+        assert!(paint_meta(&h, 0x154).is_err());
+        assert!(paint_meta(&record::reset_holder(0x0a, 0, 0), 0x147).is_err());
+    }
+
     fn source() -> TypeSource {
         TypeSource {
             placeholder: *b"PLACEHLD",

@@ -231,9 +231,93 @@ impl ImportGate {
     }
 }
 
+/// 94C20/9514F ordering over the same live state. A normally returned row
+/// report (including zero writes or partial rejection) still reaches stage9;
+/// an exceptional row error does not. Neither cancellation resets the state.
+pub fn import_with_gate<S, R, T, E>(
+    state: &mut S,
+    gate: ImportGate,
+    rows: impl FnOnce(&mut S) -> Result<R, E>,
+    stage9: impl FnOnce(&mut S) -> Result<T, E>,
+) -> Result<(Option<R>, Option<T>), E> {
+    if !gate.reaches_stage9() {
+        return Ok((None, None));
+    }
+    let rows = if gate.reaches_rows() {
+        Some(rows(state)?)
+    } else {
+        None
+    };
+    Ok((rows, Some(stage9(state)?)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn import_gate_uses_live_state_and_preserves_exception_prefixes() {
+        for (gate, expected) in [
+            (ImportGate::FileCancelled, b"".as_slice()),
+            (ImportGate::InnerCancelled, b"N"),
+            (ImportGate::Header(0), b"N"),
+            (ImportGate::Header(1), b"RN"),
+            (ImportGate::Header(2), b"N"),
+            (ImportGate::Header(255), b"N"),
+        ] {
+            let mut state = Vec::new();
+            let (rows, stage9) = import_with_gate(
+                &mut state,
+                gate,
+                |s| {
+                    s.push(b'R');
+                    Ok::<_, Error>(0)
+                },
+                |s| {
+                    assert_eq!(
+                        s.as_slice(),
+                        if gate.reaches_rows() {
+                            b"R".as_slice()
+                        } else {
+                            b""
+                        }
+                    );
+                    s.push(b'N');
+                    Ok(7)
+                },
+            )
+            .unwrap();
+            assert_eq!(state, expected);
+            assert_eq!(rows, gate.reaches_rows().then_some(0));
+            assert_eq!(stage9, gate.reaches_stage9().then_some(7));
+        }
+        let mut state = Vec::new();
+        assert!(
+            import_with_gate(
+                &mut state,
+                ImportGate::Header(1),
+                |s| {
+                    s.push(b'R');
+                    Err::<(), _>(Error::Operation("injected row failure"))
+                },
+                |_| -> Result<(), Error> { panic!("exception skips stage9") },
+            )
+            .is_err()
+        );
+        assert_eq!(state, b"R");
+        assert!(
+            import_with_gate(
+                &mut state,
+                ImportGate::InnerCancelled,
+                |_| -> Result<(), Error> { panic!("cancel skips rows") },
+                |s| {
+                    s.push(b'N');
+                    Err::<(), _>(Error::Operation("injected stage9 failure"))
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(state, b"RN");
+    }
     #[test]
     fn counters_wrap_and_same_status_does_not_mean_same_report() {
         let mut c = Counts {

@@ -533,7 +533,8 @@ impl MemoryRows<'_> {
                 (15, MemoryCallsign::Repeater2),
             ] {
                 if let Some(text) = cell(column)? {
-                    let (call, clipped) = nls::callsign_fixed(&mut text.to_vec(), nls::ascii_map)?;
+                    let (call, clipped) =
+                        nls::callsign_fixed(&mut text.to_vec(), nls::platform_map)?;
                     row.holder.set_callsign(which, &call);
                     row.corrections = row.corrections.wrapping_add(u32::from(clipped));
                 }
@@ -1946,7 +1947,7 @@ pub fn import_callsign(
                 working.delete_one(0, defaults)?;
             }
             let mut cursor = 0;
-            while let Some(row) = rows.next_with(&icf::rows::ur_default(0, 0), nls::ascii_map) {
+            while let Some(row) = rows.next_with(&icf::rows::ur_default(0, 0), nls::platform_map) {
                 out.rows_read += 1;
                 let row = row?;
                 if !row.accepted {
@@ -2342,6 +2343,36 @@ mod tests {
             live_q: q,
             system_langid: None,
         }
+    }
+
+    #[test]
+    fn memory_default_platform_nls_consumer() {
+        let q = icf::context::Context::from_bytes([0; 24]);
+        let ranges = icf::frequency::Ranges::generate(&q, None).unwrap();
+        let g = memory_image();
+        let options = memory_options(g.memory(), &ranges, &q);
+        // CP932 fullwidth A/B/1 maps to the literal ASCII call on Windows.
+        let source = b"CH No,Frequency,Mode,Your Call Sign,RPT1 Call Sign,RPT2 Call Sign\n0,145,DV,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50\n";
+        let mut rows = MemoryRows::new(source, Kind::Memory, options.locale, false).unwrap();
+        let line = rows.next_source().unwrap();
+        let row = rows.side(line, 0, false, 0, &options);
+        #[cfg(windows)]
+        {
+            let row = row.unwrap();
+            assert!(row.holder.valid());
+            for field in [
+                MemoryCallsign::Your,
+                MemoryCallsign::Repeater1,
+                MemoryCallsign::Repeater2,
+            ] {
+                assert_eq!(row.holder.callsign(field), b"AB1     ");
+            }
+        }
+        #[cfg(not(windows))]
+        assert!(matches!(
+            row,
+            Err(Failure::Text(Error::SourceUnavailable(_)))
+        ));
     }
     #[test]
     fn memory_csv_finalizer_keeps_alias_counts_dbcs_and_native_mode_data_filter_rules() {
@@ -3727,6 +3758,7 @@ mod tests {
             b"No,Name,Call Sign\r\n01,NEW,NEW1\r\n02,ONE,A1\r\n03,TWO,B2\r\n"
         );
     }
+    #[cfg(not(windows))]
     #[test]
     fn ur_nls_failure_retains_cleared_prefix_and_original_counts_without_header_rollback() {
         let mut image = ur_image();
@@ -3788,6 +3820,46 @@ mod tests {
         let mut tail = record::reset_holder(0x0d, 299, 0);
         record::load_callsign_storage_into(&image, 299, &mut tail).unwrap();
         assert_eq!(tail.callsign(MemoryCallsign::Your), b"CALLSIGN");
+    }
+
+    #[test]
+    fn ur_default_platform_nls_consumer() {
+        let mut image = ur_image();
+        let defaults = ur_image();
+        let before = image.memory().to_vec();
+        let no = import_callsign(
+            &mut image,
+            b"Name\nIGNORED\n",
+            None,
+            Locale::copied(b'.', b','),
+            &defaults,
+        );
+        assert!(no.failure.is_some());
+        same_bytes(image.memory(), &before);
+        let out = import_callsign(
+            &mut image,
+            b"Call Sign,Name\n\x82\x60\x82\x61\x82\x50,MAPPED\n",
+            None,
+            Locale::copied(b'.', b','),
+            &defaults,
+        );
+        #[cfg(windows)]
+        {
+            assert!(out.failure.is_none(), "{:?}", out.failure);
+            assert_eq!(out.applied, 1);
+            assert_eq!(
+                export_callsign(&image, None, Locale::copied(b'.', b',')).bytes,
+                b"No,Name,Call Sign\r\n01,MAPPED,AB1\r\n"
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(matches!(
+                out.failure,
+                Some(Failure::Text(Error::SourceUnavailable(_)))
+            ));
+            assert_eq!(out.applied, 0);
+        }
     }
     #[test]
     fn ur_capacity_overwrites_c4_marker_not_applied_prefix() {

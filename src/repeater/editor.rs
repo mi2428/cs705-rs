@@ -363,23 +363,17 @@ pub fn number(
                 if predicate::numeric_frequency_bad(&h) {
                     effect.native.warning_flags |= 8;
                 }
-                effect.gray = matches!(kind(&row), 0 | 4)
-                    && value(&row, 0x3c) == 0
-                    && value(&row, 0x44) == 0
-                    && value(&row, 0x17c) == 0;
+                effect.gray = fields::paint_meta_bytes(&row.bytes, 0x14a)?.gray;
             }
             NumberField::Offset => {
-                let blocked = !matches!(k, 0 | 2 | 4);
+                let meta = fields::paint_meta_bytes(&row.bytes, 0x14c)?;
+                let blocked = meta.gate != fields::Gate::Open;
                 effect.blocked = blocked;
-                if blocked {
-                    effect.display = b"---".to_vec();
+                if let Some(placeholder) = meta.placeholder() {
+                    effect.display = placeholder.to_vec();
                 }
                 if !blocked {
-                    effect.gray = (matches!(k, 0 | 4)
-                        && value(&row, 0x3c) == 0
-                        && value(&row, 0x44) == 0
-                        && value(&row, 0x17c) == 0)
-                        || value(&row, 0x44) == 0;
+                    effect.gray = meta.gray;
                     let class = r
                         .ranges
                         .db98(value(&row, 0x3c))
@@ -407,7 +401,8 @@ pub fn number(
                 }
             }
             NumberField::ToneFrequency => {
-                effect.blocked = !matches!(k, 2 | 3);
+                effect.blocked =
+                    fields::paint_meta_bytes(&row.bytes, 0x14e)?.gate != fields::Gate::Open;
                 if !effect.blocked {
                     let old = value(&row, 0x178);
                     let order: Vec<_> = (0..10)
@@ -472,7 +467,7 @@ pub fn number(
                         |row| save(w, row),
                         |_| Ok(()),
                     )?;
-                    effect.gray = !matches!(value(&row, 0x174), 1 | 2);
+                    effect.gray = fields::paint_meta_bytes(&row.bytes, 0x14e)?.gray;
                 }
             }
             NumberField::UtcOffset => {
@@ -538,7 +533,8 @@ pub fn coordinate(
             }
             TextInput::Display | TextInput::Cancel => {}
         }
-        effect.gray = value(&row, 0x180) == 0;
+        effect.gray =
+            fields::paint_meta_bytes(&row.bytes, if longitude { 0x152 } else { 0x151 })?.gray;
         Ok(())
     })();
     *holder = DecodedRecord::from_bytes(*row.bytes);
@@ -589,7 +585,8 @@ pub fn coordinate_input(
         Ok(())
     })();
     effect.display = dialog.control.clone();
-    effect.gray = holder.repeater_field(record::RepeaterField::Position) == 0;
+    effect.gray =
+        fields::paint_meta_bytes(holder.as_bytes(), if longitude { 0x152 } else { 0x151 })?.gray;
     effect.coordinate_dialog = Some(dialog);
     result
 }
@@ -646,16 +643,13 @@ fn selected(old: u32, choices: &[u32], key: u16, input: ChoiceInput) -> Selectio
         candidate: candidate.unwrap_or(old),
     }
 }
-fn style(row: &Record, field: ChoiceField) -> bool {
-    let k = kind(row);
-    let f = value(row, 0x3c);
-    let d = value(row, 0x44);
-    let used = value(row, 0x17c);
-    match field {
-        ChoiceField::Duplex => matches!(k, 0 | 4) && f == 0 && d == 0 && used == 0,
-        ChoiceField::Use => matches!(k, 0 | 4) && (f == 0 || d == 0),
-        _ => false,
-    }
+fn style(row: &Record, field: ChoiceField) -> Result<bool, Error> {
+    let key = match field {
+        ChoiceField::Duplex => 0x14b,
+        ChoiceField::Use => 0x14f,
+        _ => return Ok(false),
+    };
+    Ok(fields::paint_meta_bytes(&row.bytes, key)?.gray)
 }
 
 /// CT_Rptlist's invalid-view Enter path: insertion precedes the selector. G is
@@ -760,7 +754,8 @@ pub fn choice(
             menu.to_vec()
         };
         // A blocked DUP row never reaches cycling, including an empty menu.
-        let blocked_dup = field == ChoiceField::Duplex && !matches!(kind(&row), 0 | 2);
+        let blocked_dup = field == ChoiceField::Duplex
+            && fields::paint_meta_bytes(&row.bytes, 0x14b)?.gate != fields::Gate::Open;
         let mut selection = if blocked_dup {
             Selection {
                 accepted: false,
@@ -770,7 +765,8 @@ pub fn choice(
             selected(old, &filtered, key, input)
         };
         if field == ChoiceField::Mode {
-            effect.blocked = true;
+            effect.blocked =
+                fields::paint_meta_bytes(&row.bytes, 0x146)?.gate != fields::Gate::Open;
             if !matches!(input, ChoiceInput::Selected(_)) {
                 selection.accepted = false;
                 effect.popup_requested = false;
@@ -814,7 +810,7 @@ pub fn choice(
                 &mut effect.native,
                 |row| save(w, row),
                 |row| {
-                    gray.set(style(row, field));
+                    gray.set(style(row, field)?);
                     Ok(())
                 },
             )?;
@@ -835,7 +831,7 @@ pub fn choice(
                 effect.native.flags |= 8;
             }
             if field == ChoiceField::Use {
-                effect.gray = style(&row, field);
+                effect.gray = style(&row, field)?;
             }
         }
         Ok(())
@@ -857,20 +853,17 @@ pub fn text(
 ) -> Result<(), Error> {
     let mut row = snapshot(holder, r);
     let k = kind(&row);
-    let at = match field {
-        TextField::Name => 0x26,
-        TextField::SubName => 0x154,
-        TextField::Call => 0x160,
-        TextField::Gateway => 0x168,
+    let (at, key) = match field {
+        TextField::Name => (0x26, 0x144),
+        TextField::SubName => (0x154, 0x145),
+        TextField::Call => (0x160, 0x147),
+        TextField::Gateway => (0x168, 0x148),
     };
     let width = if field == TextField::Name { 16 } else { 8 };
-    effect.blocked = match field {
-        TextField::Call => !matches!(k, 0 | 2 | 4),
-        TextField::Gateway => !matches!(k, 0 | 4),
-        _ => false,
-    };
-    if effect.blocked {
-        effect.display = b"---".to_vec();
+    let meta = fields::paint_meta_bytes(&row.bytes, key)?;
+    effect.blocked = meta.gate != fields::Gate::Open;
+    if let Some(placeholder) = meta.placeholder() {
+        effect.display = placeholder.to_vec();
     }
     let result = (|| {
         if !effect.blocked {
