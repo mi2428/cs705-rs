@@ -18,6 +18,31 @@ pub use io::{
     Session, ValidationReport, ValidationSource, ValidationView,
 };
 
+#[path = "document_clone.rs"]
+mod clone_write;
+pub use clone_write::{
+    CloneControls, CloneError, ClonePreparation, ClonePreparationStage, CloneReply, CloneStep,
+    CloneStop, CloneWrite,
+};
+
+#[path = "document_initial.rs"]
+pub mod initial;
+pub use initial::{InitialBoundary, InitialRequest, InitialState};
+
+#[path = "document_read.rs"]
+pub mod native_read;
+pub use native_read::{CloneRead, CloneReadReply, CloneReadStep, CloneReadStop};
+
+#[path = "document_options.rs"]
+pub mod options;
+pub use options::{CloneOptionButton, CloneOptions};
+
+#[path = "document_lifecycle.rs"]
+pub mod lifecycle;
+
+#[path = "document_ui_resources.rs"]
+pub mod ui_resources;
+
 /// Original Yes/No/Cancel prompt's save result, separate from the user's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveOutcome {

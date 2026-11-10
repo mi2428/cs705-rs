@@ -79,7 +79,7 @@ impl Session {
         self.default_selector = Some(selector);
         Ok(())
     }
-    fn runtime(&self) -> stage9::Runtime<'_> {
+    pub(super) fn runtime(&self) -> stage9::Runtime<'_> {
         stage9::Runtime {
             context: &self.context,
             ranges: &self.ranges,
@@ -167,7 +167,11 @@ impl Session {
 }
 
 /// 4FB00 then4FB20: counts/maps are built before their own later field snapshots.
-fn stage8(image: &mut [u8], context: &Context, system_langid: Option<u16>) -> Result<(), Error> {
+pub(super) fn stage8(
+    image: &mut [u8],
+    context: &Context,
+    system_langid: Option<u16>,
+) -> Result<(), Error> {
     rows::expand_map(image)?;
     crate::repeater::working::expand_counts(image)?;
     rows::expand_ur_count(image)?;
@@ -180,12 +184,20 @@ fn stage8(image: &mut [u8], context: &Context, system_langid: Option<u16>) -> Re
 }
 fn storage(image: &[u8]) -> Result<Vec<u8>, Error> {
     let mut image = image.to_vec();
-    rows::rebuild_metadata(&mut image)?;
-    crate::repeater::working::rebuild_storage_into(&mut image)?;
-    rows::rebuild_ur_metadata(&mut image)?;
+    storage_into(&mut image)?;
     Ok(image)
 }
-fn convert(image: &[u8], source: u8, destination: u8, defaults: &[u8]) -> Result<Vec<u8>, Error> {
+pub(super) fn storage_into(image: &mut [u8]) -> Result<(), Error> {
+    rows::rebuild_metadata(image)?;
+    crate::repeater::working::rebuild_storage_into(image)?;
+    rows::rebuild_ur_metadata(image)
+}
+pub(super) fn convert(
+    image: &[u8],
+    source: u8,
+    destination: u8,
+    defaults: &[u8],
+) -> Result<Vec<u8>, Error> {
     clone::convert_image(
         image,
         Profile::try_from(source).map_err(|_| invalid("invalid source layout"))?,
@@ -329,6 +341,15 @@ impl From<Error> for FileError {
 }
 
 impl Document {
+    /// Shared slot08 image body. Native node/Sync25 delivery is a separate edge.
+    pub(crate) fn reload_after_conversion(
+        &mut self,
+        session: &mut Session,
+    ) -> Result<stage9::Report, Error> {
+        session.document_flags = [0, 0];
+        stage8(&mut self.current, &session.context, session.system_langid)?;
+        self.normalize(session)
+    }
     pub fn directory(&self) -> &[u8] {
         &self.directory
     }
@@ -439,6 +460,21 @@ impl Document {
             ReferenceImage::Working,
             session.runtime(),
         )
+    }
+    /// 94C20/9514F after the actual file/header/confirmation boundary. Only
+    /// Header(1) runs the reader operation, including its ordered post-row work.
+    /// Inner cancellation and header rejection still normalize the LIVE current;
+    /// file cancellation does not read G or run stage9. An exceptional reader
+    /// skips stage9 and retains its prefix. A normal partial/zero-row report does
+    /// not reject the reader. Path/baseline/dirty and the common command tail are
+    /// not committed here; import directory caches belong to the reader caller.
+    pub fn import_csv<R>(
+        &mut self,
+        session: &Session,
+        gate: crate::csv::control::ImportGate,
+        reader: impl FnOnce(&mut Self) -> Result<R, Error>,
+    ) -> Result<(Option<R>, Option<stage9::Report>), Error> {
+        crate::csv::control::import_with_gate(self, gate, reader, |doc| doc.normalize(session))
     }
     /// Headless accepted semantic setting edit plus the common timer/dirty tail.
     /// Native popup parsing/GUI notification is not simulated by this method.
@@ -578,6 +614,22 @@ impl Document {
         state: Option<&mut normalizer::ResetState>,
         output: &mut impl Write,
     ) -> Result<SaveReport, FileError> {
+        let path = request.path.clone();
+        let target = request.target_revision;
+        let report = self.save_with_validation_uncommitted(session, request, state, output)?;
+        if report.status == SaveStatus::Saved {
+            self.accept_saved(path, target);
+        }
+        Ok(report)
+    }
+
+    pub(super) fn save_with_validation_uncommitted(
+        &mut self,
+        session: &Session,
+        request: SaveRequest<'_>,
+        state: Option<&mut normalizer::ResetState>,
+        output: &mut impl Write,
+    ) -> Result<SaveReport, FileError> {
         let layout = Layout::from_map_revision(request.target_revision);
         if request.target_revision != 6
             && let choice @ (2 | 7) = request.legacy_choice
@@ -629,7 +681,6 @@ impl Document {
             stage8(&mut self.current, &session.context, session.system_langid)?;
             self.normalize(session)?;
         }
-        self.accept_saved(request.path, request.target_revision);
         Ok(SaveReport {
             status: SaveStatus::Saved,
             validation,
@@ -703,6 +754,418 @@ mod tests {
             )
             .unwrap();
         (session, doc)
+    }
+
+    #[test]
+    fn library_r2_csv_cancel_boundaries_keep_baseline_and_use_real_stage9() {
+        use crate::csv::control::ImportGate;
+        let unready = Session::new(Context::before_registry(), None, 1, [1, 0]);
+        let mut short = Document::from_current(vec![7], b"KEEP".to_vec(), 5);
+        let before = short.clone();
+        let report = short
+            .import_csv::<()>(&unready, ImportGate::FileCancelled, |_| panic!("reader"))
+            .unwrap();
+        assert_eq!(report, (None, None));
+        assert_eq!(short, before);
+
+        let fields = source_fields();
+        let (session, mut doc) = session_and_document(&fields);
+        doc.new_file(&session, 7).unwrap();
+        doc.accept_saved(b"KEEP".to_vec(), 5);
+        doc.begin_pending_name(17, b"PENDING".to_vec());
+        let baseline = doc.baseline().to_vec();
+        for gate in [
+            ImportGate::InnerCancelled,
+            ImportGate::Header(0),
+            ImportGate::Header(2),
+            ImportGate::Header(255),
+        ] {
+            doc.patch_current(&[(0x37158, b"a"), (0x3c9b0, &[0xcc; 16])])
+                .unwrap();
+            let (rows, stage9) = doc
+                .import_csv::<()>(&session, gate, |_| panic!("reader must not run"))
+                .unwrap();
+            assert!(rows.is_none());
+            assert!(stage9.is_some());
+            assert_eq!(doc.current()[0x37158], b'A');
+            assert_eq!(&doc.current()[0x3c9b0..0x3c9c0], b"IcomCloneFormat3");
+            assert_eq!(doc.baseline(), baseline);
+            assert_eq!(doc.path(), b"KEEP");
+            assert_eq!(doc.target_revision(), 5);
+            assert!(doc.pending_matches(17));
+            assert_eq!(doc.timer_ms(), None);
+        }
+        assert_eq!(doc.dirty(), 0); // Common command tail has not run yet.
+        doc.patch_current(&[(0x399a2, &[6])]).unwrap();
+        assert_eq!(doc.compare_dirty(), 1);
+        doc.import_csv::<()>(&session, ImportGate::InnerCancelled, |_| panic!("reader"))
+            .unwrap();
+        assert_eq!(doc.dirty(), 1);
+    }
+
+    #[test]
+    fn library_r2_csv_accepted_reader_applies_bytes_then_normalizes_post_row_live_current() {
+        use crate::csv::{self, channel, control::ImportGate};
+        let fields = source_fields();
+        let (session, mut doc) = session_and_document(&fields);
+        doc.new_file(&session, 7).unwrap();
+        doc.accept_saved(b"KEEP".to_vec(), 6);
+        let baseline = doc.baseline().to_vec();
+        let (report, stage9) = doc
+            .import_csv(&session, ImportGate::Header(1), |doc| {
+                let mut image = doc.current_icf()?;
+                let report = channel::import_user_edge(
+                    &mut image,
+                    b"No,Frequency Low,Frequency High\n1,145,146\n",
+                    channel::Selection {
+                        first: 0,
+                        last: 0,
+                        number_base: 1,
+                    },
+                    false,
+                    csv::Locale::copied(b'.', b','),
+                );
+                let updated = image.memory().to_vec();
+                drop(image);
+                doc.patch_current(&[(0, &updated)])?;
+                // An actual post-row recipient may replace current before9514F.
+                let mut live = doc.current().to_vec();
+                live[0x37158] = b'z';
+                live[0x3c9b0..0x3c9c0].fill(0xcc);
+                doc.replace_current(live);
+                Ok(report)
+            })
+            .unwrap();
+        let report = report.unwrap();
+        assert!(report.failure.is_none(), "{:?}", report.failure);
+        assert_eq!(
+            (report.rows_read, report.applied, report.counts.c4),
+            (1, 1, 1)
+        );
+        assert!(stage9.is_some());
+        let mut holder = icf::record::reset_holder(0x15, 0, 0);
+        icf::record_image::load_range_into(doc.current(), 0x15, 0, &mut holder).unwrap();
+        assert!(holder.valid());
+        assert_eq!(
+            &doc.current()[0x378c0..0x378c4],
+            &145_000_000_u32.to_le_bytes()
+        );
+        assert_eq!(doc.current()[0x37158], b'Z');
+        assert_eq!(doc.baseline(), baseline);
+        assert_eq!(doc.path(), b"KEEP");
+        assert_eq!(doc.dirty(), 0);
+    }
+
+    #[test]
+    fn library_r2_csv_reader_and_stage9_failures_keep_their_real_prefix() {
+        use crate::csv::control::ImportGate;
+        let fields = source_fields();
+        let (mut session, mut doc) = session_and_document(&fields);
+        doc.new_file(&session, 7).unwrap();
+        doc.accept_saved(b"KEEP".to_vec(), 6);
+        let baseline = doc.baseline().to_vec();
+        doc.patch_current(&[(0x3c9b0, &[0xcc; 16])]).unwrap();
+        let error = doc.import_csv::<()>(&session, ImportGate::Header(1), |doc| {
+            doc.patch_current(&[(0x37158, b"a")])?;
+            Err(invalid("injected reader exception"))
+        });
+        assert_eq!(error, Err(invalid("injected reader exception")));
+        assert_eq!(doc.current()[0x37158], b'a');
+        assert_eq!(&doc.current()[0x3c9b0..0x3c9c0], &[0xcc; 16]);
+        // Keep the invalid weather source through R's intervening G restore.
+        session.defaults[0x3a8ca] = 1;
+        session.defaults[0x3c8b3] = 255;
+        assert!(
+            doc.import_csv(&session, ImportGate::Header(1), |doc| {
+                doc.patch_current(&[(0x3a8ca, &[1]), (0x3c8b3, &[255]), (0x3c800, &[255])])
+            })
+            .is_err()
+        );
+        assert_eq!(doc.current()[0x37158], b'A'); // Earlier stage9 work remains.
+        assert_eq!(doc.current()[0x3c800] & 3, 0); // Native weather prefix precedes failure.
+        assert_eq!(&doc.current()[0x3c9b0..0x3c9c0], &[0xcc; 16]);
+        assert_eq!(doc.baseline(), baseline);
+        assert_eq!(doc.path(), b"KEEP");
+        assert_eq!(doc.dirty(), 0);
+    }
+
+    fn wire_for_session() -> crate::clone::session_test_support::Mock {
+        use crate::clone::session_test_support::{Mock, response};
+        let mut transport = Mock::new(6);
+        let mut identity = response(6);
+        identity[9 + 0x13] = 8; // Independent E1 bits: Q.kind1, all other fields0.
+        transport.query_response = Some(identity);
+        transport
+    }
+
+    #[test]
+    fn library_r2_clone_write_runs_three_real_probes_and_detached_final_recipient() {
+        use crate::{
+            clone::session_test_support::config,
+            icf::document::{CloneControls, CloneReply, CloneStep, CloneStop, CloneWrite},
+        };
+        let fields = source_fields();
+        let (session, mut doc) = session_and_document(&fields);
+        doc.new_file(&session, 7).unwrap();
+        doc.accept_saved(b"KEEP".to_vec(), 6);
+        doc.patch_current(&[(0x37158, b"a")]).unwrap();
+        let baseline = doc.baseline().to_vec();
+        let mut controls = CloneControls {
+            controller_busy: 0,
+            wrapper_state: 0,
+            form_flag57: 1,
+        };
+        let mut operation = CloneWrite::new(
+            config(),
+            0,
+            normalizer::ResetState {
+                show_both: 1,
+                home_invalidated: 0,
+            },
+        )
+        .unwrap();
+        let mut reply = CloneReply::Continue;
+        let mut probes = 0;
+        let mut final_calls = 0;
+        loop {
+            match operation
+                .advance(
+                    &mut doc,
+                    &session,
+                    controls,
+                    ValidationSource::NoTree,
+                    reply,
+                )
+                .unwrap()
+            {
+                CloneStep::Sync(_) => reply = CloneReply::Continue,
+                CloneStep::Query(query) => {
+                    let mut transport = wire_for_session();
+                    let outcome = query.run(&mut transport, || false);
+                    assert_eq!(outcome.failure, None);
+                    assert_eq!(transport.commands, [0xe0]);
+                    assert_eq!(transport.closes, 1);
+                    probes += 1;
+                    reply = CloneReply::Probe(outcome);
+                }
+                CloneStep::Confirm { warning, selector } => {
+                    assert!(!warning);
+                    assert_eq!(selector, 6);
+                    reply = CloneReply::Confirmation(1);
+                }
+                CloneStep::Write(write) => {
+                    let mut transport = wire_for_session();
+                    let outcome = write.run(&mut transport, || false);
+                    assert_eq!(outcome.failure, None);
+                    assert_eq!(
+                        outcome.write_disposition,
+                        clone::WriteDisposition::Acknowledged
+                    );
+                    assert_eq!(&transport.commands[..2], &[0xe0, 0xe3]);
+                    assert_eq!(transport.commands.last(), Some(&0xe5));
+                    reply = CloneReply::Written(outcome);
+                }
+                CloneStep::Finalize => {
+                    assert!(operation.active_mask.is_some());
+                    assert_eq!(
+                        operation
+                            .finalize(&mut controls, |operation, _| {
+                                assert!(operation.active_mask.is_some());
+                                final_calls += 1;
+                                Ok(())
+                            })
+                            .unwrap(),
+                        CloneStop::Completed
+                    );
+                    break;
+                }
+                CloneStep::Stopped(reason) => panic!("unexpected stop: {reason:?}"),
+            }
+        }
+        assert_eq!((probes, final_calls, operation.outcomes.len()), (3, 1, 4));
+        assert!(operation.active_mask.is_none());
+        assert_eq!(doc.current()[0x37158], b'A');
+        assert_eq!(doc.baseline(), baseline);
+        assert_eq!(doc.path(), b"KEEP");
+        assert_eq!(doc.dirty(), 0);
+    }
+
+    #[test]
+    fn library_r2_clone_read_uses_actual_wire_image_and_keeps_failed_acquisition_private() {
+        use crate::{
+            clone::session_test_support::{config, end, packet},
+            icf::document::{
+                CloneControls, CloneRead, CloneReadReply, CloneReadStep, CloneReadStop,
+            },
+        };
+        let fields = source_fields();
+        for (fail, reprobe) in [(false, false), (false, true), (true, false)] {
+            let (mut session, mut doc) = session_and_document(&fields);
+            doc.new_file(&session, 7).unwrap();
+            doc.accept_saved(b"KEEP".to_vec(), 6);
+            let before = doc.clone();
+            let mut operation = CloneRead::new(config(), 7).unwrap();
+            let controls = CloneControls {
+                controller_busy: 0,
+                wrapper_state: 0,
+                form_flag57: 1,
+            };
+            let mut reply = CloneReadReply::Continue;
+            let mut boundaries = Vec::new();
+            let mut probes = 0;
+            loop {
+                match operation.advance(&session, controls, reply).unwrap() {
+                    CloneReadStep::Query(query) => {
+                        let mut transport = wire_for_session();
+                        let outcome = query.run(&mut transport, || false);
+                        assert_eq!(outcome.failure, None);
+                        if reprobe && probes == 0 {
+                            // The sync boundary sees live Q, not the entry snapshot.
+                            let mut fields = session.context.fields();
+                            fields.0[0] = 0;
+                            session.context.adopt(fields);
+                        }
+                        probes += 1;
+                        reply = CloneReadReply::Probe(outcome);
+                    }
+                    CloneReadStep::Sync(_) => reply = CloneReadReply::Continue,
+                    CloneReadStep::Read(read) => {
+                        let mut transport = wire_for_session();
+                        let mut incoming = fields.clone();
+                        incoming[0x399a2] = 6;
+                        let length = if fail { 64 } else { 0x3c9c0 };
+                        for (block, bytes) in incoming[..length].chunks(64).enumerate() {
+                            transport
+                                .read_data
+                                .extend(packet((block * 64) as u32, bytes));
+                        }
+                        transport.read_data.extend(end(length.div_ceil(64)));
+                        let outcome = read.run(&mut transport, || false);
+                        assert_eq!(
+                            outcome.failure,
+                            fail.then_some(clone::Failure::MissingCoverage)
+                        );
+                        assert_eq!(transport.commands, [0xe0, 0xe2]);
+                        assert!(outcome.acquired(0));
+                        reply = CloneReadReply::Read(outcome);
+                    }
+                    CloneReadStep::Apply => {
+                        let stop = operation
+                            .finish_document(
+                                &mut doc,
+                                &mut session,
+                                Some(DefaultSource {
+                                    selector: 1,
+                                    prefix: &fields,
+                                    japanese_mode_pairs: None,
+                                    restricted_band_stack: None,
+                                }),
+                                ValidationSource::NoTree,
+                                |boundary, _, _| {
+                                    boundaries.push(boundary);
+                                    Ok(())
+                                },
+                            )
+                            .unwrap();
+                        assert_eq!(
+                            stop,
+                            if fail {
+                                CloneReadStop::ReadFailed
+                            } else {
+                                CloneReadStop::Completed
+                            }
+                        );
+                        break;
+                    }
+                    CloneReadStep::Stopped(reason) => panic!("unexpected stop: {reason:?}"),
+                }
+            }
+            assert_eq!(probes, if reprobe { 2 } else { 1 });
+            if fail {
+                assert_eq!(doc, before);
+                assert_eq!(boundaries, [super::super::InitialBoundary::Sync(0x11)]);
+            } else {
+                assert_eq!(doc.current()[0x399a2], 6);
+                assert_eq!(doc.baseline(), before.baseline());
+                assert!(doc.path().is_empty());
+                assert_eq!(doc.dirty(), 1);
+                assert_eq!(
+                    boundaries.last(),
+                    Some(&super::super::InitialBoundary::Sync(0x25))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn library_r2_information_queries_real_transport_and_uses_same_document_recipients() {
+        use crate::clone::{information::*, session_test_support::config};
+        use crate::icf::document::{
+            InitialState,
+            lifecycle::{RecentFiles, UiState},
+        };
+        let fields = source_fields();
+        let (mut session, mut doc) = session_and_document(&fields);
+        doc.new_file(&session, 7).unwrap();
+        doc.accept_saved(b"KEEP".to_vec(), 6);
+        let before = doc.clone();
+        let mut controller = Controller::new(7, b"7".to_vec(), [6, 0, 0]);
+        controller
+            .construct_com(
+                &RegistrySource {
+                    values: &[],
+                    crt_point: Some(b'.'),
+                },
+                &ReadMode::Current,
+            )
+            .unwrap();
+        let mut initial = InitialState::default();
+        let mut ui = UiState::headless();
+        let recent = RecentFiles::default();
+        let mut receiver = DocumentReceiver {
+            document: &mut doc,
+            session: &mut session,
+            initial: &mut initial,
+            ui: &mut ui,
+            recent: &recent,
+        };
+        controller
+            .request_reidentify_document(&[false, false], &mut receiver)
+            .unwrap();
+        assert_eq!(receiver.ui.form.as_ref().unwrap().enabled58, 0);
+        let mut transport = wire_for_session();
+        let outcome = controller
+            .query_document(config(), &mut transport, || false, &mut receiver)
+            .unwrap();
+        assert_eq!(outcome.failure, None);
+        assert_eq!(transport.commands, [0xe0]);
+        controller
+            .return_query(
+                &outcome,
+                &mut receiver,
+                ReturnSource {
+                    defaults: None,
+                    profile_return: None,
+                    captions: Some([b"HEADER".to_vec(), b"LABEL".to_vec()]),
+                    close_returns: &[],
+                },
+            )
+            .unwrap();
+        let rows = controller.information_rows().unwrap().unwrap();
+        assert_eq!(rows[0][0].text, b"HEADER");
+        assert_eq!(rows[1][0].text, b"LABEL");
+        assert_eq!(rows[1][1].text, b"");
+        assert_eq!(*receiver.document, before);
+        assert_eq!(receiver.ui.form.as_ref().unwrap().enabled58, 0);
+        controller.information_close(true).unwrap();
+        assert_eq!(controller.information, Life::ReleaseRequested);
+        assert_eq!(receiver.ui.form.as_ref().unwrap().enabled58, 0);
+        controller
+            .destroy_document("information", &mut receiver)
+            .unwrap();
+        assert_eq!(controller.information, Life::Destroyed);
+        assert_eq!(receiver.ui.form.as_ref().unwrap().enabled58, 1);
+        assert!(receiver.ui.form.as_ref().unwrap().focused);
     }
 
     #[test]

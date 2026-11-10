@@ -18,10 +18,13 @@ pub use profile::{ContextFields, IMAGE_CAPACITY, Identity, IdentityGate, Profile
 mod image;
 pub use image::convert_image;
 mod session;
+#[cfg(test)]
+pub(crate) use session::tests as session_test_support;
 pub use session::{
     Echo, Failure, Operation, Outcome, Session, SessionConfig, State, Transport, TransportSettings,
     WriteDisposition,
 };
+pub mod information;
 pub mod search;
 mod stream;
 pub use stream::{Extractor, decode_hex_script, script_token};
