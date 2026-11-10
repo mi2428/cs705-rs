@@ -1,8 +1,10 @@
 //! Shared source-generation and stage-9 normalization primitives.
 //!
 //! These functions preserve surprising original arithmetic and mutation order.
-//! They are named components, not a claim that the whole stage-9 typed/list
-//! pipeline or the five factory source profiles have been implemented.
+//! The complete driver is [`super::stage9::normalize`]; these components do not
+//! publish its terminal signature. F supplies defaults, C supplies current, and
+//! T supplies late list state. Each role can alias W, so reads must observe prior
+//! writes rather than an entry snapshot. Errors retain the completed write prefix.
 
 use super::Error;
 pub use super::frequency::{FrequencyContext, FrequencyRange, previous_channel_bad};
@@ -137,7 +139,7 @@ pub struct ChannelNormalization {
     pub index: u32,
     pub working_binding: u32,
     pub default_binding: u32,
-    /// Captured Q[12]; only zero enables replacement of tone index50.
+    /// Captured `Q[12]`; only zero enables replacement of tone index50.
     pub q12: u8,
     /// Captured VA864614; only zero permits the split-OFF previous-side reload.
     pub previous_reload_guard: u32,

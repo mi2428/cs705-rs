@@ -3,6 +3,18 @@
 //!
 //! Unknown layouts are rejected, not repaired. Uninterpreted data is preserved;
 //! a successful parse is not authorization to write the image to a radio.
+//!
+//! Canonical records use ASCII hex for this decoded byte sequence:
+//!
+//! ```text
+//! address: 4 bytes, big-endian | count: 1 byte | payload: count bytes
+//! ```
+//!
+//! Addresses are image byte offsets, not file offsets or typed row indices. CD
+//! hashes the six-byte seed followed by complete decoded records, including each
+//! address and count. Comments and metadata are outside that digest. The native
+//! reader in [`text`] deliberately accepts a wider grammar and ignores CD; its
+//! successful read still needs [`mod@format`]'s signature and exact-coverage gates.
 
 use std::fmt;
 

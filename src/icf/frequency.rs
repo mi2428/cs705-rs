@@ -219,7 +219,7 @@ pub fn intersection(a: FrequencyRange, b: FrequencyRange) -> FrequencyRange {
 }
 
 /// 1EC40 is a separate, unsorted all-later-node adjacency pass. It can produce
-/// [MAX,0] from [0,0],[MAX,MAX] due to the native wrap comparison.
+/// `[MAX,0]` from `[0,0]`, `[MAX,MAX]` due to the native wrap comparison.
 pub fn join_adjacent(list: &mut Vec<FrequencyRange>) {
     let mut i = 0;
     while i < list.len() {
@@ -594,7 +594,9 @@ impl Ranges {
         point: u8,
     ) -> Result<super::special::FrequencyInput, Error> {
         if !text.is_ascii() {
-            return Err(invalid("native frequency text requires the explicit ASCII domain"));
+            return Err(invalid(
+                "native frequency text requires the explicit ASCII domain",
+            ));
         }
         let parse = |bounds: FrequencyRange| {
             if bounds.low > bounds.high {
@@ -1619,7 +1621,10 @@ mod tests {
         }
         ranges.lists[Container::L30 as usize][3] = range(0, 1_000_000_000);
         assert_eq!(
-            ranges.frequency_text_input(8, b"4294.967295", b'.').unwrap().second_value,
+            ranges
+                .frequency_text_input(8, b"4294.967295", b'.')
+                .unwrap()
+                .second_value,
             1_000_000_000
         );
         assert!(ranges.frequency_text_input(2, b"145", b'.').is_err());

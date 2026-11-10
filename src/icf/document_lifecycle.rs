@@ -413,21 +413,22 @@ impl UiState {
         let Some(tree) = &mut self.tree else {
             return Ok(());
         };
-        if self.view.is_none() && self.form.is_some() {
-            if let Some(index) = tree.selected {
-                let key = tree
-                    .keys
-                    .get(index)
-                    .ok_or(invalid("tree selection outside owned keys"))?;
-                let source = self
-                    .view_sources
-                    .iter()
-                    .find(|v| &v.key == key)
-                    .ok_or(invalid(
-                        "selected native view has no registered class source",
-                    ))?;
-                self.view = Some(source.clone());
-            }
+        if self.view.is_none()
+            && self.form.is_some()
+            && let Some(index) = tree.selected
+        {
+            let key = tree
+                .keys
+                .get(index)
+                .ok_or(invalid("tree selection outside owned keys"))?;
+            let source = self
+                .view_sources
+                .iter()
+                .find(|v| &v.key == key)
+                .ok_or(invalid(
+                    "selected native view has no registered class source",
+                ))?;
+            self.view = Some(source.clone());
         }
         let count = u32::from_le_bytes(
             document
@@ -556,6 +557,10 @@ impl Lifecycle {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Dialogs, publication and path comparison have independent failure boundaries."
+    )]
     pub fn save(
         &mut self,
         document: &mut Document,
@@ -725,6 +730,10 @@ impl Lifecycle {
         }
         Ok(prompt)
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The open root keeps prompt, profile, asset and file sources explicit."
+    )]
     pub fn open(
         &mut self,
         document: &mut Document,
@@ -755,6 +764,10 @@ impl Lifecycle {
     }
     /// Used by file frontends to acquire adopted-Q assets after the actual dirty
     /// prompt and input read. No repeated prompt/read and no completed Open report.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The frontend supplies a completed prompt and independently acquired file and assets."
+    )]
     pub fn open_after_prompt(
         &mut self,
         document: &mut Document,
@@ -786,6 +799,10 @@ impl Lifecycle {
         }
         Ok((prompt, status))
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "MRU selection forwards the same independent open sources without capturing them."
+    )]
     pub fn open_recent(
         &mut self,
         document: &mut Document,
@@ -811,6 +828,10 @@ impl Lifecycle {
             compare,
         )
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Placement is acquired only after the independently fallible pending-save gate."
+    )]
     pub fn close_query(
         &mut self,
         document: &mut Document,
@@ -841,6 +862,10 @@ impl Lifecycle {
         }
         Ok(Some(prompt))
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Close forwards the explicit save and placement sources before releasing ownership."
+    )]
     pub fn close(
         &mut self,
         document: &mut Document,

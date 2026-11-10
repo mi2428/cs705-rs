@@ -436,6 +436,64 @@ mod tests {
     }
 
     #[test]
+    fn maximal_record_truncation_and_bad_addresses_preserve_the_commit_boundary() {
+        let record = |address: u32, bytes: &[u8]| {
+            let mut line = format!("{address:08X}{:02X}", bytes.len()).into_bytes();
+            for byte in bytes {
+                line.extend_from_slice(format!("{byte:02X}").as_bytes());
+            }
+            line.push(b'\n');
+            line
+        };
+        let maximum = record(0, &[0xa5; 255]);
+        let mut reader = Reader::default();
+        let mut image = [0x55; 255];
+        for cut in 0..maximum.len() {
+            let report = reader
+                .read_fragments(
+                    &mut image,
+                    &[
+                        Some(b"40750001\n"),
+                        Some(b"#MapRev=6\n"),
+                        Some(&maximum[..cut]),
+                    ],
+                    None,
+                )
+                .unwrap();
+            assert_eq!(report.status, Status::Syntax, "cut={cut}");
+            assert_eq!(report.records, 0);
+            assert_eq!(image, [0x55; 255]);
+        }
+        let report = reader
+            .read_fragments(
+                &mut image,
+                &[Some(b"40750001\n"), Some(&maximum), None],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.status, Status::Success);
+        assert_eq!((report.records, report.bytes_written), (1, 255));
+        assert_eq!(report.coverage.last(), Some(&0x7f));
+        assert_eq!(image, [0xa5; 255]);
+
+        let prefix = record(0, &[0x99]);
+        for address in [255, 256, i32::MAX as u32, 0x8000_0000, u32::MAX] {
+            let bad = record(address, &[1]);
+            let report = reader
+                .read_fragments(
+                    &mut image,
+                    &[Some(b"40750001\n"), Some(&prefix), Some(&bad)],
+                    None,
+                )
+                .unwrap();
+            assert_eq!(report.status, Status::ExcessCoverage);
+            assert_eq!((report.records, report.bytes_written), (1, 1));
+            assert_eq!(report.coverage[0], 1);
+            assert_eq!(image, [0xa5; 255]);
+        }
+    }
+
+    #[test]
     fn literal_grammar_boundaries_and_crt_block_lookahead() {
         assert_eq!(decimal_prefix(b" \t-4294967297tail"), u32::MAX);
         assert_eq!(hexadecimal_prefix(b"FFFFFFFF"), i32::MAX);

@@ -335,15 +335,15 @@ impl Slots {
             for (slot, row) in slots.iter_mut().zip(rows) {
                 *slot = hex(row)?;
             }
-        } else if let Some(config) = config {
-            if let Some(rows) = config["recent-files"].as_array() {
-                for (slot, row) in slots.iter_mut().zip(rows) {
-                    *slot = row
-                        .as_str()
-                        .ok_or_else(|| AppError::invalid("config recent path requires a string"))?
-                        .as_bytes()
-                        .to_vec();
-                }
+        } else if let Some(config) = config
+            && let Some(rows) = config["recent-files"].as_array()
+        {
+            for (slot, row) in slots.iter_mut().zip(rows) {
+                *slot = row
+                    .as_str()
+                    .ok_or_else(|| AppError::invalid("config recent path requires a string"))?
+                    .as_bytes()
+                    .to_vec();
             }
         }
         Ok(Self(slots))

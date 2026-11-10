@@ -50,15 +50,13 @@ fn matches_field(field: &Value, key: &str) -> bool {
     }
     if let (Some((parent, _)), Some((actual, index))) =
         (pattern.rsplit_once('/'), key.rsplit_once('/'))
+        && parent == actual
+        && let Ok(index) = index.parse::<usize>()
     {
-        if parent == actual
-            && let Ok(index) = index.parse::<usize>()
-        {
-            return field["indices"]
-                .as_array()
-                .is_some_and(|a| a.contains(&json!(index)))
-                || field["count"].as_u64().is_some_and(|n| index < n as usize);
-        }
+        return field["indices"]
+            .as_array()
+            .is_some_and(|a| a.contains(&json!(index)))
+            || field["count"].as_u64().is_some_and(|n| index < n as usize);
     }
     key.strip_prefix(pattern)
         .and_then(|s| s.strip_prefix('/'))
@@ -188,13 +186,13 @@ pub fn read(image: &Icf<'_>, keys: &[String], runtime: &records::Runtime) -> Res
             } else {
                 fields::get(image, key)?
             };
-            if let Some(object) = value.as_object_mut() {
-                if object.remove("fixed_label").is_some_and(|v| !v.is_null()) {
-                    object.insert(
-                        "read_only_reason".into(),
-                        json!("This mode has a fixed value instead of an editable choice."),
-                    );
-                }
+            if let Some(object) = value.as_object_mut()
+                && object.remove("fixed_label").is_some_and(|v| !v.is_null())
+            {
+                object.insert(
+                    "read_only_reason".into(),
+                    json!("This mode has a fixed value instead of an editable choice."),
+                );
             }
             Ok(json!({"key":key,"label":label(key),"value":value}))
         })

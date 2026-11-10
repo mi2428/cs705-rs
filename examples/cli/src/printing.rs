@@ -700,101 +700,6 @@ pub fn run(args: Args, preferences: &Value) -> Result<u8> {
     Ok(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn independent_svg_preserves_projected_order_duplicates_and_escaping() {
-        let rows = json!([[{"column":"name","value":"<UI&>"},{"column":"name","value":"second"}]]);
-        let grid = grid("Independent view", &rows).unwrap();
-        assert_eq!(grid.cells[0], ["row", "00000. name", "00001. name"]);
-        let svg = svg_document("Independent view", &rows, 300, 200).unwrap();
-        let svg = String::from_utf8(svg).unwrap();
-        assert!(svg.starts_with("<svg ") && svg.ends_with("</svg>\n"));
-        assert!(svg.contains("&lt;UI&amp;&gt;") && svg.contains("second"));
-        assert!(svg_document("Invalid view", &json!([1]), 300, 200).is_err());
-    }
-
-    #[test]
-    fn working_data_uses_ordered_snapshots_gateway_aux_and_live_q_for_history() {
-        let mut memory = vec![0; 0x3c9c0];
-        memory[0x355a1] = 6;
-        memory[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
-        memory[0x3ab82..0x3bf6e].fill(255);
-        memory[0x3ab82..0x3ab86].copy_from_slice(&[7, 0, 4, 0]);
-        memory[0x3bf10..0x3bf12].copy_from_slice(&0_u16.to_le_bytes());
-        for (physical, link) in [(7, 5_u16), (4, 6)] {
-            let at = 0xaa0f + 52 * physical;
-            memory[at..at + 4].copy_from_slice(&(145_000_000 + physical as u32).to_le_bytes());
-            memory[at + 8..at + 10].copy_from_slice(&link.to_le_bytes());
-        }
-        memory[0x2a5df + 7 * 5..0x2a5df + 7 * 6].fill(1);
-        memory[0x2a5df + 7 * 6..0x2a5df + 7 * 7].fill(2);
-        memory[0x3c0a7..0x3c2ff].fill(255);
-        memory[0x3c0a7..0x3c0ab].copy_from_slice(&[7, 0, 0, 0]);
-        for (physical, text) in [(0, b"UR-ZERO"), (7, b"UR-SEVN")] {
-            let at = 0x2f703 + 16 * physical;
-            memory[at..at + 16].fill(b' ');
-            memory[at..at + text.len()].copy_from_slice(text);
-        }
-        let image = Icf::from_memory(memory.clone()).unwrap();
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/private/cli-r3/fixtures");
-        std::fs::create_dir_all(&root).unwrap();
-        let q_path = root.join(format!("working-q-{}.bin", std::process::id()));
-        for source in [0_u8, 1] {
-            let mut q = [0; 24];
-            q[0] = source;
-            std::fs::write(&q_path, q).unwrap();
-            let runtime = records::Options {
-                record_context: Some(q_path.to_str().unwrap().to_owned()),
-                ..Default::default()
-            }
-            .load(std::iter::empty::<&str>())
-            .unwrap();
-            for kinds in [
-                vec![ViewKind::Repeater, ViewKind::Ur],
-                vec![ViewKind::FromDv],
-                vec![ViewKind::FromFm],
-                vec![ViewKind::To],
-            ] {
-                let current = working_kinds(&image, &kinds, &runtime).unwrap();
-                assert_eq!(
-                    record_image::print_dataset_count(&current, 0x0c, 3).unwrap(),
-                    2
-                );
-                assert_eq!(
-                    record_image::print_dataset_count(&current, 0x0d, 0).unwrap(),
-                    2
-                );
-                assert_eq!(&current[0x2f703..0x2f70a], b"UR-SEVN");
-                assert_eq!(&current[0x2f713..0x2f71a], b"UR-ZERO");
-                assert_eq!(&current[0xaa0f..0xaa13], &145_000_007_u32.to_le_bytes());
-                assert_eq!(
-                    &current[0xaa0f + 52..0xaa13 + 52],
-                    &145_000_004_u32.to_le_bytes()
-                );
-                assert_eq!(&current[0x2a5df..0x2a5e6], &[1; 7]);
-                assert_eq!(&current[0x2a5e6..0x2a5ed], &[2; 7]);
-                let mut holder = record::reset_holder(0x0c, 2, 0);
-                cs705::repeater::working::load_into(&current, 2, &mut holder).unwrap();
-                assert_eq!(holder.offset_hz(), if source == 0 { 5_000_000 } else { 0 });
-                assert_eq!(
-                    holder.coordinate_bytes(true)[3],
-                    if source == 0 { b'E' } else { b'W' }
-                );
-            }
-        }
-        std::fs::remove_file(q_path).unwrap();
-        let absent = records::Options::default()
-            .load(std::iter::empty::<&str>())
-            .unwrap();
-        assert!(working_kinds(&image, &[ViewKind::Repeater], &absent).is_err());
-        assert_eq!(image.memory(), memory);
-    }
-}
-
 fn source_error(error: AppError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.message)
 }
@@ -1049,4 +954,99 @@ fn run_native(args: Args, preferences: &Value) -> Result<u8> {
         &json!({"operation":"native-resource-print-publication","published":!args.write.dry_run,"approved_by_yes":args.yes,"approved_by_preview":args.preview==Preview::Print,"os_printed":false}),
     )?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn independent_svg_preserves_projected_order_duplicates_and_escaping() {
+        let rows = json!([[{"column":"name","value":"<UI&>"},{"column":"name","value":"second"}]]);
+        let grid = grid("Independent view", &rows).unwrap();
+        assert_eq!(grid.cells[0], ["row", "00000. name", "00001. name"]);
+        let svg = svg_document("Independent view", &rows, 300, 200).unwrap();
+        let svg = String::from_utf8(svg).unwrap();
+        assert!(svg.starts_with("<svg ") && svg.ends_with("</svg>\n"));
+        assert!(svg.contains("&lt;UI&amp;&gt;") && svg.contains("second"));
+        assert!(svg_document("Invalid view", &json!([1]), 300, 200).is_err());
+    }
+
+    #[test]
+    fn working_data_uses_ordered_snapshots_gateway_aux_and_live_q_for_history() {
+        let mut memory = vec![0; 0x3c9c0];
+        memory[0x355a1] = 6;
+        memory[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+        memory[0x3ab82..0x3bf6e].fill(255);
+        memory[0x3ab82..0x3ab86].copy_from_slice(&[7, 0, 4, 0]);
+        memory[0x3bf10..0x3bf12].copy_from_slice(&0_u16.to_le_bytes());
+        for (physical, link) in [(7, 5_u16), (4, 6)] {
+            let at = 0xaa0f + 52 * physical;
+            memory[at..at + 4].copy_from_slice(&(145_000_000 + physical as u32).to_le_bytes());
+            memory[at + 8..at + 10].copy_from_slice(&link.to_le_bytes());
+        }
+        memory[0x2a5df + 7 * 5..0x2a5df + 7 * 6].fill(1);
+        memory[0x2a5df + 7 * 6..0x2a5df + 7 * 7].fill(2);
+        memory[0x3c0a7..0x3c2ff].fill(255);
+        memory[0x3c0a7..0x3c0ab].copy_from_slice(&[7, 0, 0, 0]);
+        for (physical, text) in [(0, b"UR-ZERO"), (7, b"UR-SEVN")] {
+            let at = 0x2f703 + 16 * physical;
+            memory[at..at + 16].fill(b' ');
+            memory[at..at + text.len()].copy_from_slice(text);
+        }
+        let image = Icf::from_memory(memory.clone()).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/private/cli-r3/fixtures");
+        std::fs::create_dir_all(&root).unwrap();
+        let q_path = root.join(format!("working-q-{}.bin", std::process::id()));
+        for source in [0_u8, 1] {
+            let mut q = [0; 24];
+            q[0] = source;
+            std::fs::write(&q_path, q).unwrap();
+            let runtime = records::Options {
+                record_context: Some(q_path.to_str().unwrap().to_owned()),
+                ..Default::default()
+            }
+            .load(std::iter::empty::<&str>())
+            .unwrap();
+            for kinds in [
+                vec![ViewKind::Repeater, ViewKind::Ur],
+                vec![ViewKind::FromDv],
+                vec![ViewKind::FromFm],
+                vec![ViewKind::To],
+            ] {
+                let current = working_kinds(&image, &kinds, &runtime).unwrap();
+                assert_eq!(
+                    record_image::print_dataset_count(&current, 0x0c, 3).unwrap(),
+                    2
+                );
+                assert_eq!(
+                    record_image::print_dataset_count(&current, 0x0d, 0).unwrap(),
+                    2
+                );
+                assert_eq!(&current[0x2f703..0x2f70a], b"UR-SEVN");
+                assert_eq!(&current[0x2f713..0x2f71a], b"UR-ZERO");
+                assert_eq!(&current[0xaa0f..0xaa13], &145_000_007_u32.to_le_bytes());
+                assert_eq!(
+                    &current[0xaa0f + 52..0xaa13 + 52],
+                    &145_000_004_u32.to_le_bytes()
+                );
+                assert_eq!(&current[0x2a5df..0x2a5e6], &[1; 7]);
+                assert_eq!(&current[0x2a5e6..0x2a5ed], &[2; 7]);
+                let mut holder = record::reset_holder(0x0c, 2, 0);
+                cs705::repeater::working::load_into(&current, 2, &mut holder).unwrap();
+                assert_eq!(holder.offset_hz(), if source == 0 { 5_000_000 } else { 0 });
+                assert_eq!(
+                    holder.coordinate_bytes(true)[3],
+                    if source == 0 { b'E' } else { b'W' }
+                );
+            }
+        }
+        std::fs::remove_file(q_path).unwrap();
+        let absent = records::Options::default()
+            .load(std::iter::empty::<&str>())
+            .unwrap();
+        assert!(working_kinds(&image, &[ViewKind::Repeater], &absent).is_err());
+        assert_eq!(image.memory(), memory);
+    }
 }

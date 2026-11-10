@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 /// Original 17D40 query/ACK extractor. FE restarts with one FE; FD is omitted.
 /// Each call consumes all available bytes and returns only the LAST complete
-/// frame. Overflow returns [0] and leaves the unconsumed suffix in the queue.
+/// frame. Overflow returns `[0]` and leaves the unconsumed suffix in the queue.
 /// This is intentionally different from the canonical [`super::Framer`].
 #[derive(Debug, Default)]
 pub struct Extractor {

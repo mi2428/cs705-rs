@@ -140,11 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_plans_match_independent_python_fingerprint() {
-        // PE-table bitmap/grid oracle, not product output. For selectors 1..6,
-        // masks 0..31 and ascending blocks, hash each seven-byte record:
-        // u8 selector | u8 mask | BE32 address | u8 length. Not authentication.
-        let mut digest = md5::Context::new();
+    fn all_plans_cover_exact_masked_ranges_without_overlap() {
         for selector in 1..=6 {
             let expected_end = match selector {
                 1 => 0x3ad00,
@@ -153,17 +149,30 @@ mod tests {
             };
             assert_eq!(read_range(selector), Ok(0..expected_end));
             for mask in 0..32 {
-                for block in write_blocks(selector, mask).unwrap() {
-                    digest.consume([selector, mask]);
-                    digest.consume(block.start.to_be_bytes());
-                    digest.consume([(block.end - block.start) as u8]);
+                // The reference marks byte addresses directly. It does not
+                // split ranges or reuse the planner's cursor/boundary arithmetic.
+                let mut required = vec![true; expected_end as usize];
+                for (tag, start, end) in EXCLUSIONS[selector_index(selector).unwrap()] {
+                    if tag == 5 || mask & (1 << tag) == 0 {
+                        required[start as usize..end as usize].fill(false);
+                    }
                 }
+                let blocks = write_blocks(selector, mask).unwrap();
+                assert!(blocks.windows(2).all(|pair| pair[0].end <= pair[1].start));
+                let mut covered = vec![false; required.len()];
+                for block in &blocks {
+                    assert!(block.start < block.end && block.end <= expected_end);
+                    assert!(block.end - block.start <= 64);
+                    assert_eq!(block.start / 64, (block.end - 1) / 64);
+                    covered[block.start as usize..block.end as usize].fill(true);
+                }
+                assert!(covered == required, "selector={selector} mask={mask}");
+                assert_eq!(
+                    blocks.iter().map(|b| b.end - b.start).sum::<u32>(),
+                    required.iter().filter(|byte| **byte).count() as u32,
+                );
             }
         }
-        assert_eq!(
-            format!("{:x}", digest.finalize()),
-            "c8d178040966adab2bd59228adc6823e"
-        );
     }
 
     #[test]

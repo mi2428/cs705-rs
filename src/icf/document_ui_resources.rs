@@ -79,7 +79,7 @@ fn query_csv(context: &mut MenuContext<'_>, node: &mut MenuDescriptor) -> Result
             }
             whole_export = rows::native::registration_count(current)? as u32 != 0;
         }
-        9 | 10 | 11 | 12 => {
+        9..=12 => {
             grouped = true;
             let record_kind = if kind <= 10 { 0x0a } else { 0x0c };
             if matches!(kind, 10 | 12) {
