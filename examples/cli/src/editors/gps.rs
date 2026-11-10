@@ -176,7 +176,8 @@ fn edit_record(
         .map(|group| group.physical_slots().len())
         .sum::<usize>()
         + index;
-    if index == count {
+    let added = index == count;
+    if added {
         if !matches!(field, RecordField::Name) {
             return Err(AppError::invalid(
                 "an empty GPS row accepts Name input first",
@@ -192,6 +193,11 @@ fn edit_record(
         }
     }
     let mut holder = record::load(image, absolute, 1)?;
+    // The native add branch clears validity after reload. This invocation can
+    // approve Name text without storing it; a later invocation reloads valid1.
+    if added {
+        holder.set_valid(false);
+    }
     match field {
         RecordField::Name => crate::repeaters::text_input(value, |input| {
             use cs705::icf::settings::extended::TextInput;
@@ -206,13 +212,17 @@ fn edit_record(
                 stored = record::save(image, absolute, &holder)?;
                 holder = record::load(image, absolute, holder.binding())?;
             }
-            let display = match input {
-                TextInput::Begin(Some(first)) => vec![first],
-                _ => holder.as_bytes()[0x244..0x254].to_vec(),
+            let display = if added {
+                Vec::new()
+            } else {
+                match input {
+                    TextInput::Begin(Some(first)) => vec![first],
+                    _ => holder.as_bytes()[0x244..0x254].to_vec(),
+                }
             };
             Ok((
                 json!({"operation":"gps-record-name","group":group,"index":index,"absolute":absolute,"stored":stored,"state_out":if matches!(input,TextInput::Begin(_)){2}else{0},"display":io::bytes_value(&display),"shared_source_after":io::bytes_value(&shared)}),
-                stored,
+                matches!(input, TextInput::Text(_)),
             ))
         }),
         RecordField::Altitude => number_action(value, |input, point| {

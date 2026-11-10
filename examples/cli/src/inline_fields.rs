@@ -231,7 +231,7 @@ pub fn edit_non_channel(
                     e::AutoRepeaterInvocation {
                         code: frame.action,
                         argument: frame.command,
-                        warning_bits: frame.warning_bits as u8,
+                        warning_bits: frame.warning_bits,
                     },
                 )?;
                 Ok((effect.stored, effect.notify_flags))

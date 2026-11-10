@@ -365,8 +365,8 @@ impl Working {
             original: None,
         })
     }
-    /// C6AEC: immutable snapshot, order[j] physical source, typed save into j,
-    /// then indirect gateway aux[k] into same-row working aux[j]. All2500 rows
+    /// C6AEC: immutable snapshot, `order[j]` physical source, typed save into j,
+    /// then indirect gateway `aux[k]` into same-row working `aux[j]`. All2500 rows
     /// are processed; invalid order entries use the actual type22 initializer.
     pub fn from_icf(image: &crate::icf::Icf<'_>, context: DefaultContext) -> Result<Self, Error> {
         let mut memory = image.memory().to_vec();
@@ -456,7 +456,6 @@ impl Working {
             holder.set_repeater_field(R::Use, u32::from(value));
             save_row_with(&mut self.memory, index as usize, &holder, true, before)?;
         }
-        drop(holder);
         for (event, second) in [(0x11, 0), (0x13, 0x14f)] {
             enqueue(Notification {
                 event,

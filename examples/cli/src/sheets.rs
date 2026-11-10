@@ -457,12 +457,12 @@ pub fn edit_csv(bytes: &[u8], kind: Kind, assignments: &[String]) -> Result<Vec<
     }
 }
 
-pub fn row(input: &str, sheet: Sheet, action: RowAction) -> Result<()> {
+pub fn row(input: &str, sheet: Sheet, action: RowAction, end_index: Option<usize>) -> Result<()> {
     if sheet == Sheet::Call
         || (matches!(sheet, Sheet::FromDv | Sheet::FromFm | Sheet::To | Sheet::Rx)
             && matches!(&action, RowAction::Delete { .. }))
     {
-        return crate::records::row(input, sheet, action);
+        return crate::records::row(input, sheet, action, end_index);
     }
     Err(pending("row operation"))
 }

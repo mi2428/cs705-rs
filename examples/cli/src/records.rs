@@ -1882,9 +1882,6 @@ fn native_channel_callsign_modal_edit(
             .transpose()?,
         string_tail: &tail,
     };
-    let language = runtime.input_options.gui_language.ok_or_else(|| {
-        AppError::safety("modal sources require explicit GUI language in --config")
-    })?;
     let mut state = runtime.normal.borrow_mut();
     let captured = state.as_mut().ok_or_else(|| {
         AppError::safety("initialize or restore channel state before callsign modal input")
@@ -1908,7 +1905,6 @@ fn native_channel_callsign_modal_edit(
         defaults: runtime.reference_defaults.as_deref().unwrap_or(&[]),
         ranges: &captured.ranges,
         system_langid: runtime.system_langid,
-        language,
     };
     let context = EditorContext {
         ranges: &captured.ranges,
@@ -2917,6 +2913,7 @@ pub fn normal_row(input: &str, sheet: Sheet, action: RowAction, options: &Option
             })
         }
     };
+    let before = model.working().to_vec();
     let outcome = match &action {
         RowAction::Paste { clipboard, .. } => {
             let mut clipboard = parse_native_clipboard(&io::read(clipboard)?)?;
@@ -2998,9 +2995,10 @@ pub fn normal_row(input: &str, sheet: Sheet, action: RowAction, options: &Option
                     "native row confirmation declined; use --yes",
                 ));
             }
-            if !runtime.accept_partial {
+            let changed = model.working() != before;
+            if !runtime.accept_partial || !changed {
                 io::report(
-                    &json!({"effects":normal_effects(&effects),"partial":true,"published":false}),
+                    &json!({"effects":normal_effects(&effects),"partial":changed,"published":false}),
                 )?;
                 return Err(error.into());
             }
@@ -3143,15 +3141,17 @@ pub fn call_row(input: &str, action: RowAction, options: &Options) -> Result<u8>
                     "native row confirmation declined; use --yes",
                 ));
             }
-            if runtime.accept_partial {
+            let changed = working != image.memory();
+            let publish_partial = runtime.accept_partial && changed;
+            if publish_partial {
                 let mut image = image;
                 image.patch_memory(&[(0, &working)])?;
                 io::publish(&image.to_bytes(), write)?;
             }
             io::report(
-                &json!({"effects":normal_effects(&effects),"partial":true,"published":runtime.accept_partial&&!write.dry_run,"error":error.to_string()}),
+                &json!({"effects":normal_effects(&effects),"partial":changed,"published":publish_partial&&!write.dry_run,"error":error.to_string()}),
             )?;
-            return if runtime.accept_partial {
+            return if publish_partial {
                 Ok(5)
             } else {
                 Err(error.into())
@@ -3515,6 +3515,7 @@ pub fn repeater_row(input: &str, action: RowAction, options: &Options) -> Result
         }
         _ => {}
     }
+    let before = working.working().to_vec();
     let result: Result<usize> = match action {
         RowAction::Paste { .. } => working
             .paste(
@@ -3566,8 +3567,9 @@ pub fn repeater_row(input: &str, action: RowAction, options: &Options) -> Result
             Ok(0)
         }
         Err(error) => {
-            if !runtime.accept_partial {
-                io::report(&json!({"error":error.message,"partial":true,"published":false}))?;
+            let changed = working.working() != before;
+            if !runtime.accept_partial || !changed {
+                io::report(&json!({"error":error.message,"partial":changed,"published":false}))?;
                 return Err(error);
             }
             io::publish(&working.to_icf()?.to_bytes(), &write)?;
@@ -3640,6 +3642,7 @@ pub fn ur_row(input: &str, action: RowAction, options: &Options) -> Result<u8> {
         )
     })?;
     let defaults = normalizer::ReferenceImage::Separate(defaults);
+    let before = working.working().to_vec();
     let result = if delete {
         working.delete_one(index as u32, defaults).map(|()| true)
     } else {
@@ -3653,8 +3656,9 @@ pub fn ur_row(input: &str, action: RowAction, options: &Options) -> Result<u8> {
             Ok(0)
         }
         Err(error) => {
-            if !runtime.accept_partial {
-                io::report(&json!({"partial":true,"published":false,"count":working.count()}))?;
+            let changed = working.working() != before;
+            if !runtime.accept_partial || !changed {
+                io::report(&json!({"partial":changed,"published":false,"count":working.count()}))?;
                 return Err(error.into());
             }
             io::publish(&working.to_icf()?.to_bytes(), write)?;
@@ -4203,7 +4207,7 @@ fn parse_clipboard(bytes: &[u8]) -> Result<Vec<DecodedRecord>> {
 }
 
 /// History deletion only. Channel rows use their native v2 operation roots.
-pub fn row(input: &str, sheet: Sheet, action: RowAction) -> Result<()> {
+pub fn row(input: &str, sheet: Sheet, action: RowAction, end_index: Option<usize>) -> Result<()> {
     let extra = action_extra(&action);
     io::single_stdin(std::iter::once(input).chain(extra))?;
     let kind = history_kind(sheet)
@@ -4224,14 +4228,19 @@ pub fn row(input: &str, sheet: Sheet, action: RowAction) -> Result<()> {
     }
     let bytes = io::read(input)?;
     let mut image = Icf::parse(&bytes)?;
-    if record::history_selection_present(&image, kind, index, index)? {
+    let last = end_index.unwrap_or(index);
+    if record::history_selection_present(&image, kind, index, last)? {
         confirm(yes)?;
     }
-    let changed = record::delete_history_storage(&mut image, kind, index, index)?;
+    // Deletion uses the selected width, not the number of occupied map cells.
+    let changed = record::delete_history_storage(&mut image, kind, index, last)?;
     io::report(
         &json!({"deleted":changed,"events":if changed{vec![0x11]}else{Vec::<u32>::new()},"physical_records_erased":false}),
     )?;
-    io::publish(&image.to_bytes(), &write)
+    if changed {
+        io::publish(&image.to_bytes(), &write)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

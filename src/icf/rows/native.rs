@@ -2888,6 +2888,10 @@ fn prepare_source(h: &mut DecodedRecord) {
     h.set_filter(v.filter);
 }
 
+// Cross-kind paste keeps the source kind in the clipboard header. Only the
+// explicit destination kind/index resolves storage: normal logical sides use
+// the map, while call sides address four fixed raw83 pairs. Mode2 borrows target
+// name/split/SEL from the pre-write snapshot, never from a partly updated target.
 fn write_source(
     image: &mut [u8],
     kind: ChannelKind,
@@ -2930,6 +2934,10 @@ fn write_source(
 }
 
 /// A124/A328: preserve the FE double-call and separate returned native counter.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The pre-write target snapshot, live target and mutable clipboard have distinct ownership and failure effects."
+)]
 fn transfer_into(
     image: &mut [u8],
     kind: ChannelKind,
@@ -3098,8 +3106,10 @@ mod tests {
         ));
         let payload = name_notification(&h, 701).unwrap();
         let words: Vec<_> = payload
-            .chunks_exact(4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| u32::from_le_bytes(*b))
             .collect();
         assert_eq!(words, [3, 701, 0x105, 4, 0, 2]);
     }
@@ -3126,7 +3136,6 @@ mod tests {
             defaults: &[],
             ranges: &ranges,
             system_langid: None,
-            language: 0,
         };
         let reads = d::ReadInputs {
             ur_name_tail: Some([b' '; 8]),
@@ -3274,7 +3283,6 @@ mod tests {
             defaults: &defaults,
             ranges: &ranges,
             system_langid: None,
-            language: 0,
         };
         let reads = d::ReadInputs {
             blank_source_index: Some(2500),

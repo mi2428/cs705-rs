@@ -834,11 +834,11 @@ fn native_modal_sources_actions_cancel_outer_save_and_options_use_real_collector
     let source = modal_fixture();
     let config = files.write(
         "options.json",
-        br#"{"language":"English","callsign-dialog":true,"auto-correct":true}"#,
+        br#"{"callsign-dialog":true,"auto-correct":true}"#,
     );
     let list_config = files.write(
         "list-options.json",
-        br#"{"language":"English","callsign-dialog":false,"auto-correct":false}"#,
+        br#"{"callsign-dialog":false,"auto-correct":false}"#,
     );
     let q = files.write("live-q", &context(0));
     let state = initialized_normal_state(&source, 0, None);
@@ -6111,6 +6111,88 @@ fn routed_ur_rx_views_and_all_history_delete_maps_preserve_physical_payloads() {
             "empty {sheet}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        assert_eq!(Icf::parse(&out.stdout).unwrap().memory(), image.memory());
+        assert!(
+            out.stdout.is_empty(),
+            "empty history delete has no approval"
+        );
+    }
+}
+
+#[test]
+fn partial_approval_does_not_publish_a_failure_before_any_mutation() {
+    let files = Files::new();
+    let source = normal_fixture();
+    let output = files.write("unchanged-error", b"KEEP");
+    let out = cli(
+        &[
+            "row",
+            "-",
+            "--sheet",
+            "memory",
+            "--accept-partial",
+            "delete",
+            "100",
+            "0",
+            "--yes",
+            "--overwrite",
+            "-o",
+            p(&output),
+        ],
+        &source,
+    );
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(fs::read(output).unwrap(), b"KEEP");
+}
+
+#[test]
+fn history_delete_range_uses_the_selected_width_including_holes() {
+    let source = fixture();
+    for (sheet, base, capacity) in [
+        ("from-dv", 0x3c331, 10),
+        ("from-fm", 0x3c33b, 10),
+        ("to", 0x3c34f, 20),
+        ("rx", 0x3c2ff, 50),
+    ] {
+        let mut image = Icf::parse(&source).unwrap();
+        let mut map = vec![255; capacity];
+        map[..5].copy_from_slice(&[0, 255, 2, 3, 4]);
+        image.patch_memory(&[(base, &map)]).unwrap();
+        let input = image.to_bytes();
+        let args = [
+            "row",
+            "-",
+            "--sheet",
+            sheet,
+            "--end-index",
+            "2",
+            "delete",
+            "0",
+            "1",
+            "--output",
+            "-",
+        ];
+        let declined = cli(&args, &input);
+        assert_eq!(declined.status.code(), Some(6), "{sheet}");
+        assert!(declined.stdout.is_empty());
+        let mut approved = args.to_vec();
+        approved.push("--yes");
+        let out = cli(&approved, &input);
+        assert!(
+            out.status.success(),
+            "{sheet}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let result = Icf::parse(&out.stdout).unwrap();
+        let expected: &[u8] = if sheet == "rx" {
+            &[0, 255, 255, 1, 2]
+        } else {
+            &[0, 3, 4, 255, 255]
+        };
+        assert_eq!(&result.memory()[base..base + 5], expected, "{sheet}");
+        assert_eq!(&result.memory()[..base], &image.memory()[..base]);
+        assert_eq!(
+            &result.memory()[base + capacity..],
+            &image.memory()[base + capacity..]
+        );
     }
 }

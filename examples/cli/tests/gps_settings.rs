@@ -1958,6 +1958,52 @@ fn r3_gps_clock_insert_clear_delete_and_declined_name_keep_safe_prefix_policy() 
             .iter()
             .any(|v| v["partial_in_memory"] == true && v["approved"] == false)
     );
+    let out = cli(
+        &[
+            "editor",
+            "gps",
+            "record",
+            "-",
+            "3",
+            "0",
+            "name",
+            "--kind",
+            "memory",
+            "--record-context",
+            p(&q),
+            "--native-format-context",
+            p(&clock),
+            "--value",
+            "NEW",
+            "-o",
+            "-",
+        ],
+        &raw,
+    );
+    success(&out);
+    let added = cs705::icf::Icf::from_memory(out.stdout.clone()).unwrap();
+    assert_eq!(added.gps_groups().unwrap()[3].physical_slots(), &[0]);
+    assert_eq!(
+        added.physical_gps_name_raw(0).unwrap().unwrap(),
+        b"                "
+    );
+    let report = reports(&out);
+    let report = report.iter().find(|v| v.get("approved").is_some()).unwrap();
+    assert_eq!(report["approved"], true);
+    assert_eq!(report["editor"]["stored"], false);
+    let second = cli(
+        &[
+            "editor", "gps", "record", "-", "3", "0", "name", "--kind", "memory", "--value", "NEW",
+            "-o", "-",
+        ],
+        &out.stdout,
+    );
+    success(&second);
+    let edited = cs705::icf::Icf::from_memory(second.stdout).unwrap();
+    assert_eq!(
+        edited.physical_gps_name_raw(0).unwrap().unwrap(),
+        b"NEW             "
+    );
 }
 
 #[test]

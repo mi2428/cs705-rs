@@ -217,7 +217,7 @@ pub fn carry(
     } else {
         first as i32 / 2
     };
-    for offset in 0..(last - first + 1) / 2 + 1 {
+    for offset in 0..(last - first).div_ceil(2) + 1 {
         call_after_into(image, row + offset as i32, ranges, effects)?;
     }
     let end = (last as i32 + d * step as i32) as usize;

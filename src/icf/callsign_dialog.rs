@@ -1,5 +1,8 @@
 //! Headless C1BEC/BE8BC callsign dialogs. Inputs are source images and gestures,
 //! never completed candidate packets. Saving and notification remain external.
+//! Captions are independently worded ASCII, not bundled native UI resources.
+//! Category tags, fixed-width callsigns and user-provided name bytes retain their
+//! data contracts; translated native captions are not accepted as route aliases.
 
 use super::{
     Error, MemoryCallsign,
@@ -17,7 +20,6 @@ pub struct Sources<'a> {
     pub defaults: &'a [u8],
     pub ranges: &'a Ranges,
     pub system_langid: Option<u16>,
-    pub language: u32,
 }
 
 /// Native uninitialized/read-past-string inputs, needed only if actually read.
@@ -143,20 +145,14 @@ fn derived_mode(mode: u32) -> u32 {
     if mode == 0x11 { 3 } else { 2 }
 }
 
-// These are the two actual UI resource languages, not factory image data.
-fn internet(language: u32) -> &'static [u8] {
-    if language == 1 {
-        b"\x83C\x83\x93\x83^\x81[\x83l\x83b\x83g\x90\xda"
-    } else {
-        b"Internet"
-    }
+fn internet() -> &'static [u8] {
+    b"Network route"
 }
-fn rpt_token(language: u32, gateway: bool) -> &'static [u8] {
-    match (language == 1, gateway) {
-        (true, false) => b"\x8eR\x8a|\x82\xaf",
-        (true, true) => b"\x83Q\x81[\x83g\x83E\x83F\x83C",
-        (false, false) => b"Same Repeater",
-        (false, true) => b"Gateway",
+fn rpt_token(gateway: bool) -> &'static [u8] {
+    if gateway {
+        b"Gateway path"
+    } else {
+        b"Repeater path"
     }
 }
 const CQ: [u8; 8] = *b"CQCQCQ  ";
@@ -378,27 +374,9 @@ fn category_tags(list_mode: u32, mode: u32) -> Vec<u32> {
 fn category_text(s: &Sources<'_>, tag: u32) -> Result<Vec<u8>, Error> {
     Ok(match tag {
         0 => b"CQCQCQ".to_vec(),
-        1 => {
-            if s.language == 1 {
-                b"\x91\x8a\x8e\xe8\x8b\xc7\x83R\x81[\x83\x8b\x83T\x83C\x83\x93".to_vec()
-            } else {
-                b"Your Call Sign".to_vec()
-            }
-        }
-        2 => {
-            if s.language == 1 {
-                b"\x8eg\x97p\x82\xb5\x82\xc8\x82\xa2".to_vec()
-            } else {
-                b"Not Used".to_vec()
-            }
-        }
-        3 => {
-            if s.language == 1 {
-                b"\x83\x8c\x83s\x81[\x83^\x83\x8a\x83X\x83g".to_vec()
-            } else {
-                b"Repeater List".to_vec()
-            }
-        }
+        1 => b"UR contacts".to_vec(),
+        2 => b"No route".to_vec(),
+        3 => b"All repeaters".to_vec(),
         4..=53 => {
             let mut caption = format!("{:02}: ", tag - 3).into_bytes();
             caption.extend_from_slice(prefix(window(
@@ -408,13 +386,7 @@ fn category_text(s: &Sources<'_>, tag: u32) -> Result<Vec<u8>, Error> {
             )?));
             caption
         }
-        54 => {
-            if s.language == 1 {
-                b"\x83C\x83\x93\x83^\x81[\x83l\x83b\x83g\x90\xda\x91\xb1".to_vec()
-            } else {
-                b"Internet".to_vec()
-            }
-        }
+        54 => internet().to_vec(),
         _ => return Err(invalid("unregistered callsign category")),
     })
 }
@@ -562,12 +534,11 @@ fn list_value<const N: usize>(
     model: &ListModel,
     selection: ListSelection,
     reads: &ReadInputs<'_>,
-    language: u32,
 ) -> Result<Option<[u8; N]>, Error> {
     Ok(match model.tag {
         0 => Some(padded(b"CQCQCQ")),
         2 => Some([b' '; N]),
-        54 => Some(padded(internet(language))),
+        54 => Some(padded(internet())),
         1 | 3..=53 => {
             let text = if N == 8 {
                 selected(&model.calls, selection.call)?
@@ -596,11 +567,11 @@ pub fn list_into(
     let mode = derived_mode(holder.mode());
     let model = list_model(sources, list_mode, mode, selection, reads)?;
     let mut copied = false;
-    if selection.modal_result != 0 {
-        if let Some(value) = list_value::<8>(&model, selection, reads, sources.language)? {
-            holder.set_callsign(field, &value);
-            copied = true;
-        }
+    if selection.modal_result != 0
+        && let Some(value) = list_value::<8>(&model, selection, reads)?
+    {
+        holder.set_callsign(field, &value);
+        copied = true;
     }
     Ok(ListOutcome {
         modal_result: selection.modal_result,
@@ -637,6 +608,10 @@ pub fn initial_selection(
         reads,
     )
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Captured holder, live source, query and native read inputs have independent lifetimes."
+)]
 fn initial_selection_with_source(
     s: &Sources<'_>,
     holder: &DecodedRecord,
@@ -652,7 +627,7 @@ fn initial_selection_with_source(
     let (mut name, mut call) = (0, 0);
     if !blank(query) {
         let mut row = 0xffff;
-        if query.len() == 16 && mode == 3 && query == padded::<16>(internet(s.language)) {
+        if query.len() == 16 && mode == 3 && query == padded::<16>(internet()) {
             tag = 54;
         } else {
             if list_mode >= 3 {
@@ -753,6 +728,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dialog_captions_are_ascii_without_changing_category_tags_or_user_names() {
+        let mut image = vec![0; 0x4997a];
+        image[0x2ea3b..0x2ed5b].fill(b' ');
+        image[0x2ea3b..0x2ea3f].copy_from_slice(b"\x82\xa0AB");
+        let ranges = Ranges::generate(
+            &super::super::context::Context::before_registry(),
+            Some(0x411),
+        )
+        .unwrap();
+        let sources = Sources {
+            current: &image,
+            defaults: &[],
+            ranges: &ranges,
+            system_langid: None,
+        };
+        assert!(internet().is_ascii());
+        assert!(rpt_token(false).is_ascii());
+        assert!(rpt_token(true).is_ascii());
+        for tag in [0, 1, 2, 3, 54] {
+            assert!(category_text(&sources, tag).unwrap().is_ascii());
+        }
+        let group = category_text(&sources, 4).unwrap();
+        assert!(group.ends_with(&image[0x2ea3b..0x2ea4b]));
+        assert_eq!(
+            category_tags(3, 3),
+            [vec![0, 1], (3..=54).collect()].concat()
+        );
+        assert_eq!(category_tags(4, 3), [vec![2], (3..54).collect()].concat());
+        let holder = record::reset_holder(2, 0, 7);
+        let query = padded::<16>(&category_text(&sources, 54).unwrap());
+        let reads = ReadInputs::default();
+        let selection = initial_selection_with_source(
+            &sources,
+            &holder,
+            3,
+            3,
+            &query,
+            0x11,
+            &[b' '; 16],
+            &reads,
+        )
+        .unwrap();
+        let model = list_model_with_source(&sources, 3, 3, &[b' '; 16], selection, &reads).unwrap();
+        assert_eq!(model.tag, 54);
+        assert_eq!(
+            list_value::<16>(&model, selection, &reads).unwrap(),
+            Some(query)
+        );
+    }
+
+    #[test]
     fn dr_group49_scalar_first_dd_ur_list_cancel_and_index9_failure() {
         let mut image = vec![0; 0x4997a];
         image[0x49914..0x49916].copy_from_slice(&1_u16.to_le_bytes());
@@ -782,7 +808,6 @@ mod tests {
             defaults: &image,
             ranges: &ranges,
             system_langid: Some(0x411),
-            language: 0,
         };
         let reads = ReadInputs {
             ur_name_tail: Some([b' '; 8]),
@@ -798,7 +823,7 @@ mod tests {
         let mut d = Dialog::open(&sources, &mut h, &reads).unwrap();
         let after_open = h.clone();
         assert_eq!(d.mode, 4);
-        // Source mode4 categories start with Not Used, then all/group0..49.
+        // Source mode4 starts with no route, then all/group0..49.
         let source_selection = ListSelection {
             category: 51,
             name: 1,
@@ -872,7 +897,6 @@ mod tests {
             defaults: &image,
             ranges: &ranges,
             system_langid: Some(0x411),
-            language: 0,
         };
         let old_calls = [
             *h.callsign(MemoryCallsign::Your),
@@ -943,7 +967,6 @@ mod tests {
             defaults: &image,
             ranges: &ranges,
             system_langid: Some(0x411),
-            language: 0,
         };
         let reads = ReadInputs {
             ur_name_tail: Some([b' '; 8]),

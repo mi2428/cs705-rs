@@ -227,6 +227,10 @@ pub fn insert(
 /// Native type20 producer, not a completed record seed. Each local-clock read
 /// follows that row's metadata insertion. A clock/default failure retains the
 /// inserted metadata; notification failure retains all preceding record writes.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Clock and notification callbacks run on opposite sides of each committed metadata insertion."
+)]
 pub fn insert_initialized(
     image: &mut Icf<'_>,
     group: usize,

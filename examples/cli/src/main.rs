@@ -182,6 +182,9 @@ fn has_record_options(options: &records::Options) -> bool {
         || options.reference_defaults.is_some()
         || options.accept_partial
         || options.normal_state.is_some()
+        || options.native_range_context.is_some()
+        || options.native_format_context.is_some()
+        || !options.inline_unit_output.is_empty()
         || options.normal_options_present()
 }
 
@@ -552,7 +555,7 @@ fn run(cli: Cli) -> Result<u8> {
             input,
             sheet,
             action,
-            record_options,
+            mut record_options,
         } => {
             if sheet == Sheet::Memory
                 || matches!(sheet, Sheet::Bandstack | Sheet::Memopad)
@@ -572,12 +575,20 @@ fn run(cli: Cli) -> Result<u8> {
             if sheet == Sheet::Ur {
                 return records::ur_row(&input, action, &record_options);
             }
+            let end_index =
+                if matches!(sheet, Sheet::FromDv | Sheet::FromFm | Sheet::To | Sheet::Rx)
+                    && matches!(&action, RowAction::Delete { .. })
+                {
+                    record_options.end_index.take()
+                } else {
+                    None
+                };
             if has_record_options(&record_options) {
                 return Err(AppError::invalid(
                     "record runtime options require a supported native row operation",
                 ));
             }
-            sheets::row(&input, sheet, action)?;
+            sheets::row(&input, sheet, action, end_index)?;
         }
         Command::Import {
             input,
@@ -649,5 +660,31 @@ fn confirm(yes: bool) -> Result<()> {
         Err(AppError::safety(
             "destructive operation requires --yes; no interactive stdin confirmation is used",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_option_detection_includes_inline_sources() {
+        assert!(!has_record_options(&records::Options::default()));
+        for options in [
+            records::Options {
+                native_range_context: Some("unused".into()),
+                ..Default::default()
+            },
+            records::Options {
+                native_format_context: Some("unused".into()),
+                ..Default::default()
+            },
+            records::Options {
+                inline_unit_output: vec!["1=41".into()],
+                ..Default::default()
+            },
+        ] {
+            assert!(has_record_options(&options));
+        }
     }
 }

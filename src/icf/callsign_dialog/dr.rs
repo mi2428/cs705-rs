@@ -68,19 +68,18 @@ pub(super) fn classify(
     } else {
         None
     };
-    let internet_value = padded::<16>(internet(s.language));
+    let internet_value = padded::<16>(internet());
     let cq_value = padded::<16>(b"CQCQCQ");
     let mut target = if blank(&normalized) {
         0
-    } else if normalized == internet_value {
-        8
-    } else if mode == 3
-        && value[0] != b'/'
-        && *source_out == 3
-        && blank(&normalized[7..])
-        && source_holder
-            .as_ref()
-            .is_some_and(|h| normalized[..7] == h.repeater_text(T::Gateway)[..7])
+    } else if normalized == internet_value
+        || (mode == 3
+            && value[0] != b'/'
+            && *source_out == 3
+            && blank(&normalized[7..])
+            && source_holder
+                .as_ref()
+                .is_some_and(|h| normalized[..7] == h.repeater_text(T::Gateway)[..7]))
     {
         8
     } else if normalized == cq_value {
@@ -156,6 +155,10 @@ fn copy_calls(h: &mut DecodedRecord, ur: &[u8; 8], r1: &[u8; 8], r2: &[u8; 8]) {
 }
 
 /// BC08C's scalar-first consumer. It never calls a saver or creates a cache.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Source, UR and repeater requests remain separate scalar inputs at the partial-write boundary."
+)]
 pub fn apply_requests(
     s: &Sources<'_>,
     target: &mut DecodedRecord,
@@ -307,6 +310,10 @@ pub fn apply_requests(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Independent dialog controls feed classification before the shared scalar-first consumer."
+)]
 fn apply_text(
     s: &Sources<'_>,
     h: &mut DecodedRecord,
@@ -326,13 +333,12 @@ fn apply_text(
     let mut normalized = c_normalized(value, reads)?;
     let b = if blank(&normalized) {
         2500
-    } else if mode == 3 && normalized == padded::<16>(internet(s.language)) {
-        2503
     } else if mode == 3
-        && flag != 0
-        && blank(&normalized[7..])
-        && a < 2500
-        && normalized[..7] == repeater(s, a)?.repeater_text(T::Gateway)[..7]
+        && (normalized == padded::<16>(internet())
+            || (flag != 0
+                && blank(&normalized[7..])
+                && a < 2500
+                && normalized[..7] == repeater(s, a)?.repeater_text(T::Gateway)[..7]))
     {
         2503
     } else if normalized == padded::<16>(b"CQCQCQ") {
@@ -387,7 +393,7 @@ fn ur_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Error> {
                 rpt[7] == b'G' && rpt[..7] == call[..7]
             })
     {
-        let token = internet(s.language);
+        let token = internet();
         h.as_mut_bytes()[0x90..0xa0].fill(b' ');
         h.as_mut_bytes()[0x90..0x90 + token.len()].copy_from_slice(token);
     }
@@ -427,6 +433,9 @@ fn rpt_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Error> {
 }
 
 /// BE120 -> BD33C -> BC7F0, including metadata that survives outer Cancel.
+/// Route captions occupy decoded-only fields, not raw channel name/callsign
+/// windows. Their independent wording does not change the twelve-byte header,
+/// source ordinals, scalar-first apply order or the outer Cancel save boundary.
 pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Error> {
     ur_metadata(s, h)?;
     rpt_metadata(s, h)?;
@@ -478,11 +487,11 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
         u32,
     ) = if cq {
         if direct {
-            (1, b"Direct     ", true, false, false, 1)
+            (1, b"Local route", true, false, false, 1)
         } else if same {
             (
                 if pair { 2 } else { 7 },
-                if pair { b"Single     " } else { b"Single?    " },
+                if pair { b"One relay  " } else { b"One relay? " },
                 true,
                 true,
                 false,
@@ -491,7 +500,7 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
         } else if !gateway {
             (
                 if pair { 3 } else { 8 },
-                if pair { b"Asist Link " } else { b"Asist Link?" },
+                if pair { b"Relay link " } else { b"Relay link?" },
                 true,
                 true,
                 false,
@@ -502,11 +511,11 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
         }
     } else if !slash {
         if direct {
-            (1, b"Direct     ", true, false, false, 1)
+            (1, b"Local route", true, false, false, 1)
         } else if same {
             (
                 if pair { 2 } else { 7 },
-                if pair { b"Single     " } else { b"Single?    " },
+                if pair { b"One relay  " } else { b"One relay? " },
                 true,
                 true,
                 true,
@@ -519,7 +528,7 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
         } else if !gateway {
             (
                 if pair { 3 } else { 8 },
-                if pair { b"Asist Link " } else { b"Asist Link?" },
+                if pair { b"Relay link " } else { b"Relay link?" },
                 true,
                 true,
                 true,
@@ -528,7 +537,7 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
         } else {
             (
                 if pair { 4 } else { 9 },
-                if pair { b"Gateway    " } else { b"Gateway?   " },
+                if pair { b"IP routing " } else { b"IP routing?" },
                 true,
                 true,
                 false,
@@ -540,7 +549,7 @@ pub fn prepare_metadata(s: &Sources<'_>, h: &mut DecodedRecord) -> Result<(), Er
     } else {
         (
             if pair { 4 } else { 9 },
-            if pair { b"Gateway    " } else { b"Gateway?   " },
+            if pair { b"IP routing " } else { b"IP routing?" },
             true,
             true,
             false,
@@ -764,14 +773,14 @@ impl Dialog {
             return self.designation_caption(s, reads);
         }
         if route == 1 {
-            self.candidates.push(rpt_token(s.language, true).to_vec());
+            self.candidates.push(rpt_token(true).to_vec());
             self.selected = 0;
             self.end_marker = 0;
         } else {
             if self.repeater_flag == 0 {
                 self.repeater_flag = 3;
             }
-            self.candidates.push(rpt_token(s.language, false).to_vec());
+            self.candidates.push(rpt_token(false).to_vec());
             self.first_marker = Some(0);
             let mut source = lookup_repeater_name(s, &self.source, self.mode)?;
             if source >= 2500 {
@@ -801,7 +810,7 @@ impl Dialog {
             }
             if route == 3 {
                 self.end_marker = self.candidates.len() as i32;
-                self.candidates.push(rpt_token(s.language, true).to_vec());
+                self.candidates.push(rpt_token(true).to_vec());
                 if self.repeater_flag == 3 {
                     self.selected = self.end_marker;
                 }
@@ -913,7 +922,7 @@ impl Dialog {
                     return Ok(());
                 }
                 let old_mode = self.mode;
-                if let Some(value) = list_value::<16>(&model, selection, reads, s.language)? {
+                if let Some(value) = list_value::<16>(&model, selection, reads)? {
                     if source {
                         self.source = value;
                         self.mode = if (3..54).contains(&model.tag) {
