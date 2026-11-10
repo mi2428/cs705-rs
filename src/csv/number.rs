@@ -128,6 +128,34 @@ pub fn coordinate(source: &[u8], latitude: bool, point: u8) -> [u8; 4] {
     ]
 }
 
+fn native_substring(source: &[u8], start: usize, len: usize) -> &[u8] {
+    source
+        .get(start..source.len().min(start + len))
+        .unwrap_or_default()
+}
+fn native_integer(text: &[u8]) -> Result<i32, Error> {
+    match int32(text) {
+        Ok(n) => Ok(n),
+        Err(Error::Conversion(_)) => Ok(0),
+        Err(e) => Err(e),
+    }
+}
+fn native_seconds(seconds: &[u8]) -> Result<u32, Error> {
+    let first = *seconds
+        .first()
+        .ok_or(Error::Invalid("coordinate seconds logical index1"))?;
+    let tail = *seconds.get(1).unwrap_or(&0);
+    let n = first
+        .wrapping_sub(b'0')
+        .wrapping_mul(10)
+        .wrapping_add(tail.wrapping_sub(b'0'));
+    Ok(if first == 0 {
+        0
+    } else {
+        (1000 * u32::from(n) / 60) % 1000
+    })
+}
+
 /// Native9E714 phase2, NOT B8A18/B8D48 CSV decimal-coordinate grammar.
 /// Fixed byte Substrings use188948/StrToIntDef0; separators are not validated.
 /// Degree is stored BEFORE reading live current396B4, so source/read failures
@@ -137,50 +165,362 @@ pub fn coordinate_native_phase2(
     source: &[u8],
     current: &[u8],
 ) -> Result<(), Error> {
-    let substring = |start: usize, len: usize| {
-        source
-            .get(start..source.len().min(start + len))
-            .unwrap_or_default()
-    };
-    let integer = |text: &[u8]| match int32(text) {
-        Ok(n) => Ok(n),
-        Err(Error::Conversion(_)) => Ok(0),
-        Err(e) => Err(e),
-    };
-    destination[0] = integer(substring(0, 3))? as u8;
+    let substring = |start, len| native_substring(source, start, len);
+    destination[0] = native_integer(substring(0, 3))? as u8;
     let unit = *current.get(0x396b4).ok_or(Error::SourceUnavailable(
         "native coordinate current DMSType byte unavailable",
     ))?;
     let (fraction, direction) = match unit {
         1 => {
-            let minutes = integer(substring(4, 2))? as u16;
-            let seconds = substring(7, 2);
-            let first = *seconds
-                .first()
-                .ok_or(Error::Invalid("coordinate seconds logical index1"))?;
-            let tail = *seconds.get(1).unwrap_or(&0);
-            let n = first
-                .wrapping_sub(b'0')
-                .wrapping_mul(10)
-                .wrapping_add(tail.wrapping_sub(b'0'));
-            let f = if first == 0 {
-                0
-            } else {
-                (1000 * u32::from(n) / 60) % 1000
-            };
+            let minutes = native_integer(substring(4, 2))? as u16;
+            let f = native_seconds(substring(7, 2))?;
             ((1000 * u32::from(minutes) + f) as u16, 10)
         }
         0 => {
             let mut digits = substring(4, 2).to_vec();
             digits.extend_from_slice(substring(7, 2));
             digits.push(b'0');
-            (integer(&digits)? as u16, 10)
+            (native_integer(&digits)? as u16, 10)
         }
-        _ => ((integer(substring(4, 4))? as u16).wrapping_mul(6), 9),
+        _ => ((native_integer(substring(4, 4))? as u16).wrapping_mul(6), 9),
     };
     destination[1..3].copy_from_slice(&fraction.to_be_bytes());
     destination[3] = *source.get(direction).unwrap_or(&0);
     Ok(())
+}
+
+/// A0D5C reads live U; the dialog separately captures its mode at construction.
+pub fn area_native_mode(current: &[u8]) -> Result<u8, Error> {
+    Ok(match current.get(0x396b4) {
+        Some(1) => 11,
+        Some(2) => 13,
+        Some(_) => 12,
+        None => {
+            return Err(Error::SourceUnavailable(
+                "native area current DMSType byte unavailable",
+            ));
+        }
+    })
+}
+
+/// Native9E760 for the actual producer's modes11..13. Unlike9E714, all
+/// calculations (including the seconds index check) precede EVERY raw store.
+pub fn area_native_phase2(destination: &mut [u8; 4], source: &[u8], mode: u8) -> Result<(), Error> {
+    let substring = |start, len| native_substring(source, start, len);
+    let fraction = match mode {
+        11 => {
+            let minutes = native_integer(substring(0, 2))? as u16;
+            (1000 * u32::from(minutes) + native_seconds(substring(3, 2))?) as u16
+        }
+        12 => {
+            let mut digits = substring(0, 2).to_vec();
+            digits.extend_from_slice(substring(3, 2));
+            digits.push(b'0');
+            native_integer(&digits)? as u16
+        }
+        13 => (native_integer(substring(2, 4))? as u16).wrapping_mul(6),
+        _ => return Err(Error::Invalid("native area mode outside11..13")),
+    };
+    destination[0] = 0;
+    destination[1..3].copy_from_slice(&fraction.to_be_bytes());
+    destination[3] = 0;
+    Ok(())
+}
+
+fn native_dms(q: u32) -> (u32, u32) {
+    let mut minute = q / 1000;
+    let mut second = (q % 1000 * 60 + 500) / 1000;
+    if second == 60 {
+        minute += 1;
+        second = 0;
+        if minute > 59 {
+            minute = 59;
+            second = 59;
+        }
+    }
+    (minute, second)
+}
+fn native_decimal_fraction(q: u32) -> u32 {
+    ((q * 10 / 6 + 5) / 10).min(9999)
+}
+
+/// The nine short coordinate/area mask literals decoded by3AA9C.
+/// These are code literals, not a supplied completed cell or resource packet.
+const COORDINATE_MASKS: [&[u8]; 9] = [
+    b"! 99\xb099'99\">l;1;_",
+    b"!999\xb099'99\">l;1;_",
+    b"! 99\xb099.99'>l;1;_",
+    b"!999\xb099.99'>l;1;_",
+    b"! 99.9999\xb0>l;1;_",
+    b"!999.9999\xb0>l;1;_",
+    b"!99'99\";1;_",
+    b"!99.99';1;_",
+    b"!\\0.9999\xb0;1;_",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateEvent {
+    Accept,
+    Cancel,
+    EscapeKeyPress,
+    Deactivate,
+    Close,
+}
+
+/// cuciFTextGps's bounded ASCII keyboard/control producer for modes5..13.
+/// Captured mode/seed remain distinct from phase2's later live current/U read.
+/// Paste/IME is not silently treated as the normal OnKeyPress byte path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoordinateDialog {
+    pub mode: u8,
+    pub mask: &'static [u8],
+    pub seed: Vec<u8>,
+    pub control: Vec<u8>,
+    pub phase2: Option<Vec<u8>>,
+    pub cancel: bool,
+    pub done: bool,
+    pub release_requested: bool,
+    slots: Vec<u8>,
+    caret: usize,
+}
+
+impl CoordinateDialog {
+    /// A02AC edit-flag1 uses the fixed B0 literal even when48B28's degree
+    /// glyph selector differs. No host ACP or GUI language is guessed here.
+    pub fn new(
+        raw: [u8; 4],
+        longitude: bool,
+        current: &[u8],
+        first: Option<u8>,
+    ) -> Result<Self, Error> {
+        let unit = *current.get(0x396b4).ok_or(Error::SourceUnavailable(
+            "native coordinate current DMSType byte unavailable",
+        ))?;
+        let mode = match unit {
+            1 => 5,
+            2 => 9,
+            _ => 7,
+        } + u8::from(longitude);
+        let degree = if longitude {
+            format!("{:03}", raw[0])
+        } else {
+            format!(" {:02}", raw[0])
+        };
+        let q = u32::from(u16::from_be_bytes([raw[1], raw[2]]));
+        let mut seed = degree.into_bytes();
+        match unit {
+            0 => {
+                seed.push(0xb0);
+                seed.extend_from_slice(format!("{:02}.{:02}'", q / 1000, q % 1000 / 10).as_bytes());
+            }
+            1 => {
+                let (minute, second) = native_dms(q);
+                seed.push(0xb0);
+                seed.extend_from_slice(format!("{minute:02}'{second:02}\"").as_bytes());
+            }
+            2 => {
+                seed.push(b'.');
+                seed.extend_from_slice(format!("{:04}", native_decimal_fraction(q)).as_bytes());
+                seed.push(0xb0);
+            }
+            _ => {
+                seed.clear();
+            }
+        }
+        if unit <= 2 {
+            seed.push(raw[3]);
+        }
+        Ok(Self::from_seed(mode, seed, first))
+    }
+    /// A0D5C/9F70C edit seed, including mode13's display-only scratch minimum.
+    pub fn area(raw: [u8; 4], current: &[u8], first: Option<u8>) -> Result<Self, Error> {
+        let mode = area_native_mode(current)?;
+        let q = u32::from(u16::from_be_bytes([raw[1], raw[2]]));
+        let seed = match mode {
+            11 => {
+                let (minute, second) = native_dms(q);
+                format!("{minute:02}'{second:02}\"").into_bytes()
+            }
+            12 => format!("{:02}.{:02}'", q / 1000, q % 1000 / 10).into_bytes(),
+            13 => {
+                let mut text = format!("0.{:04}", native_decimal_fraction(q).max(14)).into_bytes();
+                text.push(0xb0);
+                text
+            }
+            _ => unreachable!(),
+        };
+        Ok(Self::from_seed(mode, seed, first))
+    }
+    fn first_slot(mode: u8) -> usize {
+        match mode {
+            5 | 7 | 9 => 1,
+            13 => 2,
+            _ => 0,
+        }
+    }
+    fn from_seed(mode: u8, seed: Vec<u8>, first: Option<u8>) -> Self {
+        let mask = COORDINATE_MASKS[usize::from(mode - 5)];
+        let slots: Vec<_> = mask[1..]
+            .iter()
+            .copied()
+            .take_while(|&b| b != b';')
+            .filter(|&b| !matches!(b, b'>' | b'\\'))
+            .collect();
+        let control = slots
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| {
+                if matches!(b, b'9' | b'l') {
+                    *seed.get(i).unwrap_or(&b'_')
+                } else {
+                    b
+                }
+            })
+            .collect();
+        let mut dialog = Self {
+            mode,
+            mask,
+            seed,
+            control,
+            phase2: None,
+            cancel: false,
+            done: false,
+            release_requested: false,
+            slots,
+            caret: Self::first_slot(mode),
+        };
+        if let Some(b) = first.filter(u8::is_ascii_digit) {
+            dialog.key(b);
+        }
+        dialog
+    }
+    /// Select-all replacement followed by the actual3D558 ASCII key filter and
+    /// the decoded9/uppercase-l mask slots. Literal keys never become raw digits.
+    pub fn replace(&mut self, text: &[u8]) {
+        for (byte, &slot) in self.control.iter_mut().zip(&self.slots) {
+            if matches!(slot, b'9' | b'l') {
+                *byte = b'_';
+            }
+        }
+        self.caret = Self::first_slot(self.mode);
+        for &byte in text {
+            self.key(byte);
+        }
+    }
+    fn key(&mut self, byte: u8) {
+        let byte = byte.to_ascii_uppercase();
+        let allowed_direction = match self.mode {
+            5 | 7 | 9 => b"NS".contains(&byte),
+            6 | 8 | 10 => b"EW".contains(&byte),
+            _ => false,
+        };
+        if !byte.is_ascii_digit() && !allowed_direction {
+            return;
+        }
+        while self.caret < self.slots.len() && !matches!(self.slots[self.caret], b'9' | b'l') {
+            self.caret += 1;
+        }
+        let Some(&slot) = self.slots.get(self.caret) else {
+            return;
+        };
+        if (slot == b'9' && byte.is_ascii_digit()) || (slot == b'l' && allowed_direction) {
+            self.control[self.caret] = byte;
+            self.caret += 1;
+        }
+    }
+    /// TMaskEdit's saved literals and underscore-to-space getter, then3C3E4.
+    pub fn candidate(&self) -> Vec<u8> {
+        self.control
+            .iter()
+            .map(|&b| if matches!(b, b'_' | b' ') { b'0' } else { b })
+            .collect()
+    }
+    /// 3C544/3CA60 uses concatenated fixed-position integers, no lower bound.
+    pub fn valid(&self) -> bool {
+        let text = self.candidate();
+        let sub = |at, len| native_substring(&text, at, len);
+        if self.mode >= 11 {
+            let (head, tail) = if self.mode == 13 {
+                (sub(0, 1), sub(2, 4))
+            } else {
+                (sub(0, 2), sub(3, 2))
+            };
+            let mut numeric = head.to_vec();
+            numeric.extend_from_slice(tail);
+            let (low, high) = match self.mode {
+                11 => (5, 5959),
+                12 => (8, 5999),
+                13 => (14, 9999),
+                _ => return false,
+            };
+            return (low..=high).contains(&int32(&numeric).unwrap_or(high + 1))
+                && (self.mode != 11 || int32(sub(3, 2)).unwrap_or(60) < 60);
+        }
+        let max = if matches!(self.mode, 5 | 7 | 9) {
+            900000
+        } else {
+            1800000
+        };
+        let direction = if self.mode <= 8 { 10 } else { 9 };
+        let allowed = if matches!(self.mode, 5 | 7 | 9) {
+            b"NS"
+        } else {
+            b"EW"
+        };
+        if !text.get(direction).is_some_and(|b| allowed.contains(b)) {
+            return false;
+        }
+        let mut numeric = sub(0, 3).to_vec();
+        numeric.extend_from_slice(sub(4, if self.mode <= 8 { 2 } else { 4 }));
+        if self.mode <= 8 {
+            numeric.extend_from_slice(sub(7, 2));
+        }
+        if int32(&numeric).unwrap_or(max + 1) > max {
+            return false;
+        }
+        if self.mode <= 8 {
+            int32(sub(4, 2)).unwrap_or(60) < 60
+                && int32(sub(7, 2)).unwrap_or(100) < if self.mode <= 6 { 60 } else { 100 }
+        } else {
+            int32(sub(4, 4)).unwrap_or(10000) < 10000
+        }
+    }
+    /// A disabled normal button does not Click. OnDeactivate still calls3B8C8,
+    /// whose false-validator branch dispatches the ORIGINAL seed, not a default.
+    /// Caller must run phase2/save, then call dispatched() only on normal return.
+    pub fn event(&mut self, event: CoordinateEvent) -> Option<Vec<u8>> {
+        match event {
+            CoordinateEvent::Cancel => {
+                self.cancel = true;
+                self.release_requested = true;
+                return None;
+            }
+            CoordinateEvent::EscapeKeyPress | CoordinateEvent::Close => {
+                self.release_requested = true;
+                return None;
+            }
+            CoordinateEvent::Accept if !self.valid() => return None,
+            CoordinateEvent::Deactivate if self.cancel || self.done => {
+                self.release_requested = true;
+                return None;
+            }
+            _ => {}
+        }
+        if self.done {
+            return None;
+        }
+        let text = if self.valid() {
+            self.candidate()
+        } else {
+            self.seed.clone()
+        };
+        self.phase2 = Some(text.clone());
+        Some(text)
+    }
+    pub fn dispatched(&mut self) {
+        self.done = true;
+        self.release_requested = true;
+    }
 }
 
 /// Fixed six-place finite coordinate output; only the degree FF byte is empty.
@@ -339,6 +679,258 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_area_literals_seconds_wrap_and_pre_store_errors() {
+        for (mode, text, expected) in [
+            (11, b"12x34".as_slice(), [0, 0x31, 0x16, 0]),
+            (12, b"12x34", [0, 0x30, 0x34, 0]),
+            (13, b"0x1234", [0, 0x1c, 0xec, 0]),
+            (11, b"12x59", [0, 0x32, 0xb7, 0]),
+            (11, b"12x60", [0, 0x2e, 0xe0, 0]),
+            (11, b"12x3", [0, 0x32, 0xa6, 0]),
+            (11, b"12x/9", [0, 0x2f, 0xda, 0]),
+            (11, b"12x\0a", [0, 0x2e, 0xe0, 0]),
+            (11, b"-1x00", [0, 0xfc, 0x18, 0]),
+            (12, b"xxxyy", [0; 4]),
+            (12, b"", [0; 4]),
+            (13, b"", [0; 4]),
+            (13, b"0x0001", [0, 0, 6, 0]),
+            (13, b"0x$FFF", [0, 0x5f, 0xfa, 0]),
+            (13, b"\0x1234", [0, 0x1c, 0xec, 0]),
+        ] {
+            let mut raw = [9, 8, 7, 6];
+            area_native_phase2(&mut raw, text, mode).unwrap();
+            assert_eq!(raw, expected, "mode{mode}: {text:?}");
+        }
+        for text in [b"".as_slice(), b"12", b"12x"] {
+            let mut temporary = [9, 8, 7, 6];
+            let mut word = 0xabcd;
+            let result = (|| {
+                area_native_phase2(&mut temporary, text, 11)?;
+                word = u16::from_be_bytes([temporary[1], temporary[2]]);
+                Ok::<_, Error>(())
+            })();
+            assert!(matches!(result, Err(Error::Invalid(_))));
+            assert_eq!(temporary, [9, 8, 7, 6]);
+            assert_eq!(word, 0xabcd);
+        }
+        let mut raw = [9, 8, 7, 6];
+        assert!(area_native_phase2(&mut raw, b"0x1234", 14).is_err());
+        assert_eq!(raw, [9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn native_area_modes_masks_validator_and_display_not_input_minimum() {
+        let mut current = vec![0; 0x396b5];
+        for (unit, mode, keys, candidate, expected) in [
+            (
+                1,
+                11,
+                b"12 34nE".as_slice(),
+                b"12'34\"".as_slice(),
+                [0, 0x31, 0x16, 0],
+            ),
+            (0, 12, b"12.34wS", b"12.34'", [0, 0x30, 0x34, 0]),
+            (2, 13, b"1234nW", b"0.1234\xb0", [0, 0x1c, 0xec, 0]),
+            (255, 12, b"12.34", b"12.34'", [0, 0x30, 0x34, 0]),
+        ] {
+            current[0x396b4] = unit;
+            assert_eq!(area_native_mode(&current).unwrap(), mode);
+            let mut d = CoordinateDialog::area([9, 0x30, 0x34, 8], &current, None).unwrap();
+            assert_eq!(d.mode, mode);
+            let (mask, seed) = match mode {
+                11 => (b"!99'99\";1;_".as_slice(), b"12'20\"".as_slice()),
+                12 => (b"!99.99';1;_".as_slice(), b"12.34'".as_slice()),
+                13 => (b"!\\0.9999\xb0;1;_".as_slice(), b"0.2057\xb0".as_slice()),
+                _ => unreachable!(),
+            };
+            assert_eq!(d.mask, mask);
+            assert_eq!(d.seed, seed);
+            d.replace(keys);
+            assert_eq!(d.candidate(), candidate);
+            assert!(d.valid());
+            let text = d.event(CoordinateEvent::Accept).unwrap();
+            let mut raw = [9; 4];
+            area_native_phase2(&mut raw, &text, mode).unwrap();
+            assert_eq!(raw, expected);
+            d.dispatched();
+            assert!(d.done && d.release_requested);
+        }
+        for (unit, cases) in [
+            (
+                1,
+                [
+                    (b"0004".as_slice(), false),
+                    (b"0005", true),
+                    (b"5959", true),
+                    (b"5960", false),
+                ],
+            ),
+            (
+                0,
+                [
+                    (b"0007".as_slice(), false),
+                    (b"0008", true),
+                    (b"5999", true),
+                    (b"6000", false),
+                ],
+            ),
+            (
+                2,
+                [
+                    (b"0013".as_slice(), false),
+                    (b"0014", true),
+                    (b"9999", true),
+                    (b"", false),
+                ],
+            ),
+        ] {
+            current[0x396b4] = unit;
+            let mut d = CoordinateDialog::area([0; 4], &current, None).unwrap();
+            for (keys, valid) in cases {
+                d.replace(keys);
+                assert_eq!(d.valid(), valid, "unit{unit}: {keys:?}");
+            }
+        }
+        current[0x396b4] = 2;
+        let raw = [0; 4];
+        let d = CoordinateDialog::area(raw, &current, Some(b'2')).unwrap();
+        assert_eq!(d.seed, b"0.0014\xb0");
+        assert_eq!(d.control, b"0.2014\xb0");
+        assert_eq!(raw, [0; 4]);
+        let mut parsed = [9; 4];
+        area_native_phase2(&mut parsed, b"0.0000\xb0", 13).unwrap();
+        assert_eq!(parsed, [0; 4]);
+        current[0x396b4] = 255;
+        assert_eq!(area_native_mode(&current).unwrap(), 12);
+        assert_eq!(d.mode, 13);
+        assert!(area_native_mode(&current[..0x396b4]).is_err());
+        assert!(CoordinateDialog::area(raw, &current[..0x396b4], None).is_err());
+    }
+
+    #[test]
+    fn native_area_cancel_same_value_deactivate_and_late_error() {
+        let mut current = vec![0; 0x396b5];
+        current[0x396b4] = 1;
+        let raw = [0, 0x2e, 0xe0, 0];
+        let mut cancelled = CoordinateDialog::area(raw, &current, None).unwrap();
+        cancelled.replace(b"1234");
+        assert!(cancelled.event(CoordinateEvent::Cancel).is_none());
+        assert!(cancelled.event(CoordinateEvent::Deactivate).is_none());
+        assert!(cancelled.cancel && cancelled.phase2.is_none() && !cancelled.done);
+        let mut same = CoordinateDialog::area(raw, &current, None).unwrap();
+        assert_eq!(same.seed, b"12'00\"");
+        let text = same.event(CoordinateEvent::Accept).unwrap();
+        let mut saved = raw;
+        area_native_phase2(&mut saved, &text, 11).unwrap();
+        assert_eq!(saved, raw);
+        assert_eq!(u16::from_be_bytes([saved[1], saved[2]]), 12_000);
+        same.dispatched();
+        assert!(same.done);
+        assert!(same.event(CoordinateEvent::Deactivate).is_none());
+        let mut d = CoordinateDialog::area(raw, &current, None).unwrap();
+        d.replace(b"0060");
+        assert!(!d.valid() && d.event(CoordinateEvent::Accept).is_none());
+        assert_eq!(d.event(CoordinateEvent::Deactivate), Some(d.seed.clone()));
+        d.replace(b"1234");
+        assert!(d.event(CoordinateEvent::EscapeKeyPress).is_none());
+        assert!(!d.cancel);
+        assert!(d.event(CoordinateEvent::Deactivate).is_some());
+        let mut late = CoordinateDialog::area(raw, &current, None).unwrap();
+        late.replace(b"1234");
+        let text = late.event(CoordinateEvent::Accept).unwrap();
+        let mut temporary = [9; 4];
+        let mut word = 0xabcd;
+        let result = (|| {
+            let wrapper_return = (|| {
+                area_native_phase2(&mut temporary, &text, area_native_mode(&current)?)?;
+                Err::<(), _>(Error::Operation("later display failed"))
+            })();
+            wrapper_return?;
+            word = u16::from_be_bytes([temporary[1], temporary[2]]);
+            Ok::<_, Error>(())
+        })();
+        assert!(result.is_err());
+        assert_eq!(temporary, [0, 0x31, 0x16, 0]);
+        assert_eq!(word, 0xabcd);
+        assert_eq!(late.phase2, Some(text));
+        assert!(!late.done && !late.release_requested);
+        area_native_phase2(&mut temporary, &late.seed, 11).unwrap();
+        word = u16::from_be_bytes([temporary[1], temporary[2]]);
+        assert_eq!(word, 12_000);
+    }
+
+    #[test]
+    fn native_coordinate_mask_validator_and_finite_modal_producer() {
+        let mut current = vec![0; 0x396b5];
+        for (unit, source, expected) in [
+            (0, b"35 12.34 s".as_slice(), [35, 0x30, 0x34, b'S']),
+            (0, b"-35+12.34s", [35, 0x30, 0x34, b'S']),
+            (1, b"35 12 34 s", [35, 0x31, 0x16, b'S']),
+            (2, b"35.1234s", [35, 0x1c, 0xec, b'S']),
+        ] {
+            current[0x396b4] = unit;
+            let mut d =
+                CoordinateDialog::new([35, 0x30, 0x34, b'N'], false, &current, None).unwrap();
+            assert_eq!(d.mask, COORDINATE_MASKS[usize::from(d.mode - 5)]);
+            d.replace(source);
+            assert!(d.valid());
+            let text = d.event(CoordinateEvent::Accept).unwrap();
+            assert!(!d.done && !d.release_requested);
+            let mut raw = [9; 4];
+            coordinate_native_phase2(&mut raw, &text, &current).unwrap();
+            assert_eq!(raw, expected);
+            d.dispatched();
+            assert!(d.done && d.release_requested);
+            assert!(d.event(CoordinateEvent::Accept).is_none());
+        }
+        current[0x396b4] = 1;
+        let d = CoordinateDialog::new([0, 0, 0, b'N'], false, &current, Some(b'1')).unwrap();
+        assert_eq!(&d.control[..3], b" 10");
+        assert!(d.phase2.is_none());
+        let mut d = CoordinateDialog::new([35, 0x30, 0x34, b'N'], false, &current, None).unwrap();
+        assert_eq!(d.seed, b" 35\xb012'20\"N");
+        for source in [b"900001N".as_slice(), b"351260N", b"351234W", b"", b"-++Q"] {
+            d.replace(source);
+            assert!(!d.valid());
+            assert!(d.event(CoordinateEvent::Accept).is_none());
+        }
+        assert_eq!(
+            d.event(CoordinateEvent::Deactivate),
+            Some(b" 35\xb012'20\"N".to_vec())
+        );
+        assert!(!d.done);
+        d.dispatched();
+        let mut d = CoordinateDialog::new([255, 255, 255, 0], true, &current, None).unwrap();
+        d.replace(b"1800000w");
+        assert!(d.valid());
+        d.event(CoordinateEvent::Cancel);
+        assert!(d.cancel && d.release_requested);
+        assert!(d.event(CoordinateEvent::Deactivate).is_none());
+        let mut d = CoordinateDialog::new([0, 0, 0, b'E'], true, &current, None).unwrap();
+        d.replace(b"1391234e");
+        d.event(CoordinateEvent::EscapeKeyPress);
+        assert!(!d.cancel);
+        assert!(d.event(CoordinateEvent::Deactivate).is_some());
+        let mut closed = CoordinateDialog::new([0, 0, 0, b'N'], false, &current, None).unwrap();
+        assert!(closed.event(CoordinateEvent::Close).is_none());
+        assert!(!closed.cancel && closed.release_requested);
+        // Mode and seed are captured at dialog open, but phase2 re-reads live U.
+        current[0x396b4] = 0;
+        let mut raw = [9; 4];
+        coordinate_native_phase2(&mut raw, d.phase2.as_ref().unwrap(), &current).unwrap();
+        assert_eq!(raw, [139, 0x30, 0x34, b'E']);
+        current[0x396b4] = 255;
+        let mut d = CoordinateDialog::new([35, 0, 0, b'N'], false, &current, None).unwrap();
+        assert_eq!(d.mode, 7);
+        assert!(d.seed.is_empty());
+        d.replace(b"351234N");
+        let text = d.event(CoordinateEvent::Accept).unwrap();
+        coordinate_native_phase2(&mut raw, &text, &current).unwrap();
+        assert_eq!(raw, [35, 0, 0, b'\'']);
+        assert!(CoordinateDialog::new([0; 4], false, &current[..0x396b4], None).is_err());
+    }
+
     #[test]
     fn native_phase2_literals_units_short_tail_nul_and_ordered_errors() {
         let mut current = vec![0; 0x396b5];
