@@ -338,6 +338,90 @@ pub fn number_fields() -> Vec<NumberField> {
         .collect()
 }
 
+/// The native byte-level profile, independent of global or Preset image sources.
+pub fn paint_level(raw: u8) -> Vec<u8> {
+    let mut text = crate::csv::number::field::scalar(i32::from(raw), 0, 0, 1, false, false)
+        .expect("fixed native level profile");
+    text.extend_from_slice(&number_suffix(0x2ef, i64::from(raw)));
+    text
+}
+
+/// A4E2C's one-byte uppercase hex display and the caller's literal suffix.
+pub fn paint_hex_byte(raw: u8) -> Vec<u8> {
+    format!("{raw:02X}h").into_bytes()
+}
+
+/// Native readonly paint for the existing numeric setting profiles.
+/// Storage width/sign/bias come from the existing Setting codec, without clamp.
+/// GI_SecUnit is a resource caption; only scope zero reads SYSTEM LANGID.
+pub fn paint_number_at(
+    image: &Icf<'_>,
+    key: u16,
+    index: usize,
+    seconds_unit: Option<&[u8]>,
+    system_langid: Option<u16>,
+) -> Result<Vec<u8>, Error> {
+    let field = number_settings()
+        .into_iter()
+        .find(|field| field.key == key)
+        .ok_or_else(|| invalid("native numeric paint descriptor unavailable"))?;
+    if !number_index_valid(key, index, field.count) {
+        return Err(invalid("numeric paint index outside native layout"));
+    }
+    let Value::Number(mut value) = field.read(image, index)?;
+    if key == 0x2ca {
+        value = 2 * value + 2;
+    }
+    if key == 0x307 {
+        return Ok(paint_hex_byte(value as u8));
+    }
+    if matches!(key, 0x2ef | 0x2f2 | 0x2f6) {
+        return Ok(paint_level(value as u8));
+    }
+    let scale = number_scale(key);
+    let plus = matches!(key, 0x240 | 0x362 | 0x2e6 | 0x346..=0x349);
+    let mut text = crate::csv::number::field::scalar(
+        value as i32,
+        scale,
+        scale,
+        1,
+        field.domain.min < 0,
+        plus,
+    )
+    .map_err(|_| invalid("native scaled setting formatter failed"))?;
+    if key == 0x2c5 {
+        let padding = 3usize.saturating_sub(text.len());
+        text.splice(0..0, std::iter::repeat_n(b'0', padding));
+    }
+    if key == 0x362 && value == 0 {
+        let langid = system_langid
+            .ok_or_else(|| invalid("scope zero paint requires actual SYSTEM LANGID"))?;
+        let glyph: &[u8] = if langid & 0x3ff == 0x11 {
+            b"\x81\x7d"
+        } else {
+            b"\xb1"
+        };
+        text.splice(0..0, glyph.iter().copied());
+    }
+    let unit = match key {
+        0x240 => b"MHz".as_slice(),
+        0x25e | 0x278 | 0x2c8 => seconds_unit
+            .ok_or_else(|| invalid("seconds paint requires actual GI_SecUnit caption"))?
+            .split(|&byte| byte == 0)
+            .next()
+            .unwrap(),
+        0x2cf => b"dot",
+        0x362 => b"dB",
+        0x2ca => b"ms",
+        0x2c2 => b"Hz",
+        0x346..=0x349 => b" ",
+        _ => b"",
+    };
+    text.extend_from_slice(unit);
+    text.extend_from_slice(&number_suffix(key, value));
+    Ok(text)
+}
+
 /// Edit a stored integer using its original typed numeric path.
 /// `crt_point` is the actual CRT decimal byte; filtered source still only keeps
 /// ASCII dot/digits/minus, as B0E00 does. This finite binary64 normal-CW profile
@@ -556,8 +640,28 @@ fn number_suffix(key: u16, old: i64) -> Vec<u8> {
             let q = ((old * 10000 / 511 + 5) / 10) % 10000;
             format!(" ({}.{})", q / 10, q % 10).into_bytes()
         }
+        0x29a => format!(" ({})", (old + 128) * 200 / 255 - 100).into_bytes(),
         _ => Vec::new(),
     }
+}
+
+/// Existing native UTC display with low-byte hours and projected-zero sign.
+/// 9DC08's raw7FFF display branch is independent of the optional input flag.
+pub fn utc_offset_text(minutes: i16) -> Vec<u8> {
+    if minutes == 0x7fff {
+        return b"--:--".to_vec();
+    }
+    let n = minutes.unsigned_abs();
+    let hour = (n / 60) as u8;
+    let minute = n % 60;
+    let sign = if hour == 0 && minute == 0 {
+        ""
+    } else if minutes < 0 {
+        "-"
+    } else {
+        "+"
+    };
+    format!("{sign}{hour}:{minute:02}").into_bytes()
 }
 
 /// 73035 -> 9D968 with optional-sentinel flag0. This is not decimal minutes
@@ -622,17 +726,7 @@ pub fn edit_utc_offset(image: &mut Icf<'_>, input: NumberInput<'_>) -> Result<Nu
     } else {
         old
     };
-    let n = display.unsigned_abs();
-    let hour = (n / 60) as u8;
-    let minute = n % 60;
-    let sign = if hour == 0 && minute == 0 {
-        ""
-    } else if display < 0 {
-        "-"
-    } else {
-        "+"
-    };
-    let suffix = format!("{sign}{hour}:{minute:02}").into_bytes();
+    let suffix = utc_offset_text(display as i16);
     Ok(NumberEffect {
         stored: accepted,
         accepted,
@@ -1521,14 +1615,37 @@ impl ConditionalField {
     /// Capture the actual resource branch. AutoRepeater JPN has codes0/2, not
     /// contiguous0/1/2; all three PE language resources share this exact schema.
     pub fn catalog(self, runtime: SelectorRuntime<'_>) -> Result<ConditionalCatalog, Error> {
-        let jp = runtime.system_langid & 0x3ff == 0x11;
-        let units = runtime.descriptor_8645fc == 1 || jp;
+        self.catalog_sources(
+            Some(runtime.descriptor_8645fc),
+            Some(runtime.system_langid),
+            Some(runtime.q),
+        )
+    }
+    /// Read only sources reached by this native selector's short-circuit branch.
+    pub fn catalog_sources(
+        self,
+        gui_language: Option<u32>,
+        system_langid: Option<u16>,
+        q: Option<&crate::icf::context::Context>,
+    ) -> Result<ConditionalCatalog, Error> {
+        let jp = || {
+            system_langid
+                .map(|langid| langid & 0x3ff == 0x11)
+                .ok_or_else(|| invalid("conditional selector requires actual SYSTEM LANGID"))
+        };
         let jpn = match self {
-            Self::Coordinates | Self::Temperature => units,
-            Self::ScopeSpan => jp,
+            Self::Coordinates | Self::Temperature => {
+                gui_language.ok_or_else(|| {
+                    invalid("conditional unit selector requires actual C00 language source")
+                })? == 1
+                    || jp()?
+            }
+            Self::ScopeSpan => jp()?,
             Self::AutoRepeater => {
-                let k = runtime.q.selector()?;
-                k == 0 || (k == 16 && jp)
+                let k = q
+                    .ok_or_else(|| invalid("auto repeater selector requires actual live Q"))?
+                    .selector()?;
+                k == 0 || (k == 16 && jp()?)
             }
         };
         let (selector, values) = match (self, jpn) {
@@ -2055,9 +2172,13 @@ pub enum FixedTextField {
     ApPassword,
     NetworkRadioName,
     Keyer,
+    User1Id,
+    User1Password,
+    User2Id,
+    User2Password,
 }
 impl FixedTextField {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::GatewayAddress,
         Self::GatewayCallsign,
         Self::NtpAddress,
@@ -2068,6 +2189,10 @@ impl FixedTextField {
         Self::ApPassword,
         Self::NetworkRadioName,
         Self::Keyer,
+        Self::User1Id,
+        Self::User1Password,
+        Self::User2Id,
+        Self::User2Password,
     ];
     pub fn feature_id(self) -> &'static str {
         match self {
@@ -2079,6 +2204,9 @@ impl FixedTextField {
             Self::NetworkName => "A2-H56202-03",
             Self::Ssid => "A2-H56202-10",
             Self::ApPassword => "A2-H56202-11",
+            Self::User1Id | Self::User1Password | Self::User2Id | Self::User2Password => {
+                "A2-H56202-18"
+            }
             Self::NetworkRadioName => "A2-H56202-19",
             Self::Keyer => "A2-H56064-01",
         }
@@ -2093,6 +2221,10 @@ impl FixedTextField {
             Self::NetworkName => 0x321,
             Self::Ssid => 0x31e,
             Self::ApPassword => 0x31f,
+            Self::User1Id => 0x328,
+            Self::User1Password => 0x329,
+            Self::User2Id => 0x32b,
+            Self::User2Password => 0x32c,
             Self::NetworkRadioName => 0x32e,
             Self::Keyer => 0x2c0,
         }
@@ -2101,7 +2233,12 @@ impl FixedTextField {
         match self {
             Self::GatewayAddress | Self::NtpAddress => 64,
             Self::GatewayCallsign | Self::PictureRecipient => 8,
-            Self::Comment | Self::NetworkRadioName => 16,
+            Self::Comment
+            | Self::NetworkRadioName
+            | Self::User1Id
+            | Self::User1Password
+            | Self::User2Id
+            | Self::User2Password => 16,
             Self::NetworkName => 15,
             Self::Ssid => 32,
             Self::ApPassword => 63,
@@ -2126,6 +2263,10 @@ impl FixedTextField {
             Self::NetworkName => 0x3936c,
             Self::Ssid => 0x39a07,
             Self::ApPassword => 0x39a27,
+            Self::User1Id => 0x39383,
+            Self::User1Password => 0x39393,
+            Self::User2Id => 0x393a4,
+            Self::User2Password => 0x393b4,
             Self::NetworkRadioName => 0x39551,
             Self::Keyer => 0x37158 + 70 * index,
         })
@@ -2137,7 +2278,11 @@ impl FixedTextField {
             Self::GatewayAddress | Self::NtpAddress => b"-.".as_slice(),
             Self::GatewayCallsign | Self::PictureRecipient => b"",
             Self::NetworkName => b"!#$%&\"`^+-.,;=()[]{}_~@",
-            Self::NetworkRadioName => b"!\"#$%&'()*+,-./:;<=>?@[]^_`{|}~",
+            Self::NetworkRadioName
+            | Self::User1Id
+            | Self::User1Password
+            | Self::User2Id
+            | Self::User2Password => b"!\"#$%&'()*+,-./:;<=>?@[]^_`{|}~",
             Self::Keyer => b"*,./?@^",
             _ => ALL,
         };
@@ -2147,7 +2292,15 @@ impl FixedTextField {
                 Self::GatewayCallsign | Self::PictureRecipient | Self::NetworkName | Self::Keyer
             ),
             keep_kana: matches!(self, Self::Ssid | Self::NetworkRadioName),
-            keep_spaces: !matches!(self, Self::GatewayAddress | Self::NtpAddress),
+            keep_spaces: !matches!(
+                self,
+                Self::GatewayAddress
+                    | Self::NtpAddress
+                    | Self::User1Id
+                    | Self::User1Password
+                    | Self::User2Id
+                    | Self::User2Password
+            ),
             punctuation_exceptions: punctuation,
             maximum: self.width(),
         }
@@ -2162,9 +2315,9 @@ pub struct FixedTextEffect {
     pub marked: bool,
 }
 
-/// Execute the portable ASCII NLS domain, not host locale emulation. Non-ASCII
-/// requires actual native outputs through the explicit entry below; it never
-/// silently falls back to ASCII, UTF-8, an identity map or empty text.
+/// Use actual Windows NLS when available, otherwise the portable ASCII domain.
+/// Non-Windows high bytes still require the explicit native boundary below;
+/// there is no Unicode, identity or empty-output fallback.
 pub fn edit_fixed_text(
     image: &mut Icf<'_>,
     field: FixedTextField,
@@ -2178,16 +2331,8 @@ pub fn edit_fixed_text(
         index,
         input,
         alignment_option,
-        crate::csv::nls::ascii_map,
-        |bytes| {
-            if !bytes.is_ascii() {
-                return Err(crate::csv::Error::SourceUnavailable(
-                    "non-ASCII CharUpperBuffA output required",
-                ));
-            }
-            bytes.make_ascii_uppercase();
-            Ok(bytes.len() as u32)
-        },
+        crate::csv::nls::platform_map,
+        crate::csv::nls::platform_uppercase,
     )
 }
 
@@ -2206,6 +2351,10 @@ pub fn edit_fixed_text_with_nls(
 ) -> Result<FixedTextEffect, crate::csv::Error> {
     use crate::csv::nls;
     let at = field.at(index)?;
+    let user_password = matches!(
+        field,
+        FixedTextField::User1Password | FixedTextField::User2Password
+    );
     let old = image.memory()[at..at + field.width()]
         .split(|&b| b == 0)
         .next()
@@ -2240,9 +2389,14 @@ pub fn edit_fixed_text_with_nls(
                 candidate.remove(0);
             }
         }
-        if stored && field == FixedTextField::ApPassword {
+        if stored && (field == FixedTextField::ApPassword || user_password) {
             let trimmed = crate::csv::trim(&candidate);
             stored = trimmed.is_empty() || trimmed.len() >= 8;
+            // 9BA1C/96BCC rejects a nonempty all-equal candidate, unlike AP.
+            if user_password && !candidate.is_empty() && candidate.windows(2).all(|p| p[0] == p[1])
+            {
+                stored = false;
+            }
         }
     }
     //9B80C runs after a false base helper too, except an ESC that creates no
@@ -2277,7 +2431,7 @@ pub fn edit_fixed_text_with_nls(
     }
     let marked =
         field == FixedTextField::PictureRecipient && candidate == [b' '; 8] && state_out != 2;
-    let display = if field == FixedTextField::ApPassword {
+    let display = if field == FixedTextField::ApPassword || user_password {
         vec![b'*'; candidate.len()]
     } else {
         candidate
@@ -2315,12 +2469,26 @@ pub fn edit_fixed_text_with_nls(
 
 pub fn align_callsign(bytes: &mut [u8; 8]) {
     if let Some(end) = (1..8).rev().find(|&i| bytes[i] != b' ')
-        && let Some(gap) = (1..end).rev().find(|&i| bytes[i] == b' ')
+        && let Some(gap) = (0..end).rev().find(|&i| bytes[i] == b' ')
     {
         let start = gap + 1;
         let width = end - start + 1;
         bytes.copy_within(start..=end, 8 - width);
         bytes[start..8 - width].fill(b' ');
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn callsign_alignment_includes_the_leading_gap() {
+    for (input, expected) in [
+        (*b" AB     ", *b"      AB"),
+        (*b"ABCDEFGH", *b"ABCDEFGH"),
+        (*b"        ", *b"        "),
+    ] {
+        let mut actual = input;
+        align_callsign(&mut actual);
+        assert_eq!(actual, expected);
     }
 }
 
@@ -4045,6 +4213,173 @@ pub fn edit_program_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readonly_number_groups_preserve_equal_profiles_and_format_only_differences() {
+        let mut image = image();
+        for (raw, expected) in [
+            (0, b"0 (0%)".as_slice()),
+            (128, b"128 (50%)"),
+            (255, b"255 (100%)"),
+        ] {
+            assert_eq!(paint_level(raw), expected);
+        }
+        for raw in u8::MIN..=u8::MAX {
+            for key in [0x2ef, 0x2f2, 0x2f6, 0x307] {
+                let field = number_settings()
+                    .into_iter()
+                    .find(|f| f.key == key)
+                    .unwrap();
+                field
+                    .store_numeric_raw(&mut image, 0, i32::from(raw))
+                    .unwrap();
+                let expected = if key == 0x307 {
+                    paint_hex_byte(raw)
+                } else {
+                    paint_level(raw)
+                };
+                assert_eq!(
+                    paint_number_at(&image, key, 0, None, None).unwrap(),
+                    expected
+                );
+            }
+        }
+        let equal = [
+            0x1a3, 0x211, 0x231, 0x24e, 0x25c, 0x25d, 0x265, 0x277, 0x27b, 0x28a, 0x293, 0x2ab,
+            0x2c6, 0x2ef, 0x2f2, 0x2f6, 0x2f7, 0x124, 0x261, 0x294, 0x295, 0x297, 0x2db, 0x2ad,
+            0x2c1, 0x2a9, 0x324, 0x325, 0x326,
+        ];
+        assert_eq!(equal.len(), 29);
+        for key in equal {
+            let field = number_settings()
+                .into_iter()
+                .find(|f| f.key == key)
+                .unwrap();
+            for raw in [0, if field.width == 2 { 0xffff } else { 0xff }] {
+                field.store_numeric_raw(&mut image, 0, raw).unwrap();
+                let effect =
+                    edit_number_at(&mut image, field.name, 0, NumberInput::Display, b'.').unwrap();
+                let mut expected = effect.candidate.to_string().into_bytes();
+                expected.extend_from_slice(&effect.suffix);
+                let before = image.memory().to_vec();
+                assert_eq!(
+                    paint_number_at(&image, key, 0, None, None).unwrap(),
+                    expected,
+                    "key{key:04X}"
+                );
+                assert_eq!(image.memory(), before);
+            }
+        }
+        for (key, raw, expected) in [
+            (0x29a, 0, b"-128 (-100)".as_slice()),
+            (0x29a, 128, b"0 (0)"),
+            (0x29a, 255, b"127 (100)"),
+            (0x2e6, 0, b"-15"),
+            (0x2e6, 15, b"0"),
+            (0x2e6, 16, b"+1"),
+            (0x2e6, 255, b"+240"),
+            (0x346, 0, b"-5 "),
+            (0x347, 5, b"0 "),
+            (0x348, 6, b"+1 "),
+            (0x349, 255, b"+250 "),
+            (0x278, 0, b"0s"),
+            (0x2c8, 255, b"255s"),
+            (0x2ca, 0, b"2ms"),
+            (0x2ca, 255, b"512ms"),
+            (0x2c2, 0, b"0Hz"),
+            (0x2c2, 0xffff, b"65535Hz"),
+            (0x2c5, 0, b"000"),
+            (0x2c5, 1, b"001"),
+            (0x2c5, 1000, b"1000"),
+            (0x2c5, 0xffff, b"65535"),
+        ] {
+            let field = number_settings()
+                .into_iter()
+                .find(|f| f.key == key)
+                .unwrap();
+            field.store_numeric_raw(&mut image, 0, raw).unwrap();
+            let before = image.memory().to_vec();
+            assert_eq!(
+                paint_number_at(&image, key, 0, Some(b"s\0unused"), None).unwrap(),
+                expected,
+                "key{key:04X}"
+            );
+            assert_eq!(image.memory(), before);
+        }
+        for key in [0x278, 0x2c8] {
+            assert!(paint_number_at(&image, key, 0, None, None).is_err());
+        }
+        assert!(paint_number_at(&image, 0x348, 3, None, None).is_err());
+        assert!(paint_number_at(&image, 0xffff, 0, None, None).is_err());
+    }
+
+    #[test]
+    fn readonly_scaled_and_hex_paint_preserves_storage_units_and_raw_bits() {
+        let mut image = image();
+        for (key, raw, expected) in [
+            (0x240, 0, b"0.000MHz".as_slice()),
+            (0x240, 1250, b"+1.250MHz"),
+            (0x240, -1250, b"-1.250MHz"),
+            (0x240, 0x8000, b"-32.768MHz"),
+            (0x25e, 0, b"0.0s"),
+            (0x25e, 15, b"1.5s"),
+            (0x25e, 0x80, b"12.8s"),
+            (0x2c9, 0, b"0.0"),
+            (0x2c9, 30, b"3.0"),
+            (0x2c9, 0xff, b"25.5"),
+            (0x2cf, 0, b"0.0dot"),
+            (0x2cf, 20, b"2.0dot"),
+            (0x2cf, 0xff, b"25.5dot"),
+            (0x362, 0, b"-20.0dB"),
+            (0x362, 200, b"\xb10.0dB"),
+            (0x362, 215, b"+1.5dB"),
+            (0x362, 185, b"-1.5dB"),
+            (0x362, 0x8000, b"+3256.8dB"),
+            (0x362, 0xffff, b"+6533.5dB"),
+            (0x307, 0, b"00h"),
+            (0x307, 0x0a, b"0Ah"),
+            (0x307, 0xff, b"FFh"),
+        ] {
+            let field = number_settings()
+                .into_iter()
+                .find(|f| f.key == key)
+                .unwrap();
+            field.store_numeric_raw(&mut image, 0, raw).unwrap();
+            let before = image.memory().to_vec();
+            assert_eq!(
+                paint_number_at(&image, key, 0, Some(b"s\0hidden"), Some(0x409)).unwrap(),
+                expected
+            );
+            assert_eq!(image.memory(), before);
+        }
+        let field = number_settings()
+            .into_iter()
+            .find(|f| f.key == 0x362)
+            .unwrap();
+        field.store_numeric_raw(&mut image, 16, 200).unwrap();
+        assert_eq!(
+            paint_number_at(&image, 0x362, 16, None, Some(0x411)).unwrap(),
+            b"\x81\x7d0.0dB"
+        );
+        assert!(paint_number_at(&image, 0x362, 16, None, None).is_err());
+        assert!(paint_number_at(&image, 0x25e, 0, None, None).is_err());
+        assert!(paint_number_at(&image, 0x362, 17, None, Some(0x409)).is_err());
+        assert!(paint_number_at(&image, 0xffff, 0, None, None).is_err());
+        let effect = edit_number_at(
+            &mut image,
+            "split_offset_khz",
+            0,
+            NumberInput::Text(b"-1.250"),
+            b'.',
+        )
+        .unwrap();
+        assert_eq!((effect.candidate, effect.raw_candidate), (-1250, -1250));
+        assert_eq!(
+            paint_number_at(&image, 0x240, 0, None, None).unwrap(),
+            b"-1.250MHz"
+        );
+        assert!(effect.accepted && effect.stored);
+    }
+
     fn chosen(value: i32) -> ChoiceInput {
         ChoiceInput::Selected(super::super::Selection {
             key: 1,
@@ -4608,7 +4943,48 @@ mod tests {
             .unwrap();
         let out = edit_utc_offset(&mut image, NumberInput::Next).unwrap();
         assert_eq!(out.candidate, -840);
-        assert_eq!(out.suffix, b"+34:07");
+        assert_eq!(out.suffix, b"--:--");
+        for (minutes, expected) in [
+            (0, b"0:00".as_slice()),
+            (5, b"+0:05"),
+            (-5, b"-0:05"),
+            (0x7fff, b"--:--"),
+            (-4, b"-0:04"),
+            (i16::MIN, b"-34:08"),
+            (15360, b"0:00"),
+            (-15360, b"0:00"),
+        ] {
+            assert_eq!(utc_offset_text(minutes), expected);
+        }
+        let field = super::super::find("utc_offset_minutes").unwrap();
+        for raw in u16::MIN..=u16::MAX {
+            let minutes = raw as i16;
+            let n = i32::from(minutes).abs();
+            let (hour, minute) = ((n / 60) & 0xff, n % 60);
+            let sign = if hour == 0 && minute == 0 {
+                ""
+            } else if minutes < 0 {
+                "-"
+            } else {
+                "+"
+            };
+            let expected = if minutes == 0x7fff {
+                b"--:--".to_vec()
+            } else {
+                format!("{sign}{hour}:{minute:02}").into_bytes()
+            };
+            assert_eq!(utc_offset_text(minutes), expected);
+            field
+                .store_numeric_raw(&mut image, 0, i32::from(minutes))
+                .unwrap();
+            let out = edit_utc_offset(&mut image, NumberInput::Display).unwrap();
+            assert_eq!(out.suffix, expected);
+            assert!(!out.stored);
+            assert_eq!(
+                field.read_numeric_raw(&image, 0).unwrap(),
+                i32::from(minutes)
+            );
+        }
     }
 
     #[test]
@@ -4997,6 +5373,174 @@ mod tests {
             assert!(
                 edit_fixed_text(&mut image, field, usize::MAX, FixedTextInput::Display, 0).is_err()
             );
+            assert_eq!(image.memory(), before);
+        }
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn fixed_text_platform_default_rejects_nonascii_without_image_store() {
+        let mut image = image();
+        let before = image.memory().to_vec();
+        let mut source = [0x82, 0xa0, b'A'];
+        let out = edit_fixed_text(
+            &mut image,
+            FixedTextField::Comment,
+            0,
+            FixedTextInput::Text {
+                source: &mut source,
+                phase: 1,
+            },
+            0,
+        );
+        assert!(matches!(out, Err(crate::csv::Error::SourceUnavailable(_))));
+        assert_eq!(source, [0x82, 0xa0, b'A']);
+        assert_eq!(image.memory(), before);
+    }
+
+    #[test]
+    fn fixed_text_wlan_user_profiles_enforce_literal_windows_and_password_boundaries() {
+        // A4 BA02: 328/329/32B/32C, width16, empty allowed; passwords min8.
+        for (field, key, at, password) in [
+            (FixedTextField::User1Id, 0x328, 0x39383, false),
+            (FixedTextField::User1Password, 0x329, 0x39393, true),
+            (FixedTextField::User2Id, 0x32b, 0x393a4, false),
+            (FixedTextField::User2Password, 0x32c, 0x393b4, true),
+        ] {
+            assert!(FixedTextField::ALL.contains(&field));
+            assert_eq!(field.feature_id(), "A2-H56202-18");
+            assert_eq!((field.key(), field.width(), field.count()), (key, 16, 1));
+            for phase in [1, 2] {
+                for (input, candidate, password_accepts) in [
+                    (b"".as_slice(), b"".as_slice(), true),
+                    (b"a", b"a", false),
+                    (b"1234567", b"1234567", false),
+                    (b"12345678", b"12345678", true),
+                    (b"aaaaaaaa", b"aaaaaaaa", false),
+                    (b"0123456789abcdef", b"0123456789abcdef", true),
+                    (b"aaaaaaaaaaaaaaaa", b"aaaaaaaaaaaaaaaa", false),
+                    (b"0123456789abcdefZ", b"0123456789abcdef", true),
+                    (b"aaaaaaaaaaaaaaaaZ", b"aaaaaaaaaaaaaaaa", false),
+                    (b"ab cd\\efgh", b"abcdefgh", true),
+                    (b" \\ ", b"", true),
+                    (b"!a/@b:9?", b"!a/@b:9?", true),
+                ] {
+                    let mut image = image();
+                    let mut expected = image.memory().to_vec();
+                    let mut source = input.to_vec();
+                    let out = edit_fixed_text(
+                        &mut image,
+                        field,
+                        0,
+                        FixedTextInput::Text {
+                            source: &mut source,
+                            phase,
+                        },
+                        0,
+                    )
+                    .unwrap();
+                    let accepted = !password || password_accepts;
+                    assert_eq!(out.text.stored, accepted, "{field:?} {input:?}");
+                    if accepted {
+                        expected[at..at + 16].fill(b' ');
+                        expected[at..at + candidate.len()].copy_from_slice(candidate);
+                    }
+                    assert_eq!(image.memory(), expected, "{field:?} {input:?}");
+                    assert_eq!(
+                        out.text.display,
+                        if password {
+                            vec![b'*'; candidate.len()]
+                        } else {
+                            candidate.to_vec()
+                        }
+                    );
+                    assert_eq!((out.text.state_out, out.text.notify_flags), (0, 0));
+                    assert_eq!(
+                        (out.context60, out.warning_bits, out.marked),
+                        (None, 0, false)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_text_wlan_user_readonly_cancel_phase_and_native_failure_do_not_store() {
+        for (field, at, password) in [
+            (FixedTextField::User1Id, 0x39383, false),
+            (FixedTextField::User1Password, 0x39393, true),
+            (FixedTextField::User2Id, 0x393a4, false),
+            (FixedTextField::User2Password, 0x393b4, true),
+        ] {
+            let mut image = image();
+            image.patch_memory(&[(at, b"aB\0hidden")]).unwrap();
+            let before = image.memory().to_vec();
+            for (input, state) in [
+                (FixedTextInput::Display, 0),
+                (FixedTextInput::Cancel, 0),
+                (FixedTextInput::Begin, 2),
+            ] {
+                let out = edit_fixed_text(&mut image, field, 0, input, 0).unwrap();
+                assert!(!out.text.stored);
+                assert_eq!(out.text.state_out, state);
+                assert_eq!(out.text.display, if password { b"**" } else { b"aB" });
+                assert_eq!(
+                    (
+                        out.text.notify_flags,
+                        out.context60,
+                        out.warning_bits,
+                        out.marked
+                    ),
+                    (0, None, 0, false)
+                );
+                assert_eq!(image.memory(), before);
+            }
+            for index in [1, usize::MAX] {
+                assert!(
+                    edit_fixed_text(&mut image, field, index, FixedTextInput::Display, 0).is_err()
+                );
+            }
+            for phase in [0, 3] {
+                let mut source = *b"A\0B";
+                assert!(
+                    edit_fixed_text(
+                        &mut image,
+                        field,
+                        0,
+                        FixedTextInput::Text {
+                            source: &mut source,
+                            phase
+                        },
+                        0
+                    )
+                    .is_err()
+                );
+                assert_eq!(source, *b"A\0B");
+            }
+            let mut source = *b"A\0B";
+            let out = edit_fixed_text_with_nls(
+                &mut image,
+                field,
+                0,
+                FixedTextInput::Text {
+                    source: &mut source,
+                    phase: 1,
+                },
+                0,
+                |_, _| {
+                    Err(crate::csv::Error::SourceUnavailable(
+                        "synthetic user map failure",
+                    ))
+                },
+                |_| unreachable!(),
+            );
+            assert!(matches!(
+                out,
+                Err(crate::csv::Error::SourceUnavailable(
+                    "synthetic user map failure"
+                ))
+            ));
+            assert_eq!(source, *b"AB ");
             assert_eq!(image.memory(), before);
         }
     }
@@ -5827,6 +6371,61 @@ mod tests {
         );
         //A selected1 remains a raw native bypass, not a checked catalog write.
         assert_eq!(catalog.edit(&mut image, chosen(1)).unwrap().value, 1);
+        for field in [ConditionalField::Coordinates, ConditionalField::Temperature] {
+            assert!(
+                field
+                    .catalog_sources(Some(1), None, None)
+                    .unwrap()
+                    .selector
+                    .ends_with("_JPN")
+            );
+            assert!(field.catalog_sources(Some(0), None, None).is_err());
+            assert!(field.catalog_sources(None, Some(0x411), None).is_err());
+            assert!(
+                !field
+                    .catalog_sources(Some(0), Some(0x409), None)
+                    .unwrap()
+                    .selector
+                    .ends_with("_JPN")
+            );
+        }
+        assert_eq!(
+            ConditionalField::AutoRepeater
+                .catalog_sources(None, None, Some(&q))
+                .unwrap()
+                .values(),
+            &[0, 2]
+        );
+        assert!(
+            ConditionalField::AutoRepeater
+                .catalog_sources(None, None, None)
+                .is_err()
+        );
+        assert!(
+            ConditionalField::ScopeSpan
+                .catalog_sources(None, None, None)
+                .is_err()
+        );
+        assert!(
+            ConditionalField::ScopeSpan
+                .catalog_sources(None, Some(0x411), None)
+                .is_ok()
+        );
+        let mut fields = q.fields();
+        fields.0[0] = 16;
+        q.adopt(fields);
+        assert!(
+            ConditionalField::AutoRepeater
+                .catalog_sources(None, None, Some(&q))
+                .is_err()
+        );
+        assert_eq!(
+            ConditionalField::AutoRepeater
+                .catalog_sources(None, Some(0x409), Some(&q))
+                .unwrap()
+                .values(),
+            &[0, 1, 2]
+        );
     }
 
     #[test]

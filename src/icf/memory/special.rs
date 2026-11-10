@@ -1240,6 +1240,38 @@ impl Preset {
     pub fn bandwidth_hz(&self) -> Result<i32, Error> {
         decode_bandwidth(self.bandwidth_class(), self.body[3])
     }
+    /// Native385 logical text and optional CANVAS check, not a mask number.
+    /// A normal checkbox has empty text; only exact mask00 draws the check.
+    pub fn checkbox_paint(&self, field: u32) -> Result<(Vec<u8>, Option<bool>), Error> {
+        if self.incompatible(field)? {
+            return Ok((b"--".to_vec(), None));
+        }
+        let mask = PRESET_FIELDS
+            .iter()
+            .position(|&f| f == field)
+            .ok_or(invalid("unknown preset checkbox field"))?;
+        Ok((Vec::new(), Some(self.masks[mask] == 0)))
+    }
+    /// Native389 uses unpadded integer Hz and a suffix with a trailing space.
+    /// Own maskFF is only a color change, not a reason to hide the value.
+    pub fn bandwidth_paint(&self) -> Result<Vec<u8>, Error> {
+        if self.incompatible(3)? || self.bandwidth_class() > 4 {
+            return Ok(b"---".to_vec());
+        }
+        Ok(format!("{}Hz ", self.bandwidth_hz()?).into_bytes())
+    }
+    /// Native level/address source bytes, before the shared raw-value formatter.
+    /// These are PRESET body fields, never the similarly named global settings.
+    pub fn paint_byte(&self, key: u32) -> Result<u8, Error> {
+        if !matches!(key, 0x38d | 0x38f | 0x390 | 0x39a) {
+            return Err(invalid("key is not a preset level or address"));
+        }
+        let field = PRESET_CATALOG
+            .iter()
+            .find(|f| u32::from(f.key) == key)
+            .ok_or(invalid("unknown preset paint key"))?;
+        Ok(self.body[field.offset])
+    }
     pub fn incompatible(&self, field: u32) -> Result<bool, Error> {
         let c = self.combined_mode();
         let m = &self.masks;
@@ -1647,6 +1679,215 @@ fn correct_filter_types(image: &mut Icf<'_>, g: &[u8], p: usize) -> Result<(), E
         put_byte(image, a + 5, 255)?;
     }
     Ok(())
+}
+
+/// Native numeric helper output and the existing Preset commit tail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresetNumberEffect {
+    pub editor: crate::icf::settings::extended::NumberEffect,
+    pub effects: Effects,
+}
+
+/// Shared AFD74/A4A8C input, separate from global/Preset storage and PBT tails.
+/// Both text passes use numeric_text; the second consumes the FIRST integer.
+/// This is the existing native grid over decode/encode_bandwidth, not a codec.
+pub fn bandwidth_input(
+    class: u32,
+    old_raw: u8,
+    input: crate::icf::settings::extended::NumberInput<'_>,
+    crt_point: u8,
+) -> Result<crate::icf::settings::extended::BandwidthEffect, Error> {
+    use crate::icf::settings::extended::{
+        BandwidthEffect, NumberEffect, NumberInput, numeric_text,
+    };
+    let old = i64::from(decode_bandwidth(class, old_raw)?);
+    let min = i64::from(decode_bandwidth(class, 0)?);
+    let max = [3600, 3600, 3600, 2700, 10000][class as usize];
+    let step = |width: i64, previous: bool| -> Result<i64, Error> {
+        let small = i64::from(decode_bandwidth(class, 1)? - decode_bandwidth(class, 0)?);
+        let raw =
+            encode_bandwidth(class, (width - if previous { small } else { 0 }) as i32)?.min(254);
+        Ok(i64::from(
+            decode_bandwidth(class, raw + 1)? - decode_bandwidth(class, raw)?,
+        ))
+    };
+    let mut rewritten_text = None;
+    let (candidate, accepted) = match input {
+        NumberInput::Selected(event) if event.accepted && event.key == 1 && event.phase == 2 => {
+            (i64::from(event.candidate), true)
+        }
+        NumberInput::Text(text) => {
+            let (first, accepted) = numeric_text(text, crt_point, 0, min, max, 1)?;
+            if accepted {
+                let integer = first.to_string().into_bytes();
+                let value = numeric_text(&integer, crt_point, 0, min, max, step(first, false)?)?.0;
+                rewritten_text = Some(integer);
+                (value, true)
+            } else {
+                (first, false)
+            }
+        }
+        NumberInput::Next | NumberInput::Previous => {
+            let step = step(old, input == NumberInput::Previous)?;
+            let value = old.clamp(min, max)
+                + if input == NumberInput::Next {
+                    step
+                } else {
+                    -step
+                };
+            (
+                if value < min {
+                    max
+                } else if value > max {
+                    min
+                } else {
+                    value
+                },
+                true,
+            )
+        }
+        _ => (old, false),
+    };
+    Ok(BandwidthEffect {
+        number: NumberEffect {
+            stored: false,
+            accepted,
+            candidate,
+            raw_candidate: i32::from(encode_bandwidth(class, candidate as i32)?),
+            state_out: 0,
+            notify_flags: 0,
+            suffix: Vec::new(),
+            gray: false,
+        },
+        popup_requested: input == NumberInput::Begin,
+        rewritten_text,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresetBandwidthEffect {
+    /// None means the actual case guard skipped the helper entirely.
+    pub editor: Option<crate::icf::settings::extended::BandwidthEffect>,
+    pub effects: Effects,
+}
+
+/// Preset389: guard before the shared BW helper, then preserve commit_preset's
+/// sequential BW/filter-type/G-selection stores. Own maskFF only grays output.
+pub fn edit_preset_bandwidth(
+    image: &mut Icf<'_>,
+    g: &[u8],
+    p: usize,
+    input: crate::icf::settings::extended::NumberInput<'_>,
+    crt_point: u8,
+    live_preset: usize,
+) -> Result<PresetBandwidthEffect, Error> {
+    let old = Preset::read(image.memory(), p)?;
+    let class = old.bandwidth_class();
+    let blocked = old.incompatible(3)? || class > 4;
+    if blocked {
+        return Ok(PresetBandwidthEffect {
+            editor: None,
+            effects: Effects {
+                gray: old.masks[2] == 255,
+                blocked: true,
+                ..Effects::default()
+            },
+        });
+    }
+    let mut editor = bandwidth_input(class, old.body[3], input, crt_point)?;
+    let accepted = editor.number.accepted;
+    let effects = commit_preset(
+        image,
+        g,
+        p,
+        0x389,
+        0,
+        accepted.then_some(editor.number.candidate as i32),
+        live_preset,
+    )?;
+    editor.number.stored = accepted;
+    editor.number.notify_flags = effects.callback_flags;
+    editor.number.gray = effects.gray;
+    Ok(PresetBandwidthEffect {
+        editor: Some(editor),
+        effects,
+    })
+}
+
+/// 7C891/7CB24/7CD14/7D8BD: parse the actual Preset old byte through the
+/// shared A4870/A4E2C grammar before commit_preset. MaskFF only grays the
+/// result; it does not block input. The level suffix uses the PRE-edit byte.
+/// Cancel/false preserves both the field and related G selection byte. A later
+/// commit error still preserves the original byte-store prefix.
+pub fn edit_preset_number(
+    image: &mut Icf<'_>,
+    g: &[u8],
+    p: usize,
+    key: u16,
+    input: crate::icf::settings::extended::NumberInput<'_>,
+    crt_point: u8,
+    live_preset: usize,
+) -> Result<PresetNumberEffect, Error> {
+    use crate::icf::settings::extended::{NumberEffect, NumberInput, numeric_text};
+    if !matches!(key, 0x38d | 0x38f | 0x390 | 0x39a) {
+        return Err(invalid("key is not a preset numeric editor"));
+    }
+    let old = i64::from(Preset::read(image.memory(), p)?.paint_byte(u32::from(key))?);
+    let (min, max) = if key == 0x39a { (2, 223) } else { (0, 255) };
+    let (candidate, accepted, state_out) = match input {
+        NumberInput::Display | NumberInput::Cancel | NumberInput::Selected(_) => (old, false, 0),
+        NumberInput::Begin => (old, false, 2),
+        NumberInput::Next | NumberInput::Previous => {
+            let value = old + if input == NumberInput::Next { 1 } else { -1 };
+            (
+                if value < min {
+                    max
+                } else if value > max {
+                    min
+                } else {
+                    value
+                },
+                true,
+                0,
+            )
+        }
+        NumberInput::Text(text) if key == 0x39a => {
+            (i64::from(crate::csv::number::civ_address(text)), true, 0)
+        }
+        NumberInput::Text(text) => {
+            let (value, accepted) = numeric_text(text, crt_point, 0, min, max, 1)?;
+            (if accepted { value } else { old }, accepted, 0)
+        }
+    };
+    let effects = commit_preset(
+        image,
+        g,
+        p,
+        key,
+        0,
+        accepted.then_some(candidate as i32),
+        live_preset,
+    )?;
+    let suffix = if state_out == 2 {
+        Vec::new()
+    } else if key == 0x39a {
+        b"h".to_vec()
+    } else {
+        format!(" ({}%)", old * 100 / 255).into_bytes()
+    };
+    Ok(PresetNumberEffect {
+        editor: NumberEffect {
+            stored: accepted,
+            accepted,
+            candidate,
+            raw_candidate: candidate as i32,
+            state_out,
+            notify_flags: effects.callback_flags,
+            suffix,
+            gray: effects.gray,
+        },
+        effects,
+    })
 }
 
 /// Commit a helper-accepted full candidate, after the shared editor's input
@@ -2153,6 +2394,74 @@ mod tests {
         put(&mut i, 0x378c0 + 8 * 2, &0u32.to_le_bytes()).unwrap();
         assert!(!UserEdge::read(i.memory(), 2).unwrap().valid);
         assert_eq!(word32(i.memory(), 0x378c0 + 8 * 2 + 4).unwrap(), 60_000);
+    }
+    #[test]
+    fn preset_native_paint_keeps_marker_units_and_raw_sources_read_only() {
+        for p in 0..5 {
+            let i = preset_fixture(p);
+            let memory = i.memory().to_vec();
+            let mut h = Preset::read(i.memory(), p).unwrap();
+            assert_eq!(h.checkbox_paint(0).unwrap(), (b"--".to_vec(), None));
+            assert_eq!(h.checkbox_paint(23).unwrap(), (b"--".to_vec(), None));
+            for mask in [0, 1, 255] {
+                h.masks[0] = mask;
+                let before = h.clone();
+                assert_eq!(h.checkbox_paint(1).unwrap(), (Vec::new(), Some(mask == 0)));
+                assert_eq!(h, before);
+            }
+            assert_eq!(h.checkbox_paint(2).unwrap(), (b"--".to_vec(), None));
+            h.masks.fill(0);
+            h.body[3] = 10;
+            for mask in [0, 1, 255] {
+                h.masks[4] = mask;
+                assert_eq!(
+                    h.checkbox_paint(0x16).unwrap(),
+                    (Vec::new(), Some(mask == 0))
+                );
+            }
+            h.masks[2] = 255;
+            assert_eq!(h.bandwidth_paint().unwrap(), b"600Hz ");
+            assert_eq!(h.checkbox_paint(3).unwrap(), (Vec::new(), Some(false)));
+            for (mode, raw, expected) in [
+                (1, 0, b"50Hz ".as_slice()),
+                (1, 9, b"500Hz "),
+                (1, 10, b"600Hz "),
+                (1, 255, b"25100Hz "),
+                (7, 0, b"200Hz "),
+                (7, 49, b"10000Hz "),
+                (7, 255, b"51200Hz "),
+                (8, 255, b"---"),
+                (255, 255, b"---"),
+            ] {
+                h.body[0] = mode;
+                h.body[3] = raw;
+                let before = h.clone();
+                assert_eq!(h.bandwidth_paint().unwrap(), expected);
+                assert_eq!(h, before);
+            }
+            h.body[0] = 1;
+            h.masks[1] = 255;
+            assert_eq!(h.bandwidth_paint().unwrap(), b"---");
+            h.masks.fill(255);
+            for raw in 0..=u8::MAX {
+                h.body[15] = raw;
+                h.body[16] = raw.wrapping_add(1);
+                h.body[18] = raw.wrapping_add(2);
+                h.body[22] = raw.wrapping_add(3);
+                let before = h.clone();
+                assert_eq!(h.paint_byte(0x390).unwrap(), raw);
+                assert_eq!(h.paint_byte(0x38d).unwrap(), raw.wrapping_add(1));
+                assert_eq!(h.paint_byte(0x38f).unwrap(), raw.wrapping_add(2));
+                assert_eq!(h.paint_byte(0x39a).unwrap(), raw.wrapping_add(3));
+                assert_eq!(h, before);
+            }
+            for key in [0x385, 0x389, 0x38c, 0x39b, u32::MAX] {
+                assert!(h.paint_byte(key).is_err());
+            }
+            assert!(Preset::read(i.memory(), 5).is_err());
+            assert!(Preset::read(&i.memory()[..0xa60f], 0).is_err());
+            assert_eq!(i.memory(), memory);
+        }
     }
     #[test]
     fn preset_all_parts_domains_mask_semantics_and_usb_directions() {
@@ -2681,6 +2990,284 @@ mod tests {
         commit_preset(&mut i, &[], 0, 0x394, 0, Some(1), 99).unwrap();
         assert_eq!(i.memory()[0xa60f + 6], 1);
         assert_eq!(i.memory()[0xa6dc + 5], 1);
+    }
+
+    #[test]
+    fn preset_number_text_uses_literal_fields_masks_and_related_g_tail() {
+        use crate::icf::settings::extended::NumberInput;
+        let mut g = vec![0; 0xa78d];
+        g[0xa78c] = 0x6b;
+        // BA02d: AF/IF/MOD/+address use offsets10/12/0F/16 and masks13/15/12/19.
+        for p in 0..5 {
+            for (key, offset, mask, old, text, value, suffix) in [
+                (
+                    0x38d,
+                    0x10,
+                    13,
+                    127,
+                    b".".as_slice(),
+                    0,
+                    b" (49%)".as_slice(),
+                ),
+                (0x38f, 0x12, 15, 127, b".", 0, b" (49%)"),
+                (0x390, 0x0f, 12, 127, b".", 0, b" (49%)"),
+                (0x39a, 0x16, 19, 70, b"", 2, b"h"),
+            ] {
+                for mask_value in [0, 1, 255] {
+                    for selected in [p as u8, 0x7f] {
+                        let mut image = preset_fixture(p);
+                        let at = 0xa60f + 41 * p + offset;
+                        image
+                            .patch_memory(&[
+                                (at, &[old]),
+                                (0xa6dc + 22 * p + mask, &[mask_value]),
+                                (0xa78c, &[selected]),
+                            ])
+                            .unwrap();
+                        let mut expected = image.memory().to_vec();
+                        let out = edit_preset_number(
+                            &mut image,
+                            &g,
+                            p,
+                            key,
+                            NumberInput::Text(text),
+                            b'.',
+                            p,
+                        )
+                        .unwrap();
+                        expected[at] = value;
+                        if selected == p as u8 {
+                            expected[0xa78c] = 0x6b;
+                        }
+                        assert_eq!(image.memory(), expected, "p{p} key{key:X} mask{mask_value}");
+                        assert!(out.editor.accepted && out.editor.stored);
+                        assert_eq!(out.editor.candidate, i64::from(value));
+                        assert_eq!(out.editor.raw_candidate, i32::from(value));
+                        assert_eq!(out.editor.suffix, suffix);
+                        assert_eq!((out.editor.state_out, out.editor.notify_flags), (0, 0));
+                        assert_eq!(
+                            (out.editor.gray, out.effects.gray),
+                            (mask_value == 255, mask_value == 255)
+                        );
+                        assert_eq!(out.effects.writes, 1 + usize::from(selected == p as u8));
+                        assert!(!out.effects.blocked);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preset_number_false_cancel_begin_boundaries_and_failure_prefix_are_distinct() {
+        use crate::icf::settings::{Selection, extended::NumberInput};
+        for (key, offset) in [(0x38d, 0x10), (0x38f, 0x12), (0x390, 0x0f), (0x39a, 0x16)] {
+            let mut image = preset_fixture(0);
+            image
+                .patch_memory(&[(0xa60f + offset, &[127]), (0xa78c, &[0])])
+                .unwrap();
+            let before = image.memory().to_vec();
+            for input in [
+                NumberInput::Display,
+                NumberInput::Cancel,
+                NumberInput::Begin,
+                NumberInput::Selected(Selection {
+                    key: 1,
+                    phase: 2,
+                    candidate: 99,
+                    accepted: true,
+                }),
+            ] {
+                let out = edit_preset_number(&mut image, &[], 0, key, input, b'.', 0).unwrap();
+                assert!(!out.editor.accepted && !out.editor.stored);
+                assert_eq!(out.editor.candidate, 127);
+                assert_eq!(
+                    out.editor.state_out,
+                    2 * u32::from(input == NumberInput::Begin)
+                );
+                assert_eq!(out.effects.writes, 0);
+                assert_eq!(image.memory(), before);
+            }
+            if key != 0x39a {
+                for text in [b"foo".as_slice(), b"", b"-", b"--"] {
+                    let out = edit_preset_number(
+                        &mut image,
+                        &[],
+                        0,
+                        key,
+                        NumberInput::Text(text),
+                        b'.',
+                        0,
+                    )
+                    .unwrap();
+                    assert!(!out.editor.accepted && !out.editor.stored);
+                    assert_eq!(out.editor.candidate, 127);
+                    assert_eq!(image.memory(), before);
+                }
+                let out = edit_preset_number(
+                    &mut image,
+                    &[],
+                    0,
+                    key,
+                    NumberInput::Text(b"128"),
+                    b'.',
+                    99,
+                )
+                .unwrap();
+                assert_eq!(out.editor.suffix, b" (49%)");
+                assert_eq!(image.memory()[0xa60f + offset], 128);
+            }
+        }
+        let mut image = preset_fixture(0);
+        for (key, old, input, value) in [
+            (0x38d, 255, NumberInput::Next, 0),
+            (0x38f, 0, NumberInput::Previous, 255),
+            (0x390, 127, NumberInput::Text(b"127.5"), 128),
+            (0x38d, 0, NumberInput::Text(b"999"), 255),
+            (0x38d, 0, NumberInput::Text(b"-12"), 0),
+            (0x39a, 223, NumberInput::Next, 2),
+            (0x39a, 2, NumberInput::Previous, 223),
+            (0x39a, 255, NumberInput::Text(b"foo"), 15),
+        ] {
+            let offset = match key {
+                0x38d => 0x10,
+                0x38f => 0x12,
+                0x390 => 0x0f,
+                _ => 0x16,
+            };
+            image.patch_memory(&[(0xa60f + offset, &[old])]).unwrap();
+            let out = edit_preset_number(&mut image, &[], 0, key, input, b'.', 99).unwrap();
+            assert!(out.editor.accepted);
+            assert_eq!(image.memory()[0xa60f + offset], value);
+        }
+        let before = image.memory().to_vec();
+        assert!(
+            edit_preset_number(&mut image, &[], 5, 0x38d, NumberInput::Text(b"."), b'.', 99)
+                .is_err()
+        );
+        assert!(
+            edit_preset_number(&mut image, &[], 0, 0x389, NumberInput::Text(b"."), b'.', 99)
+                .is_err()
+        );
+        assert_eq!(image.memory(), before);
+        image
+            .patch_memory(&[(0xa78c, &[0]), (0xa61f, &[127])])
+            .unwrap();
+        let mut expected = image.memory().to_vec();
+        expected[0xa61f] = 0;
+        let error = edit_preset_number(&mut image, &[], 0, 0x38d, NumberInput::Text(b"."), b'.', 0)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Invalid {
+                reason: "special image window outside supplied image",
+                ..
+            }
+        ));
+        assert_eq!(image.memory(), expected);
+    }
+
+    #[test]
+    fn preset_bandwidth_text_reuses_grid_guard_and_ordered_commit_prefix() {
+        use crate::icf::settings::extended::NumberInput;
+        let mut image = preset_fixture(0);
+        image
+            .patch_memory(&[(0xa6de, &[255]), (0xa78c, &[0])])
+            .unwrap();
+        let mut g = vec![0; 0x37867];
+        g[0x3785f] = 0x11;
+        g[0x37863] = 0x22;
+        g[0xa78c] = 0x77;
+        let mut expected = image.memory().to_vec();
+        let out =
+            edit_preset_bandwidth(&mut image, &g, 0, NumberInput::Text(b"550"), b'.', 0).unwrap();
+        let editor = out.editor.unwrap();
+        assert_eq!(editor.rewritten_text.as_deref(), Some(b"550".as_slice()));
+        assert_eq!(
+            (editor.number.candidate, editor.number.raw_candidate),
+            (600, 10)
+        );
+        assert!(editor.number.accepted && editor.number.stored && editor.number.gray);
+        assert_eq!(out.effects.callback_flags, 0x20);
+        expected[0xa612..0xa615].copy_from_slice(&[10, 0x11, 0x22]);
+        expected[0xa78c] = 0x77;
+        assert_eq!(image.memory(), expected);
+        for input in [
+            NumberInput::Cancel,
+            NumberInput::Text(b"foo"),
+            NumberInput::Begin,
+        ] {
+            let out = edit_preset_bandwidth(&mut image, &[], 0, input, b'.', 0).unwrap();
+            let editor = out.editor.unwrap();
+            assert!(!editor.number.accepted && !editor.number.stored);
+            assert_eq!(editor.popup_requested, input == NumberInput::Begin);
+            assert_eq!(out.effects.writes, 0);
+            assert_eq!(image.memory(), expected);
+        }
+        image.patch_memory(&[(0xa6dc, &[255])]).unwrap();
+        let before = image.memory().to_vec();
+        let blocked =
+            edit_preset_bandwidth(&mut image, &[], 0, NumberInput::Text(b"."), b'.', 0).unwrap();
+        assert!(blocked.editor.is_none() && blocked.effects.blocked);
+        assert_eq!(image.memory(), before);
+        let mut image = preset_fixture(0);
+        let mut expected = image.memory().to_vec();
+        expected[0xa612] = 10;
+        assert!(
+            edit_preset_bandwidth(&mut image, &[], 0, NumberInput::Text(b"550"), b'.', 99).is_err()
+        );
+        assert_eq!(image.memory(), expected);
+    }
+
+    #[test]
+    fn shared_bandwidth_input_matches_existing_global_helper_without_storage_tail() {
+        use crate::icf::settings::{
+            Selection,
+            extended::{NumberInput, edit_bandwidth},
+        };
+        for class in 0..=4 {
+            for raw in [0, 9, 10, 255] {
+                for input in [
+                    NumberInput::Display,
+                    NumberInput::Cancel,
+                    NumberInput::Begin,
+                    NumberInput::Next,
+                    NumberInput::Previous,
+                    NumberInput::Text(b"."),
+                    NumberInput::Text(b"foo"),
+                    NumberInput::Text(b"550.4"),
+                    NumberInput::Selected(Selection {
+                        key: 1,
+                        phase: 2,
+                        candidate: -7,
+                        accepted: true,
+                    }),
+                ] {
+                    let mut image = image();
+                    image
+                        .patch_memory(&[(0x37850 + 3 * class, &[raw])])
+                        .unwrap();
+                    let global = edit_bandwidth(&mut image, 3 * class, input, b'.').unwrap();
+                    let shared = bandwidth_input(class as u32, raw, input, b'.').unwrap();
+                    assert_eq!(
+                        (
+                            shared.number.accepted,
+                            shared.number.candidate,
+                            shared.number.raw_candidate
+                        ),
+                        (
+                            global.number.accepted,
+                            global.number.candidate,
+                            global.number.raw_candidate
+                        )
+                    );
+                    assert_eq!(shared.rewritten_text, global.rewritten_text);
+                    assert_eq!(shared.popup_requested, global.popup_requested);
+                    assert!(!shared.number.stored);
+                }
+            }
+        }
+        assert!(bandwidth_input(5, 0, NumberInput::Text(b"."), b'.').is_err());
+        assert!(bandwidth_input(u32::MAX, 0, NumberInput::Text(b"."), b'.').is_err());
     }
 
     #[test]
