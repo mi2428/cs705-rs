@@ -561,6 +561,82 @@ pub fn callsign_count(image: &[u8], kind: u32) -> Result<u32, Error> {
     }
 }
 
+/// Native print dataset leaves:9969C/common, C6530, C6190, C63B8 and C8100.
+/// Working49914/49978 must actually exist when reached. No source is padded,
+/// no count is clamped/recounted, and no whole-image topology pass runs first.
+/// The final false arm is ONLY9969C's explicit other-type branch, not a generic
+/// factory/base predicate. Settings/history classes select their own base path.
+pub fn print_dataset_count(image: &[u8], kind: u32, group: i32) -> Result<u32, Error> {
+    match kind {
+        2 if (0..100).contains(&group) => {
+            let mut count = 0;
+            for row in 0..100 {
+                count += u32::from(
+                    channel_address(image, ChannelKind::Normal, group as u32 * 200 + row * 2)?
+                        .is_some(),
+                );
+            }
+            Ok(count)
+        }
+        2 => Ok(0),
+        3 => Ok(4),
+        4 | 7 => Ok(1),
+        5 | 8 => {
+            let rows = if kind == 5 { 1..11 } else { 0..25 };
+            let mut count = 0;
+            let mut holder = record::reset_holder(kind, 0, 0);
+            for row in rows {
+                let valid = if kind == 5 {
+                    // 610C/6550 checks MAX before the full compact decoder. An
+                    // invalid final slot needs its DWORD, not an invented raw36.
+                    let at = super::special::CompactKind::Memopad.offset(row as usize)?;
+                    if u32::from_le_bytes(window(image, at, 4)?.try_into().unwrap()) == u32::MAX {
+                        false
+                    } else {
+                        load_compact_into(image, kind, row, &mut holder)?
+                    }
+                } else {
+                    load_scan_into(image, row, &mut holder)?
+                };
+                count += u32::from(valid);
+            }
+            Ok(count)
+        }
+        0x0c if (0..50).contains(&group) => Ok(u32::from(u16::from_le_bytes(
+            window(image, 0x49914 + 2 * group as usize, 2)?
+                .try_into()
+                .unwrap(),
+        ))),
+        0x0c => Ok(0),
+        0x0d | 0x17 => callsign_count(image, kind),
+        0x0a => Ok(u32::from(super::settings::gps::gps_group_count_source(
+            image,
+            group as u8,
+        )?)),
+        _ => Ok(0),
+    }
+}
+
+/// B40B8/B425C metadata needed by the print view's query42 row conversion.
+/// None is an absent map; Some carries ONLY the actual raw83 header split bit.
+pub fn print_channel_row(
+    image: &[u8],
+    kind: u32,
+    group: i32,
+    row: u32,
+) -> Result<Option<bool>, Error> {
+    let (dataset, index) = match kind {
+        2 if (0..100).contains(&group) && row < 100 => {
+            (ChannelKind::Normal, group as u32 * 200 + row * 2)
+        }
+        3 if row < 4 => (ChannelKind::Call, row * 2),
+        _ => return Ok(None),
+    };
+    channel_address(image, dataset, index)?
+        .map(|address| window(image, address.record_offset, 1).map(|b| b[0] & 2 != 0))
+        .transpose()
+}
+
 /// C9678/C98E0: blank maps to the capacity sentinel; otherwise compare the
 /// first exact8byte match in the CURRENT list/prefix with the holder's index.
 pub fn callsign_bad(image: &[u8], holder: &DecodedRecord) -> Result<bool, Error> {

@@ -12,6 +12,8 @@ pub mod channel;
 pub mod control;
 #[path = "csv/datetime.rs"]
 pub mod datetime;
+#[path = "csv/date_input.rs"]
+pub mod date_input;
 #[path = "csv/dispatch.rs"]
 pub mod dispatch;
 #[path = "csv/history.rs"]

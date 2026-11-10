@@ -15,6 +15,7 @@ use crate::icf::{GpsAltitude, GpsCoordinate};
 use std::borrow::Cow;
 use std::fmt;
 
+pub mod editor;
 pub mod operations;
 pub mod parser;
 pub mod transfer;

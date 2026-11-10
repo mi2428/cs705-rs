@@ -9,6 +9,8 @@
 use super::Error;
 use super::memory::{pack_callsign, unpack_callsign};
 
+pub mod gps_initial;
+
 /// Original holder size, including its 12-byte binding header.
 pub const DECODED_BYTES: usize = 616;
 /// The body begins with flags at +0C and includes all 604 trailing bytes.

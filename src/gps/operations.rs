@@ -224,6 +224,31 @@ pub fn insert(
     Ok(out)
 }
 
+/// Native type20 producer, not a completed record seed. Each local-clock read
+/// follows that row's metadata insertion. A clock/default failure retains the
+/// inserted metadata; notification failure retains all preceding record writes.
+pub fn insert_initialized(
+    image: &mut Icf<'_>,
+    group: usize,
+    row: usize,
+    requested: usize,
+    selection: (usize, usize),
+    q: &crate::icf::context::Context,
+    system_langid: Option<u16>,
+    mut clock: impl FnMut() -> Result<crate::csv::date_input::Clock, Error>,
+    notify: impl FnMut(&mut Icf<'_>, Event) -> Result<(), Error>,
+) -> Result<Outcome, Error> {
+    insert(
+        image,
+        group,
+        row,
+        requested,
+        selection,
+        |image| crate::icf::record::gps_initial::seed(image, q, system_langid, clock()?),
+        notify,
+    )
+}
+
 /// Delete one row with primitive order: shift/tail, starts, then alarm. Physical
 /// content and name tables are untouched, even when a group becomes empty.
 pub(crate) fn delete_one(image: &mut Icf<'_>, group: usize, row: usize) -> Result<(), Error> {
@@ -372,6 +397,91 @@ mod tests {
         m[STARTS..STARTS + 54].fill(0xff);
         m[ALARM..ALARM + 4].fill(0);
         Icf::from_memory(m).unwrap()
+    }
+    #[test]
+    fn library_r2_initialized_insert_uses_clock_after_metadata_and_keeps_failure_prefix() {
+        use crate::{csv::date_input::Clock, icf::context::Context};
+        let mut q = Context::before_registry();
+        q.decode_packed(0x40001);
+        let clock = Clock {
+            year: 2024,
+            month: 3,
+            day: 1,
+            hour: 0,
+            minute: 30,
+            second: 40,
+            millisecond: 17,
+        };
+        let mut i = image();
+        i.patch_memory(&[(0x396ff, &60_i16.to_le_bytes())]).unwrap();
+        let mut calls = 0;
+        let mut events = Vec::new();
+        let out = insert_initialized(
+            &mut i,
+            3,
+            0,
+            2,
+            (0, 1),
+            &q,
+            None,
+            || {
+                calls += 1;
+                Ok(Clock {
+                    second: 39 + calls,
+                    ..clock
+                })
+            },
+            |_, event| {
+                events.push(event.id);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!((calls, out.completed), (2, 2));
+        assert_eq!(events, [0x40, 0x39, 0x40, 0x39]);
+        assert_eq!(&i.memory()[ORDER..ORDER + 6], &[1, 0, 0, 0, 255, 255]);
+        let mut first = [0_u8; 34];
+        first[..8].copy_from_slice(&[0, 0, 0, b'N', 0, 0, 0, b'W']);
+        first[8..14].copy_from_slice(&[0x29, 2, 0x24, 0x23, 0x30, 0x40]);
+        first[14..18].copy_from_slice(&i32::MAX.to_le_bytes());
+        first[18..].fill(b' ');
+        assert_eq!(&i.memory()[RECORDS..RECORDS + 34], &first);
+        first[13] = 0x41;
+        assert_eq!(&i.memory()[RECORDS + 34..RECORDS + 68], &first);
+
+        let mut i = image();
+        i.patch_memory(&[(0x396ff, &60_i16.to_le_bytes())]).unwrap();
+        let mut calls = 0;
+        let mut events = Vec::new();
+        assert!(
+            insert_initialized(
+                &mut i,
+                3,
+                0,
+                3,
+                (0, 2),
+                &q,
+                None,
+                || {
+                    calls += 1;
+                    Ok(Clock {
+                        year: if calls == 2 { 0 } else { 2024 },
+                        ..clock
+                    })
+                },
+                |_, event| {
+                    events.push(event.id);
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(calls, 2);
+        assert_eq!(events, [0x40, 0x39]);
+        assert_eq!(&i.memory()[ORDER..ORDER + 6], &[1, 0, 0, 0, 255, 255]);
+        first[13] = 0x40;
+        assert_eq!(&i.memory()[RECORDS..RECORDS + 34], &first);
+        assert_eq!(&i.memory()[RECORDS + 34..RECORDS + 68], &[0xa7; 34]);
     }
     #[test]
     fn insert_partial_capacity_prefix_and_delete_preserve_physical_data() {

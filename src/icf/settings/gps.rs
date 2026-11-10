@@ -567,27 +567,67 @@ impl AlarmField {
         })
     }
 }
+
+/// 70939 normal group paint. The provider borrows the actual native selector;
+/// CSV Group/Bank ordinals do not include these localized captions.
+pub fn paint_alarm_group(
+    image: &Icf<'_>,
+    mut caption: impl FnMut(&[u8], usize) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<u8>, Error> {
+    let resource = match AlarmField::Type.read(image) {
+        0 | 1 => return Ok(b"--".to_vec()),
+        2 => b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_Group".as_slice(),
+        3 => b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_CH",
+        _ => return Err(invalid("GPS alarm group type outside normal0..3")),
+    };
+    let text = caption(resource, usize::from(AlarmField::Group.read(image)))?;
+    if text.is_empty() {
+        return Err(invalid("native GPS alarm group caption unavailable"));
+    }
+    Ok(text)
+}
+
 fn gps_word(image: &Icf<'_>, at: usize) -> u16 {
     u16::from_le_bytes(image.memory()[at..at + 2].try_into().unwrap())
 }
 /// Native C8100, unlike strict gps_groups: starts are not normalized or repaired.
 fn gps_group_count(image: &Icf<'_>, group: u8) -> u16 {
+    gps_group_count_source(image.memory(), group)
+        .expect("Icf covers native GPS count source windows")
+}
+/// Borrowed C8100 source for print/current consumers. No Icf reconstruction or
+/// strict topology validation precedes the original lazy reads and u16 wrap.
+pub fn gps_group_count_source(image: &[u8], group: u8) -> Result<u16, Error> {
+    let word = |at: usize| -> Result<u16, Error> {
+        Ok(u16::from_le_bytes(
+            image
+                .get(at..at + 2)
+                .ok_or_else(|| invalid("native GPS count source unavailable"))?
+                .try_into()
+                .unwrap(),
+        ))
+    };
     if group > 26 {
-        return 0;
+        return Ok(0);
     }
-    let start = gps_word(image, 0x3c5dd + 2 * usize::from(group));
+    let start = word(0x3c5dd + 2 * usize::from(group))?;
     if start >= 300 {
-        return 0;
+        return Ok(0);
     }
-    if let Some(next) = (usize::from(group) + 1..27)
-        .map(|g| gps_word(image, 0x3c5dd + 2 * g))
-        .find(|&s| s < 300)
-    {
-        return next.wrapping_sub(start);
+    for next_group in usize::from(group) + 1..27 {
+        let next = word(0x3c5dd + 2 * next_group)?;
+        if next < 300 {
+            return Ok(next.wrapping_sub(start));
+        }
     }
-    (usize::from(start)..300)
-        .take_while(|&i| gps_word(image, 0x3c385 + 2 * i) < 300)
-        .count() as u16
+    let mut count = 0;
+    for index in usize::from(start)..300 {
+        if word(0x3c385 + 2 * index)? >= 300 {
+            break;
+        }
+        count += 1;
+    }
+    Ok(count)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -713,6 +753,139 @@ fn altitude_unit(value: i32, to_meters: bool) -> i32 {
         converted as i32
     }
 }
+
+fn altitude_bounds(meter: bool) -> (i64, i64) {
+    if meter {
+        (-10000, 10000)
+    } else {
+        (-32808, 32808)
+    }
+}
+
+fn altitude_local(old: i32, meter: bool) -> i32 {
+    if old == i32::MAX {
+        old
+    } else {
+        let n = if meter { altitude_unit(old, true) } else { old };
+        n.wrapping_add(if n > 0 { 5 } else { -5 }) / 10
+    }
+}
+
+/// A089C normal paint shared with GPS-memory's signed32 holder. No saver runs.
+pub fn paint_altitude_raw(old: i32, meter: bool) -> Vec<u8> {
+    let mut text = if old == i32::MAX {
+        b"------".to_vec()
+    } else {
+        altitude_local(old, meter).to_string().into_bytes()
+    };
+    text.extend_from_slice(altitude_suffix(meter));
+    text
+}
+
+fn altitude_suffix(meter: bool) -> &'static [u8] {
+    if meter { b"m" } else { b"ft" }
+}
+
+fn speed_suffix(unit: u8) -> &'static [u8] {
+    match unit {
+        1 => b"mph",
+        2 => b"kt",
+        _ => b"km/h",
+    }
+}
+
+/// The same live396B5 unit source as normal paint, without a completed suffix.
+pub fn edit_altitude_live(
+    old: i32,
+    image: &Icf<'_>,
+    input: super::extended::NumberInput<'_>,
+    point: u8,
+) -> Result<super::extended::NumberEffect, Error> {
+    let meter = image.memory()[0x396b5] == 0;
+    edit_altitude_with_source(old, meter, input, point, || {
+        Ok(altitude_suffix(meter).to_vec())
+    })
+}
+
+/// A089C's holder-independent altitude wrapper. Settings and GPS-memory callers
+/// apply the returned candidate through their own existing saver and flags.
+pub fn edit_altitude_raw(
+    old: i32,
+    meter: bool,
+    input: super::extended::NumberInput<'_>,
+    point: u8,
+    unit_output: Option<&[u8]>,
+) -> Result<super::extended::NumberEffect, Error> {
+    edit_altitude_with_source(old, meter, input, point, || {
+        unit_output
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| invalid("actual native GPS unit/degree output unavailable"))
+    })
+}
+
+fn edit_altitude_with_source(
+    old: i32,
+    meter: bool,
+    input: super::extended::NumberInput<'_>,
+    point: u8,
+    unit_output: impl FnOnce() -> Result<Vec<u8>, Error>,
+) -> Result<super::extended::NumberEffect, Error> {
+    use super::extended::{NumberEffect, NumberInput};
+    let (min, max) = altitude_bounds(meter);
+    let missing = old == i32::MAX;
+    let local = altitude_local(old, meter);
+    let mut state_out = if input == NumberInput::Begin { 2 } else { 0 };
+    let (mut candidate, accepted) = match input {
+        NumberInput::Text(text) => {
+            if !text.is_ascii() {
+                return Err(invalid(
+                    "GPS numeric ctype for non-ASCII requires actual native output",
+                ));
+            }
+            if !text.iter().take_while(|&&b| b != 0).any(u8::is_ascii_digit) {
+                (i32::MAX, true)
+            } else {
+                let (n, accepted) = super::extended::numeric_value(text, point, 0, 1)?;
+                (n.clamp(min, max) as i32, accepted)
+            }
+        }
+        NumberInput::Next | NumberInput::Previous if missing => {
+            state_out = 2;
+            (local, false)
+        }
+        NumberInput::Next | NumberInput::Previous => {
+            let n = local.wrapping_add(if input == NumberInput::Next { 1 } else { -1 });
+            (
+                if i64::from(n) < min {
+                    max as i32
+                } else if i64::from(n) > max {
+                    min as i32
+                } else {
+                    n
+                },
+                true,
+            )
+        }
+        _ => (local, false),
+    };
+    if accepted && candidate != i32::MAX {
+        candidate = candidate.wrapping_mul(10);
+        if meter {
+            candidate = altitude_unit(candidate, false);
+        }
+    }
+    let output = unit_output()?;
+    Ok(NumberEffect {
+        stored: accepted,
+        accepted,
+        candidate: i64::from(candidate),
+        raw_candidate: candidate,
+        state_out,
+        notify_flags: 0,
+        suffix: if state_out == 2 { Vec::new() } else { output },
+        gray: false,
+    })
+}
 /// D501C's native sentinel and wrapped integer ratio, no new floating rounding.
 fn speed_unit(value: u32, from: u8, to: u8) -> u32 {
     if value == 0 || value == 65535 || from == to {
@@ -722,16 +895,22 @@ fn speed_unit(value: u32, from: u8, to: u8) -> u32 {
             / [1000, 1852, 1609][usize::from(to)]
     }
 }
+
+fn speed_display_unit(unit: u8) -> u8 {
+    match unit {
+        1 => 2,
+        2 => 1,
+        _ => 0,
+    }
+}
+
+fn speed_local(old: u32, display_unit: u8) -> i32 {
+    (speed_unit(old, 1, display_unit) as i32).wrapping_add(5) / 10
+}
 impl NumberField {
     pub fn bounds(&self, image: &Icf<'_>) -> (i64, i64) {
         match self.kind {
-            NumberKind::Altitude => {
-                if image.memory()[0x396b5] == 0 {
-                    (-10000, 10000)
-                } else {
-                    (-32808, 32808)
-                }
-            }
+            NumberKind::Altitude => altitude_bounds(image.memory()[0x396b5] == 0),
             NumberKind::Course => (0, 360),
             NumberKind::AlarmRow => (0, 299),
             NumberKind::Speed => (
@@ -744,6 +923,39 @@ impl NumberField {
             ),
         }
     }
+    /// Normal A089C/A0B3C/A0C40/A4918 paint, not an edit candidate or saver.
+    /// Units are live image reads. Only course needs the shared degree provider.
+    pub fn paint(&self, image: &Icf<'_>, resources: Resources) -> Result<Vec<u8>, Error> {
+        if self.kind == NumberKind::AlarmRow && image.memory()[0x3c622] != 3 {
+            return Ok(b"--".to_vec());
+        }
+        let Value::Number(old) = self.setting.read(image, 0)?;
+        match self.kind {
+            NumberKind::Altitude => {
+                Ok(paint_altitude_raw(old as i32, image.memory()[0x396b5] == 0))
+            }
+            NumberKind::Speed => {
+                let unit = image.memory()[0x396b6];
+                let mut text = speed_local(old as u32, speed_display_unit(unit))
+                    .to_string()
+                    .into_bytes();
+                text.extend_from_slice(speed_suffix(unit));
+                Ok(text)
+            }
+            NumberKind::Course => {
+                let degree = crate::csv::number::paint::degree(
+                    resources.language_descriptor,
+                    resources.system_langid,
+                )
+                .map_err(|_| invalid("native GPS course degree source unavailable"))?;
+                let mut text = old.to_string().into_bytes();
+                text.push(degree);
+                Ok(text)
+            }
+            // Group count only gates accepted saves, never normal row display.
+            NumberKind::AlarmRow => Ok(old.to_string().into_bytes()),
+        }
+    }
     /// unit_output is actual native degree/unit text. Missing output fails before
     /// the wrapper's final output copy, including its false-helper display path.
     pub fn edit(
@@ -753,31 +965,75 @@ impl NumberField {
         point: u8,
         unit_output: Option<&[u8]>,
     ) -> Result<super::extended::NumberEffect, Error> {
+        self.edit_with_source(image, input, point, || {
+            unit_output
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| invalid("actual native GPS unit/degree output unavailable"))
+        })
+    }
+
+    /// Native numeric edit with live unit bytes and the shared48B28 producer.
+    /// Resolve the suffix after numeric conversion but before the case saver,
+    /// including cancellation/display paths; missing degree input is not guessed.
+    pub fn edit_live(
+        &self,
+        image: &mut Icf<'_>,
+        input: super::extended::NumberInput<'_>,
+        point: u8,
+        resources: Resources,
+    ) -> Result<super::extended::NumberEffect, Error> {
+        let meter = image.memory()[0x396b5] == 0;
+        let speed = image.memory()[0x396b6];
+        self.edit_with_source(image, input, point, || match self.kind {
+            NumberKind::Altitude => Ok(altitude_suffix(meter).to_vec()),
+            NumberKind::Speed => Ok(speed_suffix(speed).to_vec()),
+            NumberKind::Course => crate::csv::number::paint::degree(
+                resources.language_descriptor,
+                resources.system_langid,
+            )
+            .map(|byte| vec![byte])
+            .map_err(|_| invalid("native GPS course degree source unavailable")),
+            NumberKind::AlarmRow => Ok(Vec::new()),
+        })
+    }
+
+    fn edit_with_source(
+        &self,
+        image: &mut Icf<'_>,
+        input: super::extended::NumberInput<'_>,
+        point: u8,
+        unit_output: impl FnOnce() -> Result<Vec<u8>, Error>,
+    ) -> Result<super::extended::NumberEffect, Error> {
         use super::extended::{NumberEffect, NumberInput};
         let Value::Number(old) = self.setting.read(image, 0)?;
-        let (min, max) = self.bounds(image);
-        let meter = image.memory()[0x396b5] == 0;
-        let unit = image.memory()[0x396b6];
-        let speed = match unit {
-            1 => 2,
-            2 => 1,
-            _ => 0,
-        };
-        let missing = self.kind == NumberKind::Altitude && old == i64::from(i32::MAX);
-        let local = match self.kind {
-            NumberKind::Altitude if !missing => {
-                let n = if meter {
-                    altitude_unit(old as i32, true)
-                } else {
-                    old as i32
-                };
-                n.wrapping_add(if n > 0 { 5 } else { -5 }) / 10
+        if self.kind == NumberKind::Altitude {
+            let mut effect = edit_altitude_with_source(
+                old as i32,
+                image.memory()[0x396b5] == 0,
+                input,
+                point,
+                unit_output,
+            )?;
+            if effect.stored {
+                self.setting
+                    .store_numeric_raw(image, 0, effect.raw_candidate)?;
             }
-            NumberKind::Speed => (speed_unit(old as u32, 1, speed) as i32).wrapping_add(5) / 10,
-            _ => old as i32,
+            effect.gray = self.setting.key == 0x1c4 && image.memory()[0x399e3] != 2;
+            if effect.stored && matches!(self.setting.key, 0x1ed | 0x1fe) {
+                effect.notify_flags = 0x20;
+            }
+            return Ok(effect);
+        }
+        let (min, max) = self.bounds(image);
+        let unit = image.memory()[0x396b6];
+        let speed = speed_display_unit(unit);
+        let local = if self.kind == NumberKind::Speed {
+            speed_local(old as u32, speed)
+        } else {
+            old as i32
         };
         let active = self.kind != NumberKind::AlarmRow || image.memory()[0x3c622] == 3;
-        let mut state_out = if active && input == NumberInput::Begin {
+        let state_out = if active && input == NumberInput::Begin {
             2
         } else {
             0
@@ -792,18 +1048,8 @@ impl NumberField {
                             "GPS numeric ctype for non-ASCII requires actual native output",
                         ));
                     }
-                    if self.kind == NumberKind::Altitude
-                        && !text.iter().take_while(|&&b| b != 0).any(u8::is_ascii_digit)
-                    {
-                        (i32::MAX, true)
-                    } else {
-                        let (n, accepted) = super::extended::numeric_value(text, point, 0, 1)?;
-                        (n.clamp(min, max) as i32, accepted)
-                    }
-                }
-                NumberInput::Next | NumberInput::Previous if missing => {
-                    state_out = 2;
-                    (local, false)
+                    let (n, accepted) = super::extended::numeric_value(text, point, 0, 1)?;
+                    (n.clamp(min, max) as i32, accepted)
                 }
                 NumberInput::Next | NumberInput::Previous => {
                     let n = local.wrapping_add(if input == NumberInput::Next { 1 } else { -1 });
@@ -824,22 +1070,11 @@ impl NumberField {
         if self.kind == NumberKind::Speed {
             candidate = speed_unit(candidate.wrapping_mul(10) as u32, speed, 1) as i32;
         }
-        if self.kind == NumberKind::Altitude && accepted && candidate != i32::MAX {
-            candidate = candidate.wrapping_mul(10);
-            if meter {
-                candidate = altitude_unit(candidate, false);
-            }
-        }
         let suffix = if self.kind == NumberKind::AlarmRow || !active {
             Vec::new()
         } else {
-            let output = unit_output
-                .ok_or_else(|| invalid("actual native GPS unit/degree output unavailable"))?;
-            if state_out == 2 {
-                Vec::new()
-            } else {
-                output.to_vec()
-            }
+            let output = unit_output()?;
+            if state_out == 2 { Vec::new() } else { output }
         };
         let stored = accepted
             && (self.kind != NumberKind::AlarmRow
@@ -848,7 +1083,6 @@ impl NumberField {
             self.setting.store_numeric_raw(image, 0, candidate)?;
         }
         let gray = match self.setting.key {
-            0x1c4 => image.memory()[0x399e3] != 2,
             0x1ef | 0x1f0 => image.memory()[0x3c77a] != 1,
             0x200 | 0x201 => image.memory()[0x3c7c8] != 1,
             _ => false,
@@ -859,11 +1093,7 @@ impl NumberField {
             candidate: i64::from(candidate),
             raw_candidate: candidate,
             state_out,
-            notify_flags: if stored && matches!(self.setting.key, 0x1ed | 0x1fe) {
-                0x20
-            } else {
-                0
-            },
+            notify_flags: 0,
             suffix,
             gray,
         })
@@ -991,7 +1221,7 @@ impl SymbolField {
         index: usize,
         input: super::extended::FixedTextInput<'_>,
     ) -> Result<super::extended::TextEffect, crate::csv::Error> {
-        self.edit_with_nls(image, index, input, crate::csv::nls::ascii_map)
+        self.edit_with_nls(image, index, input, crate::csv::nls::platform_map)
     }
     pub fn edit_with_nls(
         &self,
@@ -1367,6 +1597,48 @@ impl SentenceField {
         }
         selected
     }
+    /// C797C/C85F0 generates NMEA's fixed18 normal description; no64-row copy.
+    /// A4058 group6 reads the real GI_GpsLogSentence provider and appends LF.
+    /// The same raw projection as SentenceDialog ignores unknown storage bits.
+    pub fn paint(
+        self,
+        image: &Icf<'_>,
+        mut resource: impl FnMut(&[u8], usize) -> Result<Vec<u8>, Error>,
+    ) -> Result<Vec<u8>, Error> {
+        let selected = self.read(image);
+        let mut text = if selected == 0 {
+            b"OFF".to_vec()
+        } else if self == Self::Nmea && selected.count_ones() > 4 {
+            // The original initializer explicitly uses this invalid-count label.
+            b"Dummy".to_vec()
+        } else {
+            let mut text = Vec::new();
+            for index in 0..self.count() {
+                if selected & (1 << index) == 0 {
+                    continue;
+                }
+                if !text.is_empty() {
+                    text.extend_from_slice(b", ");
+                }
+                if self == Self::Nmea {
+                    text.extend_from_slice([b"RMC", b"GGA", b"GLL", b"GSA", b"VTG", b"GSV"][index]);
+                } else {
+                    let label = resource(b"GI_GpsLogSentence", index)?;
+                    if label.is_empty() {
+                        return Err(invalid("native GPS logger sentence caption unavailable"));
+                    }
+                    text.extend_from_slice(&label);
+                }
+            }
+            text
+        };
+        if self == Self::Nmea {
+            text.resize(18, b' ');
+        } else {
+            text.push(b'\n');
+        }
+        Ok(text)
+    }
 }
 pub fn find_sentence(name_or_id: &str) -> Result<SentenceField, Error> {
     SentenceField::ALL
@@ -1504,7 +1776,7 @@ impl TextField {
         index: usize,
         input: super::extended::FixedTextInput<'_>,
     ) -> Result<super::extended::TextEffect, crate::csv::Error> {
-        self.edit_with_nls(image, index, input, crate::csv::nls::ascii_map)
+        self.edit_with_nls(image, index, input, crate::csv::nls::platform_map)
     }
     pub fn edit_with_nls(
         &self,
@@ -1570,6 +1842,198 @@ mod tests {
             system_langid: Some(0x409),
             language_descriptor: Some(0),
         }
+    }
+    #[test]
+    fn library_r2_live_numeric_sources_save_seven_fields_without_completed_units() {
+        use super::super::extended::NumberInput;
+        let unavailable = Resources {
+            system_langid: None,
+            language_descriptor: None,
+        };
+        for field in number_fields()
+            .iter()
+            .filter(|field| field.kind != NumberKind::AlarmRow)
+        {
+            for (unit, altitude, speed) in [
+                (0, 328_i32, 53_i32),
+                (1, 100, 86),
+                (2, 100, 100),
+                (255, 100, 53),
+            ] {
+                let mut image = image();
+                image
+                    .patch_memory(&[(0x396b5, &[unit]), (0x396b6, &[unit])])
+                    .unwrap();
+                let before = image.memory().to_vec();
+                let out = field
+                    .edit_live(&mut image, NumberInput::Text(b"10"), b'.', resources())
+                    .unwrap();
+                let (raw, suffix) = match field.kind {
+                    NumberKind::Altitude => {
+                        (altitude, if unit == 0 { b"m".as_slice() } else { b"ft" })
+                    }
+                    NumberKind::Course => (10, b"\xb0".as_slice()),
+                    NumberKind::Speed => (
+                        speed,
+                        match unit {
+                            1 => b"mph".as_slice(),
+                            2 => b"kt",
+                            _ => b"km/h",
+                        },
+                    ),
+                    _ => unreachable!(),
+                };
+                assert!(out.accepted && out.stored);
+                assert_eq!((out.raw_candidate, out.suffix.as_slice()), (raw, suffix));
+                let mut expected = before;
+                expected[field.setting.offset..field.setting.offset + field.setting.width]
+                    .copy_from_slice(&raw.to_le_bytes()[..field.setting.width]);
+                assert_eq!(image.memory(), expected);
+                for input in [
+                    NumberInput::Cancel,
+                    NumberInput::Begin,
+                    NumberInput::Selected(Selection {
+                        key: 1,
+                        phase: 2,
+                        candidate: 9,
+                        accepted: false,
+                    }),
+                ] {
+                    let out = field
+                        .edit_live(&mut image, input, b'.', resources())
+                        .unwrap();
+                    assert!(!out.stored && !out.accepted);
+                    assert_eq!(image.memory(), expected);
+                }
+                if field.kind != NumberKind::Course {
+                    assert!(
+                        field
+                            .edit_live(&mut image, NumberInput::Text(b"0"), b'.', unavailable)
+                            .unwrap()
+                            .stored
+                    );
+                }
+            }
+        }
+        let course = number_fields()
+            .iter()
+            .find(|field| field.setting.key == 0x1ef)
+            .unwrap();
+        let mut image = image();
+        let before = image.memory().to_vec();
+        assert_eq!(
+            course.edit_live(&mut image, NumberInput::Text(b"10"), b'.', unavailable),
+            Err(invalid("native GPS course degree source unavailable"))
+        );
+        assert_eq!(image.memory(), before);
+        assert_eq!(
+            course.edit_live(&mut image, NumberInput::Text(b"\xff"), b'.', unavailable),
+            Err(invalid(
+                "GPS numeric ctype for non-ASCII requires actual native output"
+            ))
+        );
+        assert_eq!(image.memory(), before);
+        let japanese = Resources {
+            language_descriptor: Some(1),
+            system_langid: None,
+        };
+        assert_eq!(
+            course
+                .edit_live(&mut image, NumberInput::Text(b"999"), b'.', japanese)
+                .unwrap()
+                .suffix,
+            b"\xdf"
+        );
+        assert_eq!(gps_word(&image, 0x3c776), 360);
+        let altitude = number_fields()
+            .iter()
+            .find(|field| field.setting.key == 0x1ed)
+            .unwrap();
+        image.patch_memory(&[(0x396b5, &[0])]).unwrap();
+        assert_eq!(
+            altitude
+                .edit_live(&mut image, NumberInput::Text(b"-10001"), b'.', unavailable)
+                .unwrap()
+                .raw_candidate,
+            -328084
+        );
+    }
+
+    #[test]
+    fn library_r2_choice_approval_is_distinct_from_normal_return() {
+        let mut image = image();
+        image.patch_memory(&[(0x3c622, &[2, 4, 8, 7])]).unwrap();
+        let mut pairs = [b'/'; 148];
+        pairs[1] = b'!';
+        let pairs = NativeSymbolPairs::read(&pairs).unwrap();
+        for (key, phase, accepted) in [(1, 2, false), (2, 2, true), (1, 1, true)] {
+            let input = ChoiceInput::Selected(Selection {
+                key,
+                phase,
+                candidate: 1,
+                accepted,
+            });
+            let before = image.memory().to_vec();
+            for field in choice_fields() {
+                let out = field.edit(&mut image, input, resources()).unwrap();
+                assert!(!out.stored && !out.popup_requested);
+                assert_eq!(out.notify_flags, 0);
+            }
+            for field in AlarmField::ALL {
+                assert!(!field.edit(&mut image, input).unwrap().stored);
+            }
+            for field in symbol_fields() {
+                assert!(!field.select(&mut image, 0, input, &pairs).unwrap().stored);
+            }
+            assert_eq!(image.memory(), before);
+        }
+    }
+    #[test]
+    fn altitude_raw_and_setting_wrappers_share_candidates_and_late_source_gate() {
+        use crate::icf::settings::extended::NumberInput;
+        let raw = edit_altitude_raw(0, false, NumberInput::Text(b"12"), b'.', Some(b"ft")).unwrap();
+        assert_eq!(
+            (raw.raw_candidate, raw.accepted, raw.stored),
+            (120, true, true)
+        );
+        assert_eq!(raw.suffix, b"ft");
+        assert_eq!(raw.notify_flags, 0);
+        assert_eq!(
+            edit_altitude_raw(0, true, NumberInput::Text(b"100"), b'.', Some(b"m"))
+                .unwrap()
+                .raw_candidate,
+            3281
+        );
+        let absent =
+            edit_altitude_raw(i32::MAX, true, NumberInput::Next, b'.', Some(b"m")).unwrap();
+        assert_eq!(
+            (absent.state_out, absent.accepted, absent.raw_candidate),
+            (2, false, i32::MAX)
+        );
+        assert!(edit_altitude_raw(0, true, NumberInput::Begin, b'.', None).is_err());
+
+        let altitude = number_fields()
+            .iter()
+            .find(|f| f.setting.key == 0x1ed)
+            .unwrap();
+        let mut image = image();
+        image.patch_memory(&[(0x396b5, &[1])]).unwrap();
+        let effect = altitude
+            .edit(&mut image, NumberInput::Text(b"12"), b'.', Some(b"ft"))
+            .unwrap();
+        assert_eq!(effect.raw_candidate, raw.raw_candidate);
+        assert_eq!(effect.notify_flags, 0x20);
+        assert_eq!(
+            altitude.setting.read(&image, 0).unwrap(),
+            Value::Number(120)
+        );
+        let before = image.memory().to_vec();
+        assert!(
+            altitude
+                .edit(&mut image, NumberInput::Text(b"13"), b'.', None)
+                .is_err()
+        );
+        assert_eq!(image.memory(), before);
     }
     #[test]
     fn every_choice_runs_cancel_begin_raw_selection_unknown_replacement_and_native_domains() {
@@ -1788,6 +2252,105 @@ mod tests {
             )
             .unwrap();
         assert_eq!(&image.memory()[0x3c680..0x3c683], b"a\xffb");
+    }
+
+    #[test]
+    fn alarm_group_and_sentence_normal_paint_use_real_profiles_without_stores() {
+        let mut image = image();
+        for kind in [0, 1] {
+            image.patch_memory(&[(0x3c622, &[kind, 255])]).unwrap();
+            let before = image.memory().to_vec();
+            assert_eq!(
+                paint_alarm_group(&image, |_, _| panic!("off must not read a caption")).unwrap(),
+                b"--"
+            );
+            assert_eq!(image.memory(), before);
+        }
+        for (kind, group, name) in [
+            (2, 0, b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_Group".as_slice()),
+            (2, 27, b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_Group"),
+            (3, 0, b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_CH"),
+            (3, 26, b"GI_Sheet_Sel_Common_Gps_Alarm_Bank_CH"),
+        ] {
+            image
+                .patch_memory(&[(0x3c622, &[kind, group]), (0x3c5dd, &[255; 54])])
+                .unwrap();
+            let before = image.memory().to_vec();
+            let text = paint_alarm_group(&image, |resource, index| {
+                assert_eq!(resource, name);
+                assert_eq!(index, usize::from(group));
+                Ok(b"native provider".to_vec())
+            })
+            .unwrap();
+            assert_eq!(text, b"native provider");
+            assert_eq!(image.memory(), before);
+        }
+        image.patch_memory(&[(0x3c622, &[3, 27])]).unwrap();
+        assert!(
+            paint_alarm_group(&image, |_, index| {
+                assert_eq!(index, 27);
+                Err(invalid("native provider index unavailable"))
+            })
+            .is_err()
+        );
+        assert!(paint_alarm_group(&image, |_, _| Ok(Vec::new())).is_err());
+        image.patch_memory(&[(0x3c622, &[255])]).unwrap();
+        assert!(paint_alarm_group(&image, |_, _| panic!("invalid type must not look up")).is_err());
+
+        for (raw, expected) in [
+            ([0xfe; 6], b"OFF".as_slice()),
+            ([0xff, 0xfe, 0xff, 0xfe, 0xfe, 0xfe], b"RMC, GLL"),
+            ([1, 1, 1, 1, 0, 0], b"RMC, GGA, GLL, GSA"),
+            ([1, 1, 1, 1, 1, 0], b"Dummy"),
+            ([1; 6], b"Dummy"),
+        ] {
+            image.patch_memory(&[(0x399ea, &raw)]).unwrap();
+            let before = image.memory().to_vec();
+            let mut expected = expected.to_vec();
+            expected.resize(18, b' ');
+            assert_eq!(
+                SentenceField::Nmea
+                    .paint(&image, |_, _| panic!("NMEA has code literals"))
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(image.memory(), before);
+        }
+        image.patch_memory(&[(0x399f3, &[0x0f])]).unwrap();
+        assert_eq!(
+            SentenceField::Logger
+                .paint(&image, |_, _| panic!("zero must not read a label"))
+                .unwrap(),
+            b"OFF\n"
+        );
+        for (raw, indices, expected) in [
+            (0x5f, [1_usize, 3].as_slice(), b"L1, L3\n".as_slice()),
+            (0xf0, [0, 1, 2, 3].as_slice(), b"L0, L1, L2, L3\n"),
+        ] {
+            image.patch_memory(&[(0x399f3, &[raw])]).unwrap();
+            let before = image.memory().to_vec();
+            let mut visited = Vec::new();
+            let text = SentenceField::Logger
+                .paint(&image, |name, index| {
+                    assert_eq!(name, b"GI_GpsLogSentence");
+                    visited.push(index);
+                    Ok(format!("L{index}").into_bytes())
+                })
+                .unwrap();
+            assert_eq!(visited, indices);
+            assert_eq!(text, expected);
+            assert_eq!(image.memory(), before);
+        }
+        assert!(
+            SentenceField::Logger
+                .paint(&image, |_, _| Ok(Vec::new()))
+                .is_err()
+        );
+        assert!(
+            SentenceField::Logger
+                .paint(&image, |_, _| Err(invalid("provider failed")))
+                .is_err()
+        );
     }
 
     #[test]
@@ -2042,6 +2605,152 @@ mod tests {
                 .popup_requested
         );
         assert_eq!(image.memory(), before);
+    }
+
+    #[test]
+    fn gps_number_normal_paint_keeps_display_units_sentinels_and_row_profile() {
+        use super::super::extended::NumberInput;
+        let field = |key| {
+            number_fields()
+                .iter()
+                .find(|f| f.setting.key == key)
+                .unwrap()
+        };
+        let unavailable = Resources {
+            system_langid: None,
+            language_descriptor: None,
+        };
+        let mut image = image();
+        for key in [0x1f0, 0x201] {
+            let speed = field(key);
+            image
+                .patch_memory(&[(speed.setting.offset, &100_u16.to_le_bytes())])
+                .unwrap();
+            for (unit, expected) in [
+                (0, b"19km/h".as_slice()),
+                (1, b"12mph"),
+                (2, b"10kt"),
+                (255, b"19km/h"),
+            ] {
+                image.patch_memory(&[(0x396b6, &[unit])]).unwrap();
+                let before = image.memory().to_vec();
+                assert_eq!(speed.paint(&image, unavailable).unwrap(), expected);
+                assert_eq!(image.memory(), before);
+            }
+            image.patch_memory(&[(0x396b6, &[0])]).unwrap();
+            let candidate = speed
+                .edit(&mut image, NumberInput::Display, b'.', Some(b"km/h"))
+                .unwrap();
+            assert_eq!(candidate.candidate, 102);
+            assert!(!candidate.stored);
+            assert_eq!(speed.paint(&image, unavailable).unwrap(), b"19km/h");
+            image
+                .patch_memory(&[(speed.setting.offset, &u16::MAX.to_le_bytes())])
+                .unwrap();
+            assert_eq!(speed.paint(&image, unavailable).unwrap(), b"6554km/h");
+        }
+        for (raw, expected) in [
+            (14, b"1ft".as_slice()),
+            (15, b"2ft"),
+            (-14, b"-1ft"),
+            (-15, b"-2ft"),
+            (-4, b"0ft"),
+            (i32::MIN, b"214748364ft"),
+            (i32::MAX - 1, b"-214748364ft"),
+        ] {
+            assert_eq!(paint_altitude_raw(raw, false), expected);
+        }
+        assert_eq!(paint_altitude_raw(16, true), b"1m");
+        assert_eq!(paint_altitude_raw(-16, true), b"-1m");
+        assert_eq!(paint_altitude_raw(i32::MAX, true), b"------m");
+        assert_eq!(paint_altitude_raw(i32::MAX, false), b"------ft");
+        for key in [0x1c4, 0x1ed, 0x1fe] {
+            let altitude = field(key);
+            image
+                .patch_memory(&[
+                    (altitude.setting.offset, &33_i32.to_le_bytes()),
+                    (0x396b5, &[0]),
+                ])
+                .unwrap();
+            assert_eq!(altitude.paint(&image, unavailable).unwrap(), b"1m");
+            image.patch_memory(&[(0x396b5, &[255])]).unwrap();
+            assert_eq!(altitude.paint(&image, unavailable).unwrap(), b"3ft");
+        }
+        for key in [0x1ef, 0x200] {
+            let course = field(key);
+            for raw in [0_u16, 360, u16::MAX] {
+                image
+                    .patch_memory(&[(course.setting.offset, &raw.to_le_bytes())])
+                    .unwrap();
+                assert_eq!(
+                    course.paint(&image, resources()).unwrap(),
+                    [raw.to_string().as_bytes(), &[0xb0]].concat()
+                );
+            }
+            let japanese = Resources {
+                language_descriptor: Some(1),
+                system_langid: None,
+            };
+            assert_eq!(course.paint(&image, japanese).unwrap(), b"65535\xdf");
+            let system = Resources {
+                language_descriptor: Some(0),
+                system_langid: Some(0x411),
+            };
+            assert_eq!(course.paint(&image, system).unwrap(), b"65535\xdf");
+            assert!(course.paint(&image, unavailable).is_err());
+            assert!(
+                course
+                    .paint(
+                        &image,
+                        Resources {
+                            language_descriptor: Some(2),
+                            system_langid: None
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        let alarm = field(0x1cb);
+        image
+            .patch_memory(&[(0x3c624, &299_u16.to_le_bytes()), (0x3c5dd, &[255; 54])])
+            .unwrap();
+        for kind in [0, 1, 2, 255] {
+            image.patch_memory(&[(0x3c622, &[kind])]).unwrap();
+            assert_eq!(alarm.paint(&image, unavailable).unwrap(), b"--");
+        }
+        image.patch_memory(&[(0x3c622, &[3, 5])]).unwrap();
+        assert_eq!(gps_group_count(&image, 5), 0);
+        assert_eq!(alarm.paint(&image, unavailable).unwrap(), b"299");
+        assert!(
+            !alarm
+                .edit(&mut image, NumberInput::Text(b"0"), b'.', None)
+                .unwrap()
+                .stored
+        );
+        image
+            .patch_memory(&[
+                (0x3c5dd + 10, &0_u16.to_le_bytes()),
+                (0x3c5dd + 12, &2_u16.to_le_bytes()),
+            ])
+            .unwrap();
+        assert_eq!(gps_group_count(&image, 5), 2);
+        let before = image.memory().to_vec();
+        assert_eq!(alarm.paint(&image, unavailable).unwrap(), b"299");
+        assert_eq!(image.memory(), before);
+        assert!(
+            alarm
+                .edit(&mut image, NumberInput::Text(b"1"), b'.', None)
+                .unwrap()
+                .stored
+        );
+        assert_eq!(alarm.paint(&image, unavailable).unwrap(), b"1");
+        assert!(
+            !alarm
+                .edit(&mut image, NumberInput::Text(b"2"), b'.', None)
+                .unwrap()
+                .stored
+        );
+        assert_eq!(alarm.paint(&image, unavailable).unwrap(), b"1");
     }
 
     #[test]
