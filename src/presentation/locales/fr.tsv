@@ -11,7 +11,7 @@ field.1af	Image à transmettre
 field.1b2	Indicatif du destinataire de l'image
 field.1c2	Latitude GPS manuelle
 field.1c3	Longitude GPS manuelle
-field.1c7	Groupe mémoire de l'alarme GPS
+field.1c7	Étendue angulaire de l'alarme de groupe GPS
 field.1ce	Adresse UNPROTO D-PRS
 field.1d1	Symbole de position D-PRS
 field.1da	Commentaire de position D-PRS

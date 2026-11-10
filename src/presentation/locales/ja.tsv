@@ -11,7 +11,7 @@ field.1af	送信画像
 field.1b2	画像送信先のコールサイン
 field.1c2	手動設定のGPS緯度
 field.1c3	手動設定のGPS経度
-field.1c7	GPSアラームのメモリーグループ
+field.1c7	GPSグループアラームの角度範囲
 field.1ce	D-PRS UNPROTOアドレス
 field.1d1	D-PRS位置シンボル
 field.1da	D-PRS位置コメント

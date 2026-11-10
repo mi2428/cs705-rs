@@ -11,7 +11,7 @@ field.1af	Transmit picture
 field.1b2	Picture recipient callsign
 field.1c2	Manual GPS latitude
 field.1c3	Manual GPS longitude
-field.1c7	GPS alarm memory group
+field.1c7	GPS group alarm angular range
 field.1ce	D-PRS UNPROTO address
 field.1d1	D-PRS position symbol
 field.1da	D-PRS position comment

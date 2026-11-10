@@ -11,7 +11,7 @@ field.1af	Sendebild
 field.1b2	Rufzeichen des Bildempfängers
 field.1c2	Manuell eingegebener GPS-Breitengrad
 field.1c3	Manuell eingegebener GPS-Längengrad
-field.1c7	Speichergruppe für den GPS-Alarm
+field.1c7	Winkelbereich des GPS-Gruppenalarms
 field.1ce	D-PRS-UNPROTO-Adresse
 field.1d1	D-PRS-Positionssymbol
 field.1da	D-PRS-Positionskommentar
