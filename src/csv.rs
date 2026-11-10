@@ -12,6 +12,8 @@ pub mod control;
 pub mod datetime;
 #[path = "csv/dispatch.rs"]
 pub mod dispatch;
+#[path = "csv/history.rs"]
+pub mod history;
 #[path = "csv/nls.rs"]
 pub mod nls;
 #[path = "csv/number.rs"]

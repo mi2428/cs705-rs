@@ -135,6 +135,19 @@ pub fn portable_label(
     decimal: u8,
 ) -> Result<Option<Vec<u8>>, Error> {
     use super::payload::Adapter as A;
+    if request.adapter == A::Symbol {
+        if request.source.len() != 2 {
+            return Err(Error::Invalid("Rx symbol requires raw2"));
+        }
+        // Raw resource bytes belong to history's bounded PE source lookup.
+        return Ok(None);
+    }
+    if matches!(
+        request.adapter,
+        A::RxType | A::RxStatus | A::Directivity | A::DataType
+    ) {
+        return rx_label(request).map(Some);
+    }
     if !matches!(
         request.adapter,
         A::Group
@@ -194,6 +207,34 @@ pub fn portable_label(
         _ => static_label(kind, request.adapter, value).unwrap_or(missing),
     };
     Ok(Some(label.to_vec()))
+}
+
+// The compact Rx profile has different resource keys from GUI Type/Status.
+// Unknown physical resource slots and table-outside-memory are not NOT_FOUND.
+fn rx_label(request: &super::payload::Request<'_>) -> Result<Vec<u8>, Error> {
+    use super::payload::Adapter as A;
+    let label: &[u8] = match (request.adapter, request.source) {
+        (A::RxStatus, [0]) | (A::Directivity | A::DataType, [255]) => b"",
+        (A::RxType, [0]) => b"RF",
+        (A::RxType, [1]) => b"TM",
+        (A::RxType, [2]) => b"MONI",
+        (A::RxStatus, [1]) => b"RPT?",
+        (A::RxStatus, [2]) => b"UR?",
+        (A::RxStatus, [3]) => b"RPT UP",
+        (A::Directivity, [0]) => b"Omni",
+        (A::Directivity, [n @ 1..=8]) => return Ok((u32::from(*n) * 45).to_string().into_bytes()),
+        (A::DataType, [0]) => b"Live Object",
+        (A::DataType, [1]) => b"Live Item",
+        (A::DataType, [2]) => b"Killed Object",
+        (A::DataType, [3]) => b"Killed Item",
+        (_, [_]) => {
+            return Err(Error::SourceUnavailable(
+                "Rx label outside normal source profile",
+            ));
+        }
+        _ => return Err(Error::Invalid("Rx scalar label requires raw1")),
+    };
+    Ok(label.to_vec())
 }
 
 /// Built-in ASCII enum import over the same semantics used by export. The
