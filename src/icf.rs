@@ -23,6 +23,7 @@ pub mod record_image;
 mod repeaters;
 pub mod rows;
 pub mod settings;
+pub mod stage9;
 pub mod text;
 
 pub use common::{
