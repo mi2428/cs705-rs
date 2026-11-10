@@ -142,23 +142,6 @@ fn fixture() -> Vec<u8> {
     m[0x3c903..0x3c905].fill(255);
     Icf::from_memory(m).unwrap().to_bytes()
 }
-fn rx_symbol_asset() -> Vec<u8> {
-    let mut pe = vec![0; 0x1200];
-    pe[..2].copy_from_slice(b"MZ");
-    pe[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
-    pe[0x80..0x84].copy_from_slice(b"PE\0\0");
-    pe[0x84..0x86].copy_from_slice(&0x14c_u16.to_le_bytes());
-    pe[0x86..0x88].copy_from_slice(&1_u16.to_le_bytes());
-    pe[0x94..0x96].copy_from_slice(&96_u16.to_le_bytes());
-    pe[0x98..0x9a].copy_from_slice(&0x10b_u16.to_le_bytes());
-    pe[0xb4..0xb8].copy_from_slice(&0x400000_u32.to_le_bytes());
-    pe[0x104..0x108].copy_from_slice(&0x418f00_u32.to_le_bytes());
-    pe[0x108..0x10c].copy_from_slice(&0x1000_u32.to_le_bytes());
-    pe[0x10c..0x110].copy_from_slice(&0x200_u32.to_le_bytes());
-    pe[0x300..0x304].copy_from_slice(&0x819600_u32.to_le_bytes());
-    pe[0x900..0x904].copy_from_slice(b"Car\0");
-    pe
-}
 fn memory_import_fixture() -> Vec<u8> {
     use cs705::icf::{
         record::{self, ChannelField},
@@ -2380,9 +2363,7 @@ fn rx_csv_process_consumes_reverse_rank_raw_and_captured_offset_without_packet_i
     }
     let original = image.to_bytes();
     let input = f.write("rx.icf", &original);
-    let asset = f.write("symbols.exe", &rx_symbol_asset());
     let mut value = context(&f);
-    value["symbol_asset"] = json!(p(&asset));
     let ctx = f.write("context.json", &serde_json::to_vec(&value).unwrap());
     let out = cli(
         &[
@@ -2420,7 +2401,7 @@ fn rx_csv_process_consumes_reverse_rank_raw_and_captured_offset_without_packet_i
         "",
         "",
         "",
-        "Car",
+        "APRS 2F3E",
         "",
         "",
         "",
@@ -2443,6 +2424,41 @@ fn rx_csv_process_consumes_reverse_rank_raw_and_captured_offset_without_packet_i
     ]
     .join(",");
     assert_eq!(lines[1], expected.as_bytes());
+    let symbol_at = 0x309c3 + 0xd7a + 92 * 8 + 12;
+    for (raw, expected) in [
+        ([0x81, 0xff], b"APRS 81FF".as_slice()),
+        ([0, 0], b"APRS 0000"),
+        (*b",;", b"APRS 2C3B"),
+        ([255, b'>'], b""),
+    ] {
+        image.patch_memory(&[(symbol_at, &raw)]).unwrap();
+        let bytes = image.to_bytes();
+        fs::write(&input, &bytes).unwrap();
+        let out = cli(
+            &[
+                "export",
+                p(&input),
+                "--sheet",
+                "rx",
+                "--csv-context",
+                p(&ctx),
+                "-o",
+                "-",
+            ],
+            b"",
+        );
+        exit(&out, 0);
+        let row = out.stdout.split(|b| *b == b'\n').nth(1).unwrap();
+        let cells: Vec<_> = row.split(|b| *b == b',').collect();
+        assert_eq!(cells.len(), 37);
+        assert_eq!(cells[17], expected);
+        assert_eq!(fs::read(&input).unwrap(), bytes);
+        assert_eq!(
+            &Icf::parse(&bytes).unwrap().memory()[symbol_at..symbol_at + 2],
+            &raw
+        );
+    }
+    fs::write(&input, &original).unwrap();
     value["range"] = json!([2, 2]);
     fs::write(&ctx, serde_json::to_vec(&value).unwrap()).unwrap();
     let out = cli(
@@ -2489,6 +2505,40 @@ fn rx_csv_process_consumes_reverse_rank_raw_and_captured_offset_without_packet_i
     exit(&out, 3);
     assert_eq!(report(&out)["rows"], 0);
     assert!(report(&out)["prefix_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(fs::read(keep).unwrap(), b"KEEP");
+}
+
+#[test]
+fn retired_symbol_asset_is_rejected_before_any_image_or_asset_read() {
+    let f = Files::new();
+    let ctx = f.write(
+        "legacy.json",
+        br#"{"profile":"portable-ascii","symbol_asset":"-"}"#,
+    );
+    let input = f.path("unavailable.icf");
+    let keep = f.write("keep.csv", b"KEEP");
+    let out = cli(
+        &[
+            "export",
+            p(&input),
+            "--sheet",
+            "rx",
+            "--csv-context",
+            p(&ctx),
+            "--overwrite",
+            "-o",
+            p(&keep),
+        ],
+        b"",
+    );
+    exit(&out, 3);
+    assert!(
+        report(&out)["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown CSV context member")
+    );
+    assert!(out.stdout.is_empty());
     assert_eq!(fs::read(keep).unwrap(), b"KEEP");
 }
 

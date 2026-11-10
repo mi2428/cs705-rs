@@ -1768,14 +1768,14 @@ pub fn export_history(
 
 /// 88208/91EE4/92AFC. Reverse rank maps stop at the first missing logical rank;
 /// they are not the forward From/To maps and do not skip holes.
+/// Symbol cells use independent APRS byte IDs, not original source captions.
 pub fn export_receive_history(
     image: &Icf<'_>,
     selection: Option<Selection>,
     locale: Locale,
     datetime: &super::datetime::Context<'_>,
-    symbol_pe: Option<&[u8]>,
 ) -> Export {
-    export_receive_history_with_date(image, selection, locale, datetime, symbol_pe, |_| {
+    export_receive_history_with_date(image, selection, locale, datetime, |_| {
         Err(Error::SourceUnavailable("Rx native calendar token output"))
     })
 }
@@ -1786,7 +1786,6 @@ pub fn export_receive_history_with_date(
     selection: Option<Selection>,
     locale: Locale,
     datetime: &super::datetime::Context<'_>,
-    symbol_pe: Option<&[u8]>,
     mut native: impl FnMut(super::datetime::DateToken) -> Result<Vec<u8>, Error>,
 ) -> Export {
     let mut out = Export {
@@ -1847,14 +1846,7 @@ pub fn export_receive_history_with_date(
         for index in range {
             let mut holder = record::reset_holder(0x0e, index, 0);
             record::load_receive_history_storage_into(image, index, &mut holder)?;
-            let Some(bytes) = receive_row(
-                image.memory(),
-                &holder,
-                locale,
-                datetime,
-                symbol_pe,
-                &mut native,
-            )?
+            let Some(bytes) = receive_row(image.memory(), &holder, locale, datetime, &mut native)?
             else {
                 break;
             };
@@ -1874,7 +1866,6 @@ fn receive_row(
     holder: &DecodedRecord,
     locale: Locale,
     datetime: &super::datetime::Context<'_>,
-    symbol_pe: Option<&[u8]>,
     native: &mut impl FnMut(super::datetime::DateToken) -> Result<Vec<u8>, Error>,
 ) -> Result<Option<Vec<u8>>, Error> {
     // 92B51..92B5E precedes even the invalid-H path. Capture once and pass the
@@ -1908,7 +1899,7 @@ fn receive_row(
         super::payload::Kind::ReceiveHistory,
         super::payload::Holder::new(holder.as_bytes())?,
         context,
-        |request| super::history::format_with_date(request, datetime, symbol_pe, &mut *native),
+        |request| super::history::format_with_date(request, datetime, &mut *native),
     )
     .map(Some)
 }
@@ -3025,37 +3016,11 @@ mod tests {
         }
         image
     }
-    fn rx_symbol_asset() -> Vec<u8> {
-        // A single file-backed PE section, the real primary Car pointer slot,
-        // and a NUL caption. No completed cell/row is passed to the formatter.
-        let mut pe = vec![0; 0x1200];
-        pe[..2].copy_from_slice(b"MZ");
-        pe[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
-        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
-        pe[0x84..0x86].copy_from_slice(&0x14c_u16.to_le_bytes());
-        pe[0x86..0x88].copy_from_slice(&1_u16.to_le_bytes());
-        pe[0x94..0x96].copy_from_slice(&96_u16.to_le_bytes());
-        pe[0x98..0x9a].copy_from_slice(&0x10b_u16.to_le_bytes());
-        pe[0xb4..0xb8].copy_from_slice(&0x400000_u32.to_le_bytes());
-        pe[0x104..0x108].copy_from_slice(&0x418f00_u32.to_le_bytes());
-        pe[0x108..0x10c].copy_from_slice(&0x1000_u32.to_le_bytes());
-        pe[0x10c..0x110].copy_from_slice(&0x200_u32.to_le_bytes());
-        pe[0x300..0x304].copy_from_slice(&0x819600_u32.to_le_bytes());
-        pe[0x900..0x904].copy_from_slice(b"Car\0");
-        pe
-    }
     #[test]
     fn rx_root_uses_first_reverse_rank_stops_at_hole_and_shares_real_formatters() {
         let image = rx_image();
-        let asset = rx_symbol_asset();
         let before = image.memory().to_vec();
-        let out = export_receive_history(
-            &image,
-            None,
-            Locale::copied(b'.', b','),
-            &rx_datetime(),
-            Some(&asset),
-        );
+        let out = export_receive_history(&image, None, Locale::copied(b'.', b','), &rx_datetime());
         assert!(out.failure.is_none(), "{:?}", out.failure);
         assert_eq!(out.rows, 1);
         let lines = out.bytes.split(|b| *b == b'\n').collect::<Vec<_>>();
@@ -3079,7 +3044,7 @@ mod tests {
             "",
             "",
             "",
-            "Car",
+            "APRS 2F3E",
             "",
             "",
             "",
@@ -3111,7 +3076,6 @@ mod tests {
             }),
             Locale::copied(b',', b';'),
             &rx_datetime(),
-            Some(&asset),
         );
         assert!(out.failure.is_none());
         assert_eq!(out.rows, 1);
@@ -3128,7 +3092,6 @@ mod tests {
         let mut image = rx_image();
         image.patch_memory(&[(0x3c2ff + 3, &[1])]).unwrap();
         let before = image.memory().to_vec();
-        let asset = rx_symbol_asset();
         let mut date = rx_datetime();
         date.short_date = b"ddd mmmm d ggg e mmm mmm";
         let tokens = [
@@ -3150,7 +3113,6 @@ mod tests {
             selection,
             Locale::copied(b'.', b','),
             &date,
-            Some(&asset),
             |request| {
                 assert_eq!(
                     request.date,
@@ -3180,7 +3142,6 @@ mod tests {
             selection,
             Locale::copied(b'.', b','),
             &date,
-            Some(&asset),
             |_| {
                 seen += 1;
                 if seen > 6 {
@@ -3201,13 +3162,11 @@ mod tests {
     #[test]
     fn rx_native_date_source_is_not_read_for_numeric_empty_or_invalid_date() {
         let mut image = rx_image();
-        let asset = rx_symbol_asset();
         let out = export_receive_history_with_date(
             &image,
             None,
             Locale::copied(b'.', b','),
             &rx_datetime(),
-            Some(&asset),
             |_| panic!("numeric date needs no native source"),
         );
         assert!(out.failure.is_none());
@@ -3221,7 +3180,6 @@ mod tests {
             None,
             Locale::copied(b'.', b','),
             &date,
-            Some(&asset),
             |_| panic!("compact invalid date needs no native source"),
         );
         assert!(out.failure.is_none());
@@ -3234,7 +3192,6 @@ mod tests {
             None,
             Locale::copied(b'.', b','),
             &date,
-            None,
             |_| panic!("missing rank needs no native source"),
         );
         assert!(out.failure.is_none());
@@ -3250,20 +3207,17 @@ mod tests {
                 &invalid,
                 Locale::copied(b'.', b','),
                 &rx_datetime(),
-                None,
                 &mut |_| panic!("invalid holder must not request native date output")
             ),
             Err(Error::SourceUnavailable(_))
         ));
         let mut image = rx_image();
-        let asset = rx_symbol_asset();
         assert!(
             receive_row(
                 image.memory(),
                 &invalid,
                 Locale::copied(b'.', b','),
                 &rx_datetime(),
-                None,
                 &mut |_| panic!("invalid holder must not request native date output")
             )
             .unwrap()
@@ -3272,13 +3226,16 @@ mod tests {
         image
             .patch_memory(&[(0x3c2ff + 3, &[1]), (0x309c3 + 0xd7a + 92 * 3 + 12, b"/?")])
             .unwrap();
-        let out = export_receive_history(
-            &image,
-            None,
-            Locale::copied(b'.', b','),
-            &rx_datetime(),
-            Some(&asset),
-        );
+        let out = export_receive_history(&image, None, Locale::copied(b'.', b','), &rx_datetime());
+        assert!(out.failure.is_none());
+        assert_eq!(out.rows, 3);
+        assert!(out.bytes.windows(9).any(|b| b == b"APRS 2F3F"));
+        // Unknown symbols are data, not formatter failures. An invalid Type on
+        // the second row still exercises the existing completed-prefix boundary.
+        image
+            .patch_memory(&[(0x309c3 + 0x32 + 48 * 3 + 47, &[3])])
+            .unwrap();
+        let out = export_receive_history(&image, None, Locale::copied(b'.', b','), &rx_datetime());
         assert_eq!(out.rows, 1);
         assert!(matches!(
             out.failure,
@@ -3287,13 +3244,7 @@ mod tests {
         image
             .patch_memory(&[(0x396ff, &1440_i16.to_le_bytes())])
             .unwrap();
-        let out = export_receive_history(
-            &image,
-            None,
-            Locale::copied(b'.', b','),
-            &rx_datetime(),
-            Some(&asset),
-        );
+        let out = export_receive_history(&image, None, Locale::copied(b'.', b','), &rx_datetime());
         assert_eq!(out.rows, 0);
         assert!(matches!(
             out.failure,

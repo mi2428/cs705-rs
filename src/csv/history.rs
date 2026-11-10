@@ -1,6 +1,8 @@
 //! Rx92AFC's individual compact1/extra0 formatter requests, not whole CSV rows.
 //! Offset is captured by the caller before holder validity checks. Resource
 //! labels share table::portable_label; Gregorian/BCD/time logic stays in datetime.
+//! Symbol display is intentionally independent of original captions: raw APRS
+//! bytes become a lossless ASCII identifier, not a native-caption fallback.
 
 use super::{Error, datetime, payload, table};
 
@@ -12,19 +14,16 @@ pub mod paint;
 pub fn format(
     request: payload::Request<'_>,
     context: &datetime::Context<'_>,
-    symbol_pe: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    format_with_date(request, context, symbol_pe, |_| {
+    format_with_date(request, context, |_| {
         Err(Error::SourceUnavailable("Rx native calendar token output"))
     })
 }
 
-/// Source bytes are the original PE resource asset, not rendered captions.
 /// Native date tokens use datetime's existing seam, never completed cells/rows.
 pub fn format_with_date(
     request: payload::Request<'_>,
     context: &datetime::Context<'_>,
-    symbol_pe: Option<&[u8]>,
     native: impl FnMut(datetime::DateToken) -> Result<Vec<u8>, Error>,
 ) -> Result<Vec<u8>, Error> {
     use payload::Adapter as A;
@@ -33,7 +32,7 @@ pub fn format_with_date(
             table::portable_label(payload::Kind::ReceiveHistory, &request, b'.')?
                 .ok_or(Error::SourceUnavailable("Rx static label adapter"))
         }
-        A::Symbol => symbol(request.source, symbol_pe, false, true),
+        A::Symbol => symbol(request.source, true),
         A::HistoryDate => {
             let raw = request
                 .source
@@ -160,9 +159,30 @@ pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
     found.ok_or(Error::SourceUnavailable("PE symbol RVA is not file-backed"))
 }
 
-fn symbol(
+/// Independent display contract, not the original caption table or a fallback.
+/// Both bytes survive even for unknown pairs. Only first=FF denotes missing;
+/// fixed uppercase hex cannot introduce CSV/JSON delimiters or embedded NUL.
+pub fn symbol(raw: &[u8], compact: bool) -> Result<Vec<u8>, Error> {
+    let [first, second]: [u8; 2] = raw
+        .try_into()
+        .map_err(|_| Error::Invalid("Rx symbol requires raw2"))?;
+    Ok(if first == 255 {
+        if compact {
+            Vec::new()
+        } else {
+            b"No symbol".to_vec()
+        }
+    } else {
+        format!("APRS {first:02X}{second:02X}").into_bytes()
+    })
+}
+
+/// Explicit source-caption oracle, isolated from normal export and paint.
+/// The caller supplies source bytes; this function never finds or executes an
+/// application. Its native table semantics do not define normal Symbol display.
+pub fn symbol_from_source(
     raw: &[u8],
-    source: Option<&[u8]>,
+    source: &[u8],
     locale: bool,
     compact: bool,
 ) -> Result<Vec<u8>, Error> {
@@ -188,9 +208,6 @@ fn symbol(
     if !(33..=128).contains(&second) || !matches!(first,b'/'|b'\\'|b'0'..=b'9'|b'A'..=b'Z') {
         return Ok(direct());
     }
-    let pe = source.ok_or(Error::SourceUnavailable(
-        "Rx Symbol requires original PE source asset",
-    ))?;
     let special = [first, second] == *b"IY";
     // C88B8 forces locale0 for compact1. Native paint uses48B44's canonical bit.
     let slot = if special {
@@ -198,13 +215,13 @@ fn symbol(
     } else {
         (if first == b'/' { 0x418f18 } else { 0x419218 }) + 8 * u32::from(second - 33)
     } + u32::from(locale && !compact) * 4;
-    let pointer = dword(pe_tail(pe, slot)?, 0)?;
+    let pointer = dword(pe_tail(source, slot)?, 0)?;
     let rva = pointer
         .checked_sub(0x400000)
         .ok_or(Error::SourceUnavailable(
             "Rx symbol caption pointer outside source image",
         ))?;
-    let tail = pe_tail(pe, rva)?;
+    let tail = pe_tail(source, rva)?;
     let end = tail
         .iter()
         .take(39)
@@ -231,6 +248,59 @@ fn symbol(
 mod tests {
     use super::*;
     use payload::Adapter as A;
+
+    #[test]
+    fn symbol_raw_bytes_are_lossless_and_delimiter_safe_without_source() {
+        assert_eq!(
+            format(request(A::Symbol, b"/>", 0), &context()).unwrap(),
+            b"APRS 2F3E"
+        );
+        for first in 0..=u8::MAX {
+            for second in 0..=u8::MAX {
+                let raw = [first, second];
+                let csv = format(request(A::Symbol, &raw, 0), &context()).unwrap();
+                let painted = paint::format(
+                    request(A::Symbol, &raw, 0),
+                    &paint::Context::default(),
+                    || panic!("symbol must not read the clock"),
+                )
+                .unwrap();
+                if first == 255 {
+                    assert!(csv.is_empty());
+                    assert_eq!(painted, b"No symbol");
+                } else {
+                    assert_eq!(csv, painted);
+                    assert_eq!(&csv[..5], b"APRS ");
+                    assert_eq!(csv.len(), 9);
+                    for (hex, byte) in csv[5..].as_chunks::<2>().0.iter().zip(raw) {
+                        assert!(
+                            hex.iter()
+                                .all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(b))
+                        );
+                        assert_eq!(
+                            u8::from_str_radix(std::str::from_utf8(hex).unwrap(), 16).unwrap(),
+                            byte
+                        );
+                    }
+                }
+                assert!(csv.iter().all(|b| !b"\0\r\n,;\"\\".contains(b)));
+            }
+        }
+        for raw in [b"".as_slice(), b"/", b"/>>"] {
+            assert!(matches!(
+                format(request(A::Symbol, raw, 0), &context()),
+                Err(Error::Invalid(_))
+            ));
+            assert!(matches!(
+                paint::format(
+                    request(A::Symbol, raw, 0),
+                    &paint::Context::default(),
+                    || panic!()
+                ),
+                Err(Error::Invalid(_))
+            ));
+        }
+    }
 
     pub(super) fn context() -> datetime::Context<'static> {
         datetime::Context {
@@ -277,11 +347,11 @@ mod tests {
         }
         let mut at = 0x701;
         for (slot, text) in [
-            (0xe8, b"Car\0".as_slice()),
-            (0x1d0, b"Person\0"),
-            (0x290, b"Ship(powerboat)\0"),
-            (0x3e8, b"Overlayed Car\0"),
-            (0x600, b"Icom Radio\0"),
+            (0xe8, b"P0\0".as_slice()),
+            (0x1d0, b"P1\0"),
+            (0x290, b"P2\0"),
+            (0x3e8, b"A0\0"),
+            (0x600, b"S0\0"),
         ] {
             put32(&mut pe, 0x200 + slot, 0x818f18 + at as u32);
             pe[0x200 + at..0x200 + at + text.len()].copy_from_slice(text);
@@ -290,11 +360,7 @@ mod tests {
         pe
     }
     fn cell(adapter: A, source: &[u8], offset: i16) -> Result<Vec<u8>, Error> {
-        format(
-            request(adapter, source, offset),
-            &context(),
-            Some(&symbol_source()),
-        )
+        format(request(adapter, source, offset), &context())
     }
 
     #[test]
@@ -321,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn static_labels_symbol_source_and_empty_branches_are_distinct() {
+    fn static_labels_independent_symbols_and_source_oracle_are_distinct() {
         for (adapter, raw, expected) in [
             (A::RxType, b"\0".as_slice(), b"RF".as_slice()),
             (A::RxType, b"\x01", b"TM"),
@@ -340,19 +406,19 @@ mod tests {
             (A::DataType, b"\x03", b"Killed Item"),
             (A::DataType, b"\xff", b""),
             (A::Symbol, b"\xff\0", b""),
-            (A::Symbol, b"/>", b"Car"),
-            (A::Symbol, b"/[", b"Person"),
-            (A::Symbol, b"/s", b"Ship(powerboat)"),
-            (A::Symbol, b"IY", b"Icom Radio"),
-            (A::Symbol, b"\\>", b"Overlayed Car"),
-            (A::Symbol, b"A>", b"Overlayed Car (A)"),
-            (A::Symbol, b"0>", b"Overlayed Car (0)"),
-            (A::Symbol, b"/d", b"/d"),
-            (A::Symbol, b"\\[", b"\\["),
-            (A::Symbol, b"A[", b"A["),
-            (A::Symbol, b"\x01A", b" A"),
-            (A::Symbol, b"/\xff", b"/"),
-            (A::Symbol, b",\xff", b""),
+            (A::Symbol, b"/>", b"APRS 2F3E"),
+            (A::Symbol, b"/[", b"APRS 2F5B"),
+            (A::Symbol, b"/s", b"APRS 2F73"),
+            (A::Symbol, b"IY", b"APRS 4959"),
+            (A::Symbol, b"\\>", b"APRS 5C3E"),
+            (A::Symbol, b"A>", b"APRS 413E"),
+            (A::Symbol, b"0>", b"APRS 303E"),
+            (A::Symbol, b"/d", b"APRS 2F64"),
+            (A::Symbol, b"\\[", b"APRS 5C5B"),
+            (A::Symbol, b"A[", b"APRS 415B"),
+            (A::Symbol, b"\x01A", b"APRS 0141"),
+            (A::Symbol, b"/\xff", b"APRS 2FFF"),
+            (A::Symbol, b",\xff", b"APRS 2CFF"),
         ] {
             assert_eq!(cell(adapter, raw, 0).unwrap(), expected);
         }
@@ -367,17 +433,17 @@ mod tests {
                 Err(Error::SourceUnavailable(_))
             ));
         }
-        assert_eq!(cell(A::Symbol, b"/?", 0).unwrap(), b"/?");
+        assert_eq!(cell(A::Symbol, b"/?", 0).unwrap(), b"APRS 2F3F");
         assert!(matches!(
-            format(request(A::Symbol, b"/>", 0), &context(), None),
+            symbol_from_source(b"/>", b"", false, true),
             Err(Error::SourceUnavailable(_))
         ));
         assert_eq!(
-            format(request(A::Symbol, b"\xffX", 0), &context(), Some(b"not PE")).unwrap(),
+            symbol_from_source(b"\xffX", b"not PE", false, true).unwrap(),
             b""
         );
         assert_eq!(
-            format(request(A::Symbol, b"/\xff", 0), &context(), Some(b"not PE")).unwrap(),
+            symbol_from_source(b"/\xff", b"not PE", false, true).unwrap(),
             b"/"
         );
     }
@@ -393,47 +459,40 @@ mod tests {
         }
         for second in 33..=128 {
             assert_eq!(
-                format(
-                    request(A::Symbol, &[b'/', second], 0),
-                    &context(),
-                    Some(&pe)
-                )
-                .unwrap(),
+                symbol_from_source(&[b'/', second], &pe, false, true).unwrap(),
                 b"P"
             );
             assert_eq!(
-                format(
-                    request(A::Symbol, &[b'\\', second], 0),
-                    &context(),
-                    Some(&pe)
-                )
-                .unwrap(),
+                symbol_from_source(&[b'\\', second], &pe, false, true).unwrap(),
                 b"ALT"
             );
         }
         assert_eq!(
-            format(request(A::Symbol, b"0!", 0), &context(), Some(&pe)).unwrap(),
+            symbol_from_source(b"0!", &pe, false, true).unwrap(),
             b"ALT (0)"
         );
-        assert_eq!(
-            format(request(A::Symbol, b"IY", 0), &context(), Some(&pe)).unwrap(),
-            b"Icom Radio"
-        );
+        assert_eq!(symbol_from_source(b"IY", &pe, false, true).unwrap(), b"S0");
         // A real empty special caption is success, NOT the primary/alternate
         // empty-caption direct branch. C895F marks IY found unconditionally.
         put32(&mut pe, 0x800, 0x819618);
+        assert_eq!(symbol_from_source(b"IY", &pe, false, true).unwrap(), b"");
+        pe[0x990..0x997].copy_from_slice(b"Q,R;  \0");
+        put32(&mut pe, 0x2ec, 0x8196a8);
         assert_eq!(
-            format(request(A::Symbol, b"IY", 0), &context(), Some(&pe)).unwrap(),
-            b""
+            symbol_from_source(b"/>", &pe, true, false).unwrap(),
+            b"Q,R;"
+        );
+        assert_eq!(symbol_from_source(b"/>", &pe, true, true).unwrap(), b"P");
+        assert_eq!(
+            symbol_from_source(b"\xffX", &pe, true, false).unwrap(),
+            b"---"
         );
     }
 
     #[test]
     fn symbol_pe_geometry_pointer_nul_buffer_and_source_failures_are_checked() {
         let pe = symbol_source();
-        let render = |source: &[u8], raw: &[u8]| {
-            format(request(A::Symbol, raw, 0), &context(), Some(source))
-        };
+        let render = |source: &[u8], raw: &[u8]| symbol_from_source(raw, source, false, true);
         for len in [0, 1, 63, 0x83, 0x97, 0x177, 0x200, 0x2e8, 0x900] {
             assert!(render(&pe[..len], b"/>").is_err());
         }
@@ -569,22 +628,22 @@ mod tests {
         c.time_separator = 0;
         let raw = [0x08, 0x11, 0x26, 1, 2, 3];
         assert_eq!(
-            format(request(A::HistoryDate, &raw, 0), &c, None).unwrap(),
+            format(request(A::HistoryDate, &raw, 0), &c).unwrap(),
             b"08-11-2026 010203"
         );
         c.short_date = b"gg e/mm/dd";
         assert!(matches!(
-            format(request(A::HistoryDate, &raw, 0), &c, None),
+            format(request(A::HistoryDate, &raw, 0), &c),
             Err(Error::SourceUnavailable(_))
         ));
         assert_eq!(
-            format_with_date(request(A::HistoryDate, &raw, 0), &c, None, |_| {
+            format_with_date(request(A::HistoryDate, &raw, 0), &c, |_| {
                 Err(Error::Operation("native date failure"))
             }),
             Err(Error::Operation("native date failure"))
         );
         assert_eq!(
-            format_with_date(request(A::HistoryDate, &raw, 0), &c, None, |token| {
+            format_with_date(request(A::HistoryDate, &raw, 0), &c, |token| {
                 assert_eq!(token.date.year, 2026);
                 Ok(match token.letter {
                     b'g' => b"ERA".to_vec(),
@@ -596,19 +655,13 @@ mod tests {
             b"ERA 7-11-08 010203"
         );
         assert_eq!(
-            format_with_date(request(A::HistoryDate, &raw, 0), &c, None, |_| Ok(
-                Vec::new()
-            ))
-            .unwrap(),
+            format_with_date(request(A::HistoryDate, &raw, 0), &c, |_| Ok(Vec::new())).unwrap(),
             b" -11-08 010203"
         );
         assert_eq!(
-            format_with_date(
-                request(A::HistoryDate, &[0xff; 6], 0),
-                &c,
-                None,
-                |_| panic!("invalid compact date never reads native token")
-            )
+            format_with_date(request(A::HistoryDate, &[0xff; 6], 0), &c, |_| panic!(
+                "invalid compact date never reads native token"
+            ))
             .unwrap(),
             b""
         );
@@ -629,7 +682,7 @@ mod tests {
         let mut c = context();
         c.time_separator = 0;
         assert_eq!(
-            format(request(A::Timestamp, &[0x23, 0x59, 0xff], 1), &c, None).unwrap(),
+            format(request(A::Timestamp, &[0x23, 0x59, 0xff], 1), &c).unwrap(),
             b"000000"
         );
     }
@@ -667,7 +720,6 @@ mod tests {
         memory[gps + 49..gps + 92].fill(b' ');
         memory[gps + 49..gps + 53].copy_from_slice(b"GPS;");
         let image = Icf::from_memory(memory).unwrap();
-        let symbols = symbol_source();
         let mut h = record::reset_holder(0x0e, 3, 1);
         record::load_receive_history_storage_into(&image, 3, &mut h).unwrap();
         let c = payload::Context {
@@ -689,7 +741,7 @@ mod tests {
             c,
             |r| {
                 assert_eq!(r.utc_offset_minutes, 1);
-                format(r, &context(), Some(&symbols))
+                format(r, &context())
             },
         )
         .unwrap();
@@ -711,7 +763,7 @@ mod tests {
                 b"-0.000000"
             ]
         );
-        assert_eq!(cells[17], b"Car");
+        assert_eq!(cells[17], b"APRS 2F3E");
         assert_eq!(&cells[35..], &[b"00:00:00".as_slice(), b"GPS"]);
         record::load_receive_history_storage_into(&image, 2, &mut h).unwrap();
         assert!(!h.valid());

@@ -65,7 +65,6 @@ impl Context {
                 "system_langid",
                 "crt_decimal",
                 "repeater_group_name",
-                "symbol_asset",
                 "native_date_tokens",
                 "native_date_order",
                 "native_clock_date",
@@ -395,7 +394,7 @@ fn context(input: &str, csv: Option<&str>, options: &Options) -> Result<Context>
     })?;
     io::single_stdin(std::iter::once(input).chain(csv).chain([path]))?;
     let context = Context::read(path)?;
-    let mut sources = ["seed_icf", "symbol_asset", "document_generation"]
+    let mut sources = ["seed_icf", "document_generation"]
         .into_iter()
         .filter(|key| context.0.get(*key).is_some())
         .map(|key| context.text(key))
@@ -987,18 +986,12 @@ pub fn export(
                 "Rx has no named groups; use context rank range",
             ));
         }
-        let symbol = context
-            .0
-            .get("symbol_asset")
-            .map(|_| io::read(context.text("symbol_asset")?))
-            .transpose()?;
         let mut cursor = 0;
         let report = data::channel::export_receive_history_with_date(
             &image,
             context.row_range(50, 0)?,
             locale,
             &context.datetime()?,
-            symbol.as_deref(),
             |request| context.native_date(&mut cursor, request),
         );
         (

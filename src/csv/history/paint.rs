@@ -1,5 +1,6 @@
 //! Native Rx compact0 paint and shared47CF0, not the compact1/extra0 CSV profile.
 //! Raw source widths and decoded holder offsets belong to the record caller.
+//! Symbol alone uses the independent raw-byte display contract in history.
 
 use super::{Error, datetime, payload};
 
@@ -107,10 +108,10 @@ fn date_time(
 /// Format one native paint request. `clock` supplies actual GetLocalTime/RTL
 /// decoded fields ONLY on invalid HistoryDate, after the throwing offset stage.
 /// No host clock, completed caption, whole row or pre-rendered mask is accepted.
+/// Symbol uses raw byte IDs and does not read native language or caption tables.
 pub fn format(
     request: payload::Request<'_>,
     context: &Context,
-    symbol_pe: Option<&[u8]>,
     mut clock: impl FnMut() -> Result<(datetime::Date, datetime::Time), Error>,
 ) -> Result<Vec<u8>, Error> {
     use payload::Adapter as A;
@@ -156,17 +157,7 @@ pub fn format(
                 context.separators()?,
             ))
         }
-        A::Symbol => {
-            if request.source.len() != 2 {
-                return Err(Error::Invalid("native Rx symbol requires raw2"));
-            }
-            let locale = if request.source[0] == 255 {
-                false
-            } else {
-                context.language()?
-            };
-            super::symbol(request.source, symbol_pe, locale, false)
-        }
+        A::Symbol => super::symbol(request.source, false),
         A::Message | A::GpsMessage => {
             let extra = context.extra()?;
             let width = if request.adapter == A::Message {
@@ -331,7 +322,7 @@ pub fn format_field(
             };
             Ok(suffix(text, label))
         }
-        0x16b | 0x16c | 0x16d => {
+        0x16b..=0x16d => {
             let value = raw_byte(source)?;
             let (base, label, missing) = match key {
                 0x16b => (0x4077b8, b"W".as_slice(), b"--".as_slice()),
@@ -485,14 +476,8 @@ mod tests {
             utc_offset_minutes: offset,
         }
     }
-    fn render(
-        adapter: A,
-        source: &[u8],
-        offset: i16,
-        context: &Context,
-        pe: Option<&[u8]>,
-    ) -> Result<Vec<u8>, Error> {
-        format(request(adapter, source, offset), context, pe, || {
+    fn render(adapter: A, source: &[u8], offset: i16, context: &Context) -> Result<Vec<u8>, Error> {
+        format(request(adapter, source, offset), context, || {
             panic!("clock must not be reached")
         })
     }
@@ -570,50 +555,45 @@ mod tests {
         ] {
             context.date_order = Some(order);
             assert_eq!(
-                render(A::HistoryDate, &raw, 60, &context, None).unwrap(),
+                render(A::HistoryDate, &raw, 60, &context).unwrap(),
                 expected
             );
             assert_eq!(
-                render(A::HistoryDate, &[8, 0x11, 0x26, 1, 2, 3], 0, &context, None).unwrap(),
+                render(A::HistoryDate, &[8, 0x11, 0x26, 1, 2, 3], 0, &context).unwrap(),
                 ordinary
             );
         }
         context.date_order = Some(0);
         assert_eq!(
-            render(A::HistoryDate, &[8, 0x11, 255, 1, 2, 3], 0, &context, None).unwrap(),
+            render(A::HistoryDate, &[8, 0x11, 255, 1, 2, 3], 0, &context).unwrap(),
             b"2099/11/08 01:02:03"
         );
         assert_eq!(
-            render(A::HistoryDate, &[1, 1, 0, 0, 0, 0], -15361, &context, None).unwrap(),
+            render(A::HistoryDate, &[1, 1, 0, 0, 0, 0], -15361, &context).unwrap(),
             b"1999/12/31 23:59:00"
         );
         assert!(matches!(
-            render(A::HistoryDate, &[255; 6], 1440, &Context::default(), None),
+            render(A::HistoryDate, &[255; 6], 1440, &Context::default()),
             Err(Error::Conversion(_))
         ));
         assert!(matches!(
-            render(A::HistoryDate, &raw, 0, &Context::default(), None),
+            render(A::HistoryDate, &raw, 0, &Context::default()),
             Err(Error::SourceUnavailable(_))
         ));
         let mut calls = 0;
         for (order, separators, expected) in [
             (0, [b':'; 2], b"----/--/-- --:--:--".as_slice()),
             (1, [0, b':'], b"--/--/---- ----:--"),
-            (2, [b',', b';'], b"--/--/---- --,--;--"),
+            (2, *b",;", b"--/--/---- --,--;--"),
             (0, [0; 2], b"----/--/-- ------"),
         ] {
             context.date_order = Some(order);
             context.time_separators = Some(separators);
             assert_eq!(
-                format(
-                    request(A::HistoryDate, &[255; 6], 0),
-                    &context,
-                    None,
-                    || {
-                        calls += 1;
-                        Ok(clock())
-                    }
-                )
+                format(request(A::HistoryDate, &[255; 6], 0), &context, || {
+                    calls += 1;
+                    Ok(clock())
+                })
                 .unwrap(),
                 expected
             );
@@ -621,93 +601,65 @@ mod tests {
         assert_eq!(calls, 4);
         context.time_separators = None;
         assert!(
-            format(
-                request(A::HistoryDate, &[255; 6], 0),
-                &context,
-                None,
-                || {
-                    calls += 1;
-                    Ok(clock())
-                }
-            )
+            format(request(A::HistoryDate, &[255; 6], 0), &context, || {
+                calls += 1;
+                Ok(clock())
+            })
             .is_err()
         );
         assert_eq!(calls, 5);
         assert_eq!(
-            format(
-                request(A::HistoryDate, &[255; 6], 0),
-                &context,
-                None,
-                || Err(Error::Operation("clock failure"))
-            ),
+            format(request(A::HistoryDate, &[255; 6], 0), &context, || Err(
+                Error::Operation("clock failure")
+            )),
             Err(Error::Operation("clock failure"))
         );
         assert_eq!(
-            render(
-                A::Timestamp,
-                &[0x24, 0, 0],
-                i16::MIN,
-                &Context::default(),
-                None
-            )
-            .unwrap(),
+            render(A::Timestamp, &[0x24, 0, 0], i16::MIN, &Context::default()).unwrap(),
             b"--:--:--"
         );
         context.time_separators = Some([b':'; 2]);
         assert_eq!(
-            render(A::Timestamp, &[0x23, 0x59, 255], 1, &context, None).unwrap(),
+            render(A::Timestamp, &[0x23, 0x59, 255], 1, &context).unwrap(),
             b"00:00:00"
         );
         assert_eq!(
-            render(A::Timestamp, &[0, 0, 0x30], -1, &context, None).unwrap(),
+            render(A::Timestamp, &[0, 0, 0x30], -1, &context).unwrap(),
             b"23:59:30"
         );
         assert_eq!(
-            render(A::Timestamp, &[0, 0, 0x30], 1440, &context, None).unwrap(),
+            render(A::Timestamp, &[0, 0, 0x30], 1440, &context).unwrap(),
             b"00:00:30"
         );
         context.time_separators = Some([0, b':']);
         assert_eq!(
-            render(A::Timestamp, &[0x23, 0x59, 255], 1, &context, None).unwrap(),
+            render(A::Timestamp, &[0x23, 0x59, 255], 1, &context).unwrap(),
             b"0000:00"
         );
-        assert!(render(A::Timestamp, &[0, 0, 0], 0, &Context::default(), None).is_err());
+        assert!(render(A::Timestamp, &[0, 0, 0], 0, &Context::default()).is_err());
 
-        let mut pe = super::super::tests::symbol_source();
-        pe[0x980..0x987].copy_from_slice(b"J,A;  \0");
-        pe[0x2ec..0x2f0].copy_from_slice(&0x819698_u32.to_le_bytes());
         context.gui_language = Some(1);
-        assert_eq!(
-            render(A::Symbol, b"/>", 0, &context, Some(&pe)).unwrap(),
-            b"J,A;"
-        );
+        assert_eq!(render(A::Symbol, b"/>", 0, &context).unwrap(), b"APRS 2F3E");
         context.gui_language = Some(0);
         context.system_langid = Some(0x411);
+        assert_eq!(render(A::Symbol, b"/>", 0, &context).unwrap(), b"APRS 2F3E");
+        assert_eq!(render(A::Symbol, b"A>", 0, &context).unwrap(), b"APRS 413E");
         assert_eq!(
-            render(A::Symbol, b"/>", 0, &context, Some(&pe)).unwrap(),
-            b"Car"
+            render(A::Symbol, b",\xff", 0, &context).unwrap(),
+            b"APRS 2CFF"
         );
         assert_eq!(
-            render(A::Symbol, b"A>", 0, &context, Some(&pe)).unwrap(),
-            b"Overlayed Car (A)"
+            render(A::Symbol, b"\xffX", 0, &Context::default()).unwrap(),
+            b"No symbol"
         );
-        assert_eq!(
-            render(A::Symbol, b",\xff", 0, &context, None).unwrap(),
-            b","
-        );
-        assert_eq!(
-            render(A::Symbol, b"\xffX", 0, &Context::default(), None).unwrap(),
-            b"---"
-        );
-        assert!(render(A::Symbol, b"/>", 0, &context, None).is_err());
+        assert!(render(A::Symbol, b"/>", 0, &Context::default()).is_ok());
         assert_eq!(
             super::super::format(
                 request(A::Symbol, b"/>", 0),
-                &super::super::tests::context(),
-                Some(&pe)
+                &super::super::tests::context()
             )
             .unwrap(),
-            b"Car"
+            b"APRS 2F3E"
         );
         for (adapter, width) in [(A::Message, 20), (A::GpsMessage, 43)] {
             let mut source = vec![b' '; width];
@@ -717,33 +669,26 @@ mod tests {
             context.gui_language = Some(1);
             context.system_langid = None;
             assert_eq!(
-                render(adapter, &source, 0, &context, None).unwrap(),
+                render(adapter, &source, 0, &context).unwrap(),
                 b" a_\xa1_,;"
             );
             context.gui_language = Some(0);
             context.system_langid = Some(0x411);
             assert_eq!(
-                render(adapter, &source, 0, &context, None).unwrap(),
+                render(adapter, &source, 0, &context).unwrap(),
                 b" a_\xa1_,;"
             );
             context.system_langid = Some(0x409);
-            assert_eq!(
-                render(adapter, &source, 0, &context, None).unwrap(),
-                b" a___,;"
-            );
+            assert_eq!(render(adapter, &source, 0, &context).unwrap(), b" a___,;");
             context.gui_language = Some(0x101);
-            assert_eq!(
-                render(adapter, &source, 0, &context, None).unwrap(),
-                b" a___,;"
-            );
+            assert_eq!(render(adapter, &source, 0, &context).unwrap(), b" a___,;");
             context.system_langid = None;
-            assert!(render(adapter, &source, 0, &context, None).is_err());
+            assert!(render(adapter, &source, 0, &context).is_err());
             assert_eq!(source, original);
             assert_eq!(
                 super::super::format(
                     request(adapter, &source, 0),
-                    &super::super::tests::context(),
-                    None
+                    &super::super::tests::context()
                 )
                 .unwrap(),
                 b" a_\xa1_"
@@ -1038,9 +983,9 @@ mod tests {
         assert!(field(0x165, &15_i32.to_le_bytes(), &[], &context, None).is_err());
         assert!(field(0x170, &[0], &[], &context, None).is_err());
         assert!(field(0x155, &[0], &[], &context, None).is_err());
-        assert!(render(A::Mode, &[0], 0, &Context::default(), None).is_err());
+        assert!(render(A::Mode, &[0], 0, &Context::default()).is_err());
         for (adapter, width) in [(A::HistoryDate, 6), (A::Timestamp, 3), (A::Symbol, 2)] {
-            assert!(render(adapter, &vec![0; width - 1], 0, &context, None).is_err());
+            assert!(render(adapter, &vec![0; width - 1], 0, &context).is_err());
         }
     }
 }

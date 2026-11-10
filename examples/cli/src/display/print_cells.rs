@@ -468,12 +468,11 @@ fn repeater(
     if !holder.valid() {
         return Ok(Vec::new());
     }
-    if (0x144..=0x153).contains(&node.key) {
-        if let Some(text) =
+    if (0x144..=0x153).contains(&node.key)
+        && let Some(text) =
             cs705::repeater::fields::paint_meta(&holder, node.key as u16)?.placeholder()
-        {
-            return Ok(text.to_vec());
-        }
+    {
+        return Ok(text.to_vec());
     }
     let n = node.name.as_slice();
     Ok(match n {
@@ -636,6 +635,7 @@ fn receive_history(
                 runtime,
             );
         }
+        // Symbol uses the independent raw-pair formatter, not the resource oracle.
         0x167 => A::Symbol,
         0x16a => A::Timestamp,
         0x17a => A::GpsMessage,
@@ -684,7 +684,6 @@ fn receive_history(
             utc_offset_minutes: offset,
         },
         &context,
-        Some(resources.source_pe()),
         || {
             let source = runtime.display_format_context().map_err(|_| {
                 cs705::csv::Error::SourceUnavailable("native Rx actual Now context")
@@ -1632,6 +1631,28 @@ mod tests {
         );
         assert!(print_condition(b"unknown", &runtime).is_err());
         assert_eq!(image.memory()[0x39a27..0x39a2f], *b"private\0");
+
+        node.key = 0x167;
+        node.name = b"CL_RxHis_Symbol".to_vec();
+        for (raw, expected) in [
+            (b"/>".as_slice(), b"APRS 2F3E".as_slice()),
+            (b"\xff>", b"No symbol"),
+        ] {
+            image.patch_memory(&[(0x31749, raw)]).unwrap();
+            assert_eq!(
+                print_cell(
+                    &image,
+                    image.memory(),
+                    &factory,
+                    &node,
+                    &runtime,
+                    &resources
+                )
+                .unwrap(),
+                expected
+            );
+            assert_eq!(&image.memory()[0x31749..0x3174b], raw);
+        }
 
         let mut message = [b' '; 20];
         message[..4].copy_from_slice(b"A,B;");
