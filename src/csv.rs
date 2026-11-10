@@ -6,6 +6,8 @@
 //! Native language/era/RTL values are explicit inputs, independent of the copied
 //! CSV decimal/list bytes. The older gps::Csv/repeater::Csv remain local editors.
 
+#[path = "csv/channel.rs"]
+pub mod channel;
 #[path = "csv/control.rs"]
 pub mod control;
 #[path = "csv/datetime.rs"]
