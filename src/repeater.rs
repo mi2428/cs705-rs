@@ -29,13 +29,14 @@ use crate::icf::{
 use std::borrow::Cow;
 use std::fmt;
 
-pub mod staging;
-pub mod transfer;
+pub mod editor;
 pub mod fields;
 pub mod finalize;
 pub mod groups;
 pub mod parser;
 pub mod predicate;
+pub mod staging;
+pub mod transfer;
 pub mod working;
 
 // CS-705 1.30 CS705.exe SHA-256:
