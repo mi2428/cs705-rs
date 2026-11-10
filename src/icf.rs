@@ -17,6 +17,7 @@ mod groups;
 mod image;
 mod memory;
 mod messages;
+pub mod normalizer;
 pub mod record;
 pub mod record_image;
 mod repeaters;
@@ -421,6 +422,33 @@ impl<'a> Icf<'a> {
         }
         let offset = slot * MEMORY_CHANNEL_BYTES + MEMORY_NAME_OFFSET;
         Ok(Some(&self.memory[offset..offset + MEMORY_NAME_BYTES]))
+    }
+
+    /// Apply the normal name editor's bounded byte normalization to an occupied
+    /// physical slot. Empty names are legal; `None` means cancellation.
+    ///
+    /// The shared input is sanitized before candidate trimming/clipping. This is
+    /// the name text/storage component, not the complete decoded side re-encode
+    /// or empty logical-row pending-name operation.
+    pub fn edit_physical_memory_name(
+        &mut self,
+        slot: usize,
+        input: Option<&mut [u8]>,
+    ) -> Result<bool, Error> {
+        if self.physical_memory_name_raw(slot)?.is_none() {
+            return Err(Error::Unsupported {
+                line: 5 + (MEMORY_EMPTY_FLAGS + slot) / RECORD_BYTES,
+                reason: "physical memory slot is empty",
+            });
+        }
+        let Some(input) = input else {
+            return Ok(false);
+        };
+        let candidate = normalizer::normalize_name(input, MEMORY_NAME_BYTES);
+        let at = slot * MEMORY_CHANNEL_BYTES + MEMORY_NAME_OFFSET;
+        self.memory[at..at + MEMORY_NAME_BYTES].fill(b' ');
+        self.memory[at..at + candidate.len()].copy_from_slice(&candidate);
+        Ok(true)
     }
 
     /// Replace only an occupied physical slot's name with narrow ASCII text.

@@ -671,6 +671,30 @@ mod tests {
         assert_eq!(&holder.as_bytes()[0x0d..0x1d], b"GROUP NAME      ");
     }
 
+    #[test]
+    fn allowed_callsign_prefix_first_match_and_typed_save_do_not_repair_later_holes() {
+        let mut image = vec![0x9a; 0x4997a];
+        image[0x395ad..0x3969d].fill(b' ');
+        image[0x395ad..0x395bd].copy_from_slice(b"AB\0CD   AB\0CD   ");
+        image[0x395c5..0x395cd].copy_from_slice(b"LATER   ");
+        assert_eq!(callsign_count(&image, 0x17).unwrap(), 2);
+        let mut h = record::reset_holder(0x17, 0, 7);
+        load_into(&image, 0x17, 0, &mut h).unwrap();
+        assert!(!callsign_bad(&image, &h).unwrap());
+        load_into(&image, 0x17, 1, &mut h).unwrap();
+        assert!(callsign_bad(&image, &h).unwrap());
+        h.set_callsign(super::super::MemoryCallsign::Your, b"AB\0CE   ");
+        let before = image.clone();
+        store_into(&mut image, 0x17, 1, &mut h).unwrap();
+        assert_eq!(&image[..0x395b5], &before[..0x395b5]);
+        assert_eq!(&image[0x395bd..], &before[0x395bd..]);
+        assert!(!callsign_bad(&image, &h).unwrap());
+        load_into(&image, 0x24, 29, &mut h).unwrap();
+        assert_eq!(h.callsign(super::super::MemoryCallsign::Your), &[b' '; 8]);
+        super::super::normalizer::delete_allowed_into(&mut image, u32::MAX).unwrap();
+        assert_eq!(&image[0x395a5..0x395ad], b"AB\0CD   "); // Signed j=-1 still enters native D1DBC.
+        assert_eq!(&image[0x395ad..0x395b5], b"AB\0CE   ");
+    }
     use record::ChannelStage;
 
     fn image() -> Vec<u8> {

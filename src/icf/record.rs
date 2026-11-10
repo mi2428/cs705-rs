@@ -1286,6 +1286,99 @@ pub fn decode_history_into(
     Ok(())
 }
 
+/// Concrete BA04 history searches over the real expanded lists. Only the
+/// history callers' mode2/width8/selector0 or slash selector1 paths live here;
+/// the unrelated gateway/name dialog searches are not approximated by them.
+pub fn resolve_history_query(
+    repeaters: &crate::repeater::working::Working,
+    ur: &super::rows::WorkingUr,
+    query: HistoryQuery,
+) -> Result<i32, Error> {
+    if query == HistoryQuery::RepeaterCount {
+        return Ok(repeaters.groups()?.total() as i32);
+    }
+    let module_equal =
+        |a: u8, b: u8| a == b || (matches!(a, b' ' | b'A') && matches!(b, b' ' | b'A'));
+    match query {
+        HistoryQuery::Ur { call } | HistoryQuery::UpperUr { call } => {
+            let prefix = matches!(query, HistoryQuery::UpperUr { .. });
+            if call == [b' '; 8] || (prefix && call[0] == b'/') {
+                return Ok(300);
+            }
+            for index in 0..ur.count() {
+                let mut holder = reset_holder(0x0d, u32::from(index), 0);
+                ur.load_into(u32::from(index), &mut holder)?;
+                let candidate = holder.callsign(super::MemoryCallsign::Your);
+                if (!prefix && candidate == &call)
+                    || (prefix
+                        && candidate[..7] == call[..7]
+                        && (candidate[7] == call[7] || candidate[7] == b' '))
+                {
+                    return Ok(i32::from(index));
+                }
+            }
+            Ok(300)
+        }
+        HistoryQuery::FromDv { call } => {
+            for index in 0..repeaters.groups()?.total() as u16 {
+                let at = 0xaa0f + 52 * usize::from(index);
+                let raw = repeaters.working().get(at..at + 52).ok_or(Error::Invalid {
+                    line: 5,
+                    reason: "history raw repeater search window unavailable",
+                })?;
+                if raw[10] & 0xc0 != 0 {
+                    continue;
+                }
+                let candidate = unpack_callsign(&raw[11..18]);
+                if candidate != [b' '; 8]
+                    && candidate[..7] == call[..7]
+                    && module_equal(candidate[7], call[7])
+                {
+                    return Ok(i32::from(index));
+                }
+            }
+            Ok(65535)
+        }
+        HistoryQuery::FromFm {
+            call,
+            frequency_hz,
+            limit,
+        } => {
+            for index in 0..limit as u16 {
+                let mut holder = reset_holder(0x0c, u32::from(index), 0);
+                repeaters.load_into(usize::from(index), &mut holder)?;
+                if holder.repeater_text(RepeaterText::Call) == &call
+                    && holder.channel_field(ChannelField::FrequencyHz) == frequency_hz
+                    && matches!(holder.repeater_field(RepeaterField::Mode), 0 | 1)
+                    && holder.channel_field(ChannelField::Duplex) != 0
+                {
+                    return Ok(i32::from(index));
+                }
+            }
+            Ok(65535)
+        }
+        HistoryQuery::ToRepeater { call } => {
+            if call[0] != b'/' {
+                return Ok(65535);
+            }
+            for index in 0..repeaters.groups()?.total() as u16 {
+                let mut holder = reset_holder(0x0c, u32::from(index), 0);
+                repeaters.load_into(usize::from(index), &mut holder)?;
+                let candidate = holder.repeater_text(RepeaterText::Call);
+                if holder.repeater_field(RepeaterField::Mode) == 2
+                    && candidate != &[b' '; 8]
+                    && candidate[..6] == call[1..7]
+                    && module_equal(candidate[7], call[7])
+                {
+                    return Ok(i32::from(index));
+                }
+            }
+            Ok(65535)
+        }
+        HistoryQuery::RepeaterCount => unreachable!("count handled before search"),
+    }
+}
+
 /// 73D9 reflector is a read-only raw8 history load, with no current-list lookup.
 /// FF clears validity only. Non-FF physical bytes are not clamped to five slots.
 pub fn load_reflector_storage_into(
@@ -1318,6 +1411,64 @@ pub fn load_reflector_storage_into(
     };
     holder.set_header(0x14, index, holder.binding());
     decode_history_base_into(holder, 0x14, raw)
+}
+
+/// From/To map byte is a physical source without a new p<capacity clamp. FF is
+/// the native miss. The existing supplement sequencer owns query/count order;
+/// each callback re-reads its actual list and keeps field-only load headers.
+pub fn load_history_storage_into(
+    image: &super::Icf<'_>,
+    kind: u32,
+    index: usize,
+    repeaters: &crate::repeater::working::Working,
+    ur: &super::rows::WorkingUr,
+    holder: &mut DecodedRecord,
+) -> Result<(), Error> {
+    let (map, count, base, width) = match kind {
+        0x0f => (0x3c331, 10, 0x32935, 8),
+        0x10 => (0x3c33b, 10, 0x32985, 12),
+        0x12 => (0x3c34f, 20, 0x32a4d, 8),
+        _ => {
+            return Err(Error::Invalid {
+                line: 5,
+                reason: "history document adapter requires FromDV/FromFM/ToDV",
+            });
+        }
+    };
+    if index >= count {
+        return Err(Error::Invalid {
+            line: 5,
+            reason: "history logical row outside dataset",
+        });
+    }
+    let physical = image.memory()[map + index];
+    let raw = if physical == 255 {
+        None
+    } else {
+        let at = base + width * usize::from(physical);
+        Some(image.memory().get(at..at + width).ok_or(Error::Invalid {
+            line: 5,
+            reason: "history physical payload unavailable",
+        })?)
+    };
+    holder.set_header(kind, index as u32, holder.binding());
+    decode_history_into(
+        holder,
+        kind,
+        raw,
+        |query| resolve_history_query(repeaters, ur, query),
+        |source, holder| {
+            let header = (holder.kind(), holder.index(), holder.binding());
+            let valid = holder.valid();
+            let result = match source {
+                HistoryLoad::Repeater(index) => repeaters.load_into(index as usize, holder),
+                HistoryLoad::Ur(index) => ur.load_into(index, holder).map(|_| ()),
+            };
+            holder.set_header(header.0, header.1, header.2);
+            holder.set_valid(valid);
+            result
+        },
+    )
 }
 
 /// Decode a physical Rx record after its REVERSE rank-map lookup (6C57..71F2).
