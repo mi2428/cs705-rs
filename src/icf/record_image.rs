@@ -146,9 +146,16 @@ pub fn store_channel_into(
     holder: &mut DecodedRecord,
     mut before_store: impl FnMut(&ChannelWrite<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let address = channel_address(image, kind, index)?.ok_or(invalid(
-        "channel destination has no allocated physical slot",
-    ))?;
+    let Some(address) = channel_address(image, kind, index)? else {
+        // 7857 skips the absent physical flag;78A3 returns for valid0 before
+        // any name/body pointer use. Slot10 has already released this map.
+        if !holder.valid() {
+            return Ok(());
+        }
+        return Err(invalid(
+            "channel destination has no allocated physical slot",
+        ));
+    };
     let mut raw: [u8; 83] = window(image, address.record_offset, 83)?
         .try_into()
         .unwrap();
@@ -251,7 +258,7 @@ fn compact_kind(kind: u32) -> Result<super::special::CompactKind, Error> {
     }
 }
 
-/// Load kind04/05 through special's single raw36 decoder and record projection.
+/// Load kind04/05/19/1A/1B through special's one raw36 decoder/projection.
 /// Memopad slot0 is addressable, though stage9 visits only1..10. No outer reset
 /// is implied; invalid rows write the sentinel, not the remaining body fields.
 pub fn load_compact_into(
@@ -260,6 +267,9 @@ pub fn load_compact_into(
     index: u32,
     holder: &mut DecodedRecord,
 ) -> Result<bool, Error> {
+    if matches!(kind, 0x19..=0x1b) {
+        return load_paired_into(image, kind, index, holder);
+    }
     let dataset = compact_kind(kind)?;
     let source = super::special::CompactChannel::read(image, dataset, index as usize)?;
     let (side, range_kind) = if kind == 4 {
@@ -276,9 +286,11 @@ pub fn load_compact_into(
     Ok(holder.valid())
 }
 
-/// Save kind04/05 at an explicit destination via special's ordered raw36 saver.
+/// Save compact kinds at an explicit destination via special's raw36 saver.
 /// Frequency commits even when invalid; its remaining32bytes then stay intact.
 /// Saver-side callsign correction survives a later callback error in the holder.
+/// Shared19..1B instead skip valid0 and store the external flag first. Callback
+/// offsets for these shared kinds are absolute; kind04/05 retain raw-relative.
 pub fn store_compact_into(
     image: &mut [u8],
     kind: u32,
@@ -286,6 +298,9 @@ pub fn store_compact_into(
     holder: &mut DecodedRecord,
     mut before_store: impl FnMut(usize, &[u8]) -> Result<(), Error>,
 ) -> Result<(), Error> {
+    if matches!(kind, 0x19..=0x1b) {
+        return store_paired_into(image, kind, index, holder, before_store);
+    }
     let at = compact_kind(kind)?.offset(index as usize)?;
     let old: [u8; 36] = window(image, at, 36)?.try_into().unwrap();
     let mut values = record::compact_values(holder);
@@ -328,13 +343,334 @@ pub fn store_scan_into(
     holder.as_mut_bytes()[0x26..0x36].copy_from_slice(&values.name);
     result
 }
+/// Type0D's direct logical name/call arrays and live working count. The saved
+/// order table is NOT a physical mapping here. Even inactive tail slots decode
+/// both fields; the outer reset remains caller-owned. No extra300-row clamp is
+/// inserted before the original address computation; actual slices are bounded.
+pub fn load_callsign_into(
+    image: &[u8],
+    index: u32,
+    holder: &mut DecodedRecord,
+) -> Result<bool, Error> {
+    let count = u16::from_le_bytes(window(image, 0x49978, 2)?.try_into().unwrap());
+    let name_at = (index as usize)
+        .checked_mul(16)
+        .and_then(|at| at.checked_add(0x2f703))
+        .ok_or(invalid("UR name offset overflow"))?;
+    let call_at = (index as usize)
+        .checked_mul(8)
+        .and_then(|at| at.checked_add(0x2eda3))
+        .ok_or(invalid("UR call offset overflow"))?;
+    let name = window(image, name_at, 16)?.try_into().unwrap();
+    let call = window(image, call_at, 8)?.try_into().unwrap();
+    holder.set_header(0x0d, index, holder.binding());
+    holder.set_valid(index < u32::from(count));
+    record::decode_callsign_into(holder, name, call);
+    Ok(holder.valid())
+}
+
+/// The type0D saver has no validity/count guard: name16 then call8, each through
+/// the shared record codec. Address checks occur at the individual store.
+pub fn store_callsign_into(
+    image: &mut [u8],
+    index: u32,
+    holder: &DecodedRecord,
+) -> Result<(), Error> {
+    record::encode_callsign_into(holder, |event| {
+        let (base, stride, bytes): (u32, u32, &[u8]) = match event {
+            record::CallsignWrite::Name(bytes) => (0x2f703, 16, bytes),
+            record::CallsignWrite::Call(bytes) => (0x2eda3, 8, bytes),
+        };
+        apply_patches(
+            image,
+            &[(
+                base.wrapping_add(index.wrapping_mul(stride)) as usize,
+                bytes,
+            )],
+        )
+    })
+}
+fn paired_address(kind: u32, index: u32) -> Result<(usize, usize), Error> {
+    let flag = match kind {
+        0x19 if index < 2 => 0x3c84e,
+        0x1a if index < 6 => [0x3a782, 0x3a7cb, 0x3a819][index as usize / 2],
+        0x1b if index < 2 => 0x3c800,
+        _ => return Err(invalid("paired compact kind/index outside dataset")),
+    };
+    Ok((flag, flag + 1 + 36 * (index as usize % 2)))
+}
+fn paired_valid(image: &[u8], kind: u32, index: u32) -> Result<bool, Error> {
+    if kind != 0x1a {
+        return Ok(true);
+    }
+    let b = |at| window(image, at, 1).map(|v| v[0]);
+    Ok(match index / 2 {
+        0 => {
+            b(0x3c84a)? & 1 != 0
+                || (b(0x3a8c9)? != 0 && b(0x3a815)? & 1 != 0)
+                || (b(0x3a8ca)? != 0 && b(0x3a863)? & 1 != 0)
+        }
+        1 => b(0x3a8c9)? & 1 != 0,
+        2 => b(0x3a8ca)? & 1 != 0,
+        _ => return Err(invalid("paired compact validity index outside dataset")),
+    })
+}
+/// 6550/8230's paired shared compact datasets. External validity is independent
+/// of frequencyMAX; an invalid row never reads its body or split flag source.
+pub fn load_paired_into(
+    image: &[u8],
+    kind: u32,
+    index: u32,
+    holder: &mut DecodedRecord,
+) -> Result<bool, Error> {
+    let (flag, at) = paired_address(kind, index)?;
+    let valid = paired_valid(image, kind, index)?;
+    holder.set_header(kind, index, holder.binding());
+    holder.set_group(u32::MAX);
+    holder.as_mut_bytes()[0x24] = (index % 2) as u8;
+    holder.as_mut_bytes()[0x38..0x3c].fill(0xff);
+    let source = if valid {
+        Some(window(image, at, 36)?.try_into().unwrap())
+    } else {
+        None
+    };
+    let split = if valid {
+        window(image, flag, 1)?[0] >> 1
+    } else {
+        0
+    };
+    let values = super::special::CompactChannel::decode_bound(source, valid)?;
+    record::decode_compact_into(holder, &values, split);
+    Ok(valid)
+}
+/// Shared-kind save skips everything for valid0. Otherwise the external split
+/// bit commits before the raw36 frequency/body and holder callsign correction.
+pub fn store_paired_into(
+    image: &mut [u8],
+    kind: u32,
+    index: u32,
+    holder: &mut DecodedRecord,
+    mut before_store: impl FnMut(usize, &[u8]) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let (flag, at) = paired_address(kind, index)?;
+    if !holder.valid() {
+        return Ok(());
+    }
+    let oldflag = window(image, flag, 1)?[0];
+    let newflag = (oldflag & !2) | ((holder.as_bytes()[0x25] & 1) << 1);
+    before_store(flag, &[newflag])?;
+    apply_patches(image, &[(flag, &[newflag])])?;
+    let old: [u8; 36] = window(image, at, 36)?.try_into().unwrap();
+    let mut values = record::compact_values(holder);
+    let result = values.write_to(&old, |offset, bytes| {
+        before_store(at + offset, bytes)?;
+        apply_patches(image, &[(at + offset, bytes)])
+    });
+    holder.as_mut_bytes()[0xa4..0xac].copy_from_slice(&values.callsigns[1]);
+    result
+}
+
+/// Outer610C dispatch for all11 stage9 runtime kinds plus the UR list/default.
+/// Reset occurs before dispatch, not in lower field-only adapters.
+pub fn load_into(
+    image: &[u8],
+    kind: u32,
+    index: u32,
+    holder: &mut DecodedRecord,
+) -> Result<bool, Error> {
+    *holder = record::reset_holder(kind, index, holder.binding());
+    match kind {
+        2 => {
+            let valid = load_channel_into(image, ChannelKind::Normal, index, holder)?;
+            let name = window(image, 0x355c3 + 19 * holder.group() as usize, 16)?;
+            holder.as_mut_bytes()[0x0d..0x1d].copy_from_slice(name);
+            Ok(valid)
+        }
+        3 => load_channel_into(image, ChannelKind::Call, index, holder),
+        4 | 5 => load_compact_into(image, kind, index, holder),
+        8 => load_scan_into(image, index, holder),
+        0x0c => {
+            crate::repeater::working::load_into(image, index as usize, holder)?;
+            Ok(holder.valid())
+        }
+        0x0d => load_callsign_into(image, index, holder),
+        0x17 => {
+            let at = 0x395ad_u32.wrapping_add(index.wrapping_mul(8)) as usize;
+            holder.set_callsign(
+                super::MemoryCallsign::Your,
+                window(image, at, 8)?.try_into().unwrap(),
+            );
+            Ok(holder.valid())
+        }
+        0x15 | 0x16 | 0x18 => load_range_into(image, kind, index, holder),
+        0x19..=0x1b => load_paired_into(image, kind, index, holder),
+        0x23 => {
+            *holder = super::rows::ur_default(index, holder.binding());
+            Ok(true)
+        }
+        0x24 => {
+            holder.set_callsign(super::MemoryCallsign::Your, &[b' '; 8]);
+            Ok(true)
+        }
+        _ => Err(invalid("typed image load kind not implemented")),
+    }
+}
+/// Outer77B0 save boundary. The explicit destination selects kind/index; it is
+/// not inferred from a copied source header. Each codec commits its own stages.
+pub fn store_into(
+    image: &mut [u8],
+    kind: u32,
+    index: u32,
+    holder: &mut DecodedRecord,
+) -> Result<(), Error> {
+    match kind {
+        2 => store_channel_into(image, ChannelKind::Normal, index, holder, |_| Ok(())),
+        3 => store_channel_into(image, ChannelKind::Call, index, holder, |_| Ok(())),
+        4 | 5 => store_compact_into(image, kind, index, holder, |_, _| Ok(())),
+        8 => store_scan_into(image, index, holder, |_, _| Ok(())),
+        0x0c => crate::repeater::working::save_into(image, index as usize, holder),
+        0x0d => store_callsign_into(image, index, holder),
+        0x17 => apply_patches(
+            image,
+            &[(
+                0x395ad_u32.wrapping_add(index.wrapping_mul(8)) as usize,
+                holder.callsign(super::MemoryCallsign::Your),
+            )],
+        ),
+        0x15 | 0x16 | 0x18 => store_range_into(image, kind, index, holder, |_, _| Ok(())),
+        0x19..=0x1b => store_paired_into(image, kind, index, holder, |_, _| Ok(())),
+        _ => Err(invalid("typed image save kind not implemented")),
+    }
+}
+
+/// C6190 cached UR count, or C63B8's first EXACT8space allowed-call prefix.
+pub fn callsign_count(image: &[u8], kind: u32) -> Result<u32, Error> {
+    match kind {
+        0x0d => Ok(u32::from(u16::from_le_bytes(
+            window(image, 0x49978, 2)?.try_into().unwrap(),
+        ))),
+        0x17 => {
+            for index in 0..30 {
+                if window(image, 0x395ad + 8 * index, 8)? == [b' '; 8] {
+                    return Ok(index as u32);
+                }
+            }
+            Ok(30)
+        }
+        _ => Err(invalid("callsign count requires kind0D or17")),
+    }
+}
+
+/// C9678/C98E0: blank maps to the capacity sentinel; otherwise compare the
+/// first exact8byte match in the CURRENT list/prefix with the holder's index.
+pub fn callsign_bad(image: &[u8], holder: &DecodedRecord) -> Result<bool, Error> {
+    let sentinel = match holder.kind() {
+        0x0d => 300,
+        0x17 => 30,
+        _ => return Err(invalid("callsign predicate requires kind0D or17")),
+    };
+    let query = holder.callsign(super::MemoryCallsign::Your);
+    let mut first = sentinel;
+    if query != &[b' '; 8] {
+        for index in 0..callsign_count(image, holder.kind())? {
+            let mut candidate = record::reset_holder(holder.kind(), index, holder.binding());
+            load_into(image, holder.kind(), index, &mut candidate)?;
+            if candidate.callsign(super::MemoryCallsign::Your) == query {
+                first = index;
+                break;
+            }
+        }
+    }
+    Ok(first != holder.index())
+}
 fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 0, reason }
+}
+
+/// Native16-byte view used by61F20; count is the entry gate, not a new loop cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelView {
+    pub group: u32,
+    pub first: i32,
+    pub last: i32,
+    pub count: i32,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelFilter {
+    pub broad: bool,
+    pub include_side1: bool,
+    pub count_all: bool,
+    pub show_both: u32,
+}
+/// 61F20 for Home MR/call. Side1 is skipped BEFORE load using the PREVIOUS
+/// loaded holder's split byte, not the current row's raw header. Returns bad
+/// count, or0/1 at the first bad row when count_all isfalse. View count<=0 reads
+/// no image/holder. B/Q remain the shared frequency engine's actual sources.
+pub fn channel_bad_count(
+    image: &[u8],
+    view: ChannelView,
+    filter: ChannelFilter,
+    ranges: &super::frequency::Ranges,
+    q: &super::context::Context,
+    binding: u32,
+) -> Result<u32, Error> {
+    if view.count <= 0 {
+        return Ok(0);
+    }
+    let kind = match view.group {
+        0..=99 => 2,
+        100 => 3,
+        _ => return Err(invalid("Home channel view group outside0..100")),
+    };
+    let mut holder = record::reset_holder(kind, 0, binding);
+    let mut count = 0_u32;
+    let mut side = view.first;
+    while side <= view.last {
+        let skip = side & 1 != 0
+            && (!filter.include_side1 || (filter.show_both == 0 && holder.as_bytes()[0x25] == 0));
+        if !skip {
+            let index = if kind == 3 {
+                side as u32
+            } else {
+                view.group.wrapping_mul(200).wrapping_add(side as u32)
+            };
+            load_into(image, kind, index, &mut holder)?;
+            if super::frequency::channel_bad(&holder, ranges, q, filter.broad)? {
+                count = count.wrapping_add(1);
+                if !filter.count_all {
+                    return Ok(count);
+                }
+            }
+        }
+        if side == view.last {
+            break;
+        }
+        side = side
+            .checked_add(1)
+            .ok_or(invalid("Home side iteration exceeds signed DWORD"))?;
+    }
+    Ok(count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outer_normal_load_supplies_logical_group_name_but_field_only_load_preserves_it() {
+        let mut image = image();
+        put_map(&mut image, 7, 23, 3);
+        image[0x355c3 + 19 * 7..0x355d3 + 19 * 7].copy_from_slice(b"GROUP NAME      ");
+        let mut holder = record::reset_holder(2, 1446, 9);
+        holder.as_mut_bytes()[0x0d..0x1d].fill(0xa7);
+        load_channel_into(&image, ChannelKind::Normal, 1446, &mut holder).unwrap();
+        assert_eq!(&holder.as_bytes()[0x0d..0x1d], &[0xa7; 16]);
+        load_into(&image, 2, 1446, &mut holder).unwrap();
+        assert_eq!(&holder.as_bytes()[0x0d..0x1d], b"GROUP NAME      ");
+        load_into(&image, 2, 1447, &mut holder).unwrap();
+        assert_eq!(&holder.as_bytes()[0x0d..0x1d], b"GROUP NAME      ");
+    }
+
     use record::ChannelStage;
 
     fn image() -> Vec<u8> {
@@ -470,6 +806,162 @@ mod tests {
                 .is_err()
         );
         assert_eq!(image, before);
+        holder.set_valid(false);
+        store_channel_into(&mut image, ChannelKind::Normal, 0, &mut holder, |_| {
+            panic!("native invalid+empty skips every store")
+        })
+        .unwrap();
+        assert_eq!(image, before);
+    }
+
+    #[test]
+    fn callsign_adapter_uses_direct_arrays_and_decodes_inactive_tail_without_order_mapping() {
+        let mut image = image();
+        image[0x49978..0x4997a].copy_from_slice(&1_u16.to_le_bytes());
+        image[0x2f713..0x2f723].copy_from_slice(b"INACTIVE TAIL   ");
+        image[0x2edab..0x2edb3].copy_from_slice(b"TAIL    ");
+        let mut holder = scratch();
+        assert!(!load_callsign_into(&image, 1, &mut holder).unwrap());
+        assert_eq!(
+            (holder.kind(), holder.index(), holder.binding()),
+            (0x0d, 1, 0x5a5a5a5a)
+        );
+        assert_eq!(&holder.as_bytes()[0x26..0x36], b"INACTIVE TAIL   ");
+        assert_eq!(&holder.as_bytes()[0x88..0x90], b"TAIL    ");
+        assert_eq!(&holder.as_bytes()[0x18c..0x194], &[0x5a; 8]);
+        let before = holder.clone();
+        assert!(load_callsign_into(&image, u32::MAX, &mut holder).is_err());
+        assert!(holder == before);
+    }
+
+    #[test]
+    fn paired_external_validity_decodes_max_frequency_and_keeps_flag_first_failure_prefix() {
+        let mut image = image();
+        let mut holder = scratch();
+        image[0x3c84e] = 0xa7;
+        image[0x3c84f..0x3c853].fill(0xff);
+        image[0x3c853] = 0x70;
+        assert!(load_paired_into(&image, 0x19, 0, &mut holder).unwrap());
+        assert_eq!(holder.mode(), 13); // Native lookup raw7 -> decoded13.
+        assert_eq!(&holder.as_bytes()[0x3c..0x40], &u32::MAX.to_le_bytes());
+        assert_eq!(holder.as_bytes()[0x25], 1);
+        holder.as_mut_bytes()[0x25] = 0;
+        holder.as_mut_bytes()[0x3c..0x40].copy_from_slice(&42_u32.to_le_bytes());
+        let before = image.clone();
+        let mut stores = Vec::new();
+        assert!(
+            store_paired_into(&mut image, 0x19, 0, &mut holder, |at, _| {
+                stores.push(at);
+                if at == 0x3c853 {
+                    Err(invalid("synthetic paired body failure"))
+                } else {
+                    Ok(())
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(stores, [0x3c84e, 0x3c84f, 0x3c853]);
+        let mut expected = before;
+        expected[0x3c84e] = 0xa5;
+        expected[0x3c84f..0x3c853].copy_from_slice(&42_u32.to_le_bytes());
+        assert_eq!(image, expected);
+        holder.set_valid(false);
+        store_paired_into(&mut [], 0x1b, 1, &mut holder, |_, _| {
+            panic!("invalid skips all source")
+        })
+        .unwrap();
+        image[0x3c84a] = 0;
+        image[0x3a8c9] = 2;
+        image[0x3a8ca] = 0;
+        image[0x3a815] = 1;
+        assert!(load_paired_into(&image, 0x1a, 0, &mut holder).unwrap());
+        assert!(!load_paired_into(&image, 0x1a, 2, &mut holder).unwrap()); // Nonzero is not lowbit1.
+        assert!(load_paired_into(&image, 0x1b, 1, &mut holder).unwrap());
+        assert_eq!(holder.as_bytes()[0x24], 1);
+        assert!(load_paired_into(&image, 0x1a, 6, &mut holder).is_err());
+    }
+
+    #[test]
+    fn home_aggregate_gates_side_before_load_and_distinguishes_first_bad_from_bad_count() {
+        let mut image = image();
+        put_map(&mut image, 0, 0, 3);
+        image[249] = 0;
+        image[250..254].copy_from_slice(&321_u32.to_le_bytes());
+        image[283..287].copy_from_slice(&456_u32.to_le_bytes());
+        let q = super::super::context::Context::before_registry();
+        let ranges = super::super::frequency::Ranges::generate(&q, Some(0x409)).unwrap();
+        let view = ChannelView {
+            group: 0,
+            first: 0,
+            last: 1,
+            count: 2,
+        };
+        let filter = ChannelFilter {
+            broad: true,
+            include_side1: true,
+            count_all: true,
+            show_both: 0,
+        };
+        assert_eq!(
+            channel_bad_count(&image, view, filter, &ranges, &q, 17).unwrap(),
+            1
+        );
+        assert_eq!(
+            channel_bad_count(
+                &image,
+                view,
+                ChannelFilter {
+                    show_both: 1,
+                    ..filter
+                },
+                &ranges,
+                &q,
+                17
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            channel_bad_count(
+                &image,
+                view,
+                ChannelFilter {
+                    show_both: 1,
+                    count_all: false,
+                    ..filter
+                },
+                &ranges,
+                &q,
+                17
+            )
+            .unwrap(),
+            1
+        );
+        image[249] = 2; // Odd singleton still sees reset split0 BEFORE its own header load.
+        assert_eq!(
+            channel_bad_count(
+                &image,
+                ChannelView { first: 1, ..view },
+                filter,
+                &ranges,
+                &q,
+                17
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            channel_bad_count(
+                &[],
+                ChannelView { count: 0, ..view },
+                filter,
+                &ranges,
+                &q,
+                17
+            )
+            .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -555,7 +1047,7 @@ mod tests {
         assert_eq!(image, expected);
         assert!(load_compact_into(&image, 4, 45, &mut holder).is_err());
         assert!(load_compact_into(&image, 5, 11, &mut holder).is_err());
-        assert!(load_compact_into(&image, 0x19, 0, &mut holder).is_err());
+        assert!(load_compact_into(&image, 0x19, 0, &mut holder).unwrap());
     }
 
     #[test]

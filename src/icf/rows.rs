@@ -46,6 +46,14 @@ pub struct Allocation {
     pub exhausted: bool,
 }
 
+/// 610C type23: common reset plus the native eight-byte code literal59064A.
+/// This is an instruction/string recipe, not an externally supplied holder/G.
+pub fn ur_default(index: u32, binding: u32) -> super::record::DecodedRecord {
+    let mut holder = super::record::reset_holder(0x23, index, binding);
+    holder.as_mut_bytes()[0x88..0x90].copy_from_slice(b"CALLSIGN");
+    holder
+}
+
 impl NormalMemory {
     /// Expand storage links/masks into the normal working map, without field edits.
     ///
