@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 
 use super::{Error, Icf};
 
+pub mod extended;
 pub mod network;
 
 /// A contiguous numeric code domain; codes are not physical units or defaults.
