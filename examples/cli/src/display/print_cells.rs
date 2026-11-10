@@ -919,8 +919,8 @@ fn settings_cell(
         .find(|field| u32::from(field.key()) == node.key)
     {
         let effect = field.edit(&mut image.clone(), index, e::ChoiceInput::Display)?;
-        if let Some(label) = effect.fixed_label {
-            return Ok(label.as_bytes().to_vec());
+        if let Some(value) = effect.fixed_value {
+            return Ok(value.source_label().as_bytes().to_vec());
         }
         return selected_label(
             resources,
@@ -967,8 +967,8 @@ fn settings_cell(
         .chain(e::rf_choice_fields())
         .find(|field| u32::from(field.key()) == node.key && field.accepts_index(index))
     {
-        if let Some(label) = field.fixed_label(index)? {
-            return Ok(label.as_bytes().to_vec());
+        if let Some(value) = field.fixed_value(index)? {
+            return Ok(value.source_label().as_bytes().to_vec());
         }
         let value = field.read(image, index)?;
         if node.key == 0x1b0 {

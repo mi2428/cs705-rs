@@ -132,7 +132,7 @@ pub fn row_alarm(
             notify_flags: if candidate.is_some() { 0x20 } else { 0 },
             gray: false,
             popup_requested: input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         },
         marked,
         notify_39: candidate.is_some(),

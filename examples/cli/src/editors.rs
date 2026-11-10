@@ -685,7 +685,7 @@ pub(crate) fn number_json(effect: &lib::NumberEffect) -> Value {
         "suffix":io::bytes_value(&effect.suffix),"gray":effect.gray})
 }
 fn choice_json(effect: &lib::ChoiceEffect) -> Value {
-    json!({"stored":effect.stored,"value":effect.value,"notify_flags":effect.notify_flags,"gray":effect.gray,"popup_requested":effect.popup_requested,"fixed_label":effect.fixed_label})
+    json!({"stored":effect.stored,"value":effect.value,"notify_flags":effect.notify_flags,"gray":effect.gray,"popup_requested":effect.popup_requested,"fixed_label":effect.fixed_value.map(|value| value.source_label())})
 }
 fn dr_home_json(effect: &lib::HomeDrEffect) -> Value {
     json!({"accepted":effect.accepted,"stored":effect.stored,"candidate":effect.candidate,"reference":effect.reference,"notify_flags":effect.notify_flags,"warning_bits":effect.warning_bits,"state_out":effect.state_out,"popup_requested":effect.popup_requested})

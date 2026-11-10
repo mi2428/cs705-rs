@@ -360,7 +360,7 @@ fn choice_edit(
     };
     Ok((
         json!({"setting":format!("choice/{path}"),"stored":effect.stored,"value":effect.value,
-        "notify_flags":effect.notify_flags,"gray":effect.gray,"popup_requested":effect.popup_requested,"fixed_label":effect.fixed_label}),
+        "notify_flags":effect.notify_flags,"gray":effect.gray,"popup_requested":effect.popup_requested,"fixed_label":effect.fixed_value.map(|value| value.source_label())}),
         effect.stored,
     ))
 }

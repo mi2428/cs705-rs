@@ -473,7 +473,7 @@ impl ChoiceField {
             notify_flags: if effect.stored { self.notify_flags } else { 0 },
             gray: self.gray_parent != 0 && image.memory()[self.gray_parent] != 2,
             popup_requested: input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         })
     }
 }
@@ -563,7 +563,7 @@ impl AlarmField {
             notify_flags,
             gray: false,
             popup_requested: !choices.is_empty() && input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         })
     }
 }
@@ -1212,7 +1212,7 @@ impl SymbolField {
             notify_flags: if candidate.is_some() { 0x20 } else { 0 },
             gray: false,
             popup_requested: input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         })
     }
     pub fn edit(

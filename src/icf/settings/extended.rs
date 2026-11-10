@@ -1843,7 +1843,7 @@ impl PackedField {
             },
             gray: false,
             popup_requested: input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         })
     }
 }
@@ -1856,7 +1856,26 @@ pub struct ChoiceEffect {
     pub gray: bool,
     pub popup_requested: bool,
     /// Fixed AGC/delay rows do not read a raw byte or call the selector.
-    pub fixed_label: Option<&'static str>,
+    pub fixed_value: Option<FixedValue>,
+}
+
+/// A fixed semantic value. It also gates editing without comparing UI text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedValue {
+    AgcFast,
+    AgcDelay100Millis,
+    NotApplicable,
+}
+
+impl FixedValue {
+    /// The original byte-display contract, not a localized UI label.
+    pub fn source_label(self) -> &'static str {
+        match self {
+            Self::AgcFast => "FAST",
+            Self::AgcDelay100Millis => "0.1sec",
+            Self::NotApplicable => "---",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1896,7 +1915,7 @@ impl AmplifierField {
                 notify_flags: 0,
                 gray: true,
                 popup_requested: false,
-                fixed_label: Some("---"),
+                fixed_value: Some(FixedValue::NotApplicable),
             });
         }
         let old = if self == Self::Preamp {
@@ -1931,7 +1950,7 @@ impl AmplifierField {
             },
             gray: self == Self::Preamp && image.attenuator_raw(index)? != 0,
             popup_requested: input == ChoiceInput::Begin,
-            fixed_label: None,
+            fixed_value: None,
         })
     }
 }
@@ -1964,13 +1983,13 @@ impl ChoiceField {
         }
         Ok(())
     }
-    pub fn fixed_label(&self, index: usize) -> Result<Option<&'static str>, Error> {
+    pub fn fixed_value(&self, index: usize) -> Result<Option<FixedValue>, Error> {
         self.check(index)?;
         Ok(if index >= 4 {
             match self.key() {
-                0x336 => Some("FAST"),
-                0x339 => Some("0.1sec"),
-                0x33a | 0x33b => Some("---"),
+                0x336 => Some(FixedValue::AgcFast),
+                0x339 => Some(FixedValue::AgcDelay100Millis),
+                0x33a | 0x33b => Some(FixedValue::NotApplicable),
                 _ => None,
             }
         } else {
@@ -1979,7 +1998,7 @@ impl ChoiceField {
     }
     pub fn read(&self, image: &Icf<'_>, index: usize) -> Result<i64, Error> {
         self.check(index)?;
-        if self.fixed_label(index)?.is_some() {
+        if self.fixed_value(index)?.is_some() {
             return Ok(0);
         }
         let Value::Number(value) = self.storage.read(image, index)?;
@@ -1999,8 +2018,8 @@ impl ChoiceField {
             return Err(invalid("key assignment cycling requires actual live Q"));
         }
         let old = self.read(image, index)?;
-        let fixed_label = self.fixed_label(index)?;
-        let effect = match if fixed_label.is_some() {
+        let fixed_value = self.fixed_value(index)?;
+        let effect = match if fixed_value.is_some() {
             ChoiceInput::Display
         } else {
             input
@@ -2049,8 +2068,8 @@ impl ChoiceField {
             },
             notify_flags,
             gray,
-            popup_requested: fixed_label.is_none() && input == ChoiceInput::Begin,
-            fixed_label,
+            popup_requested: fixed_value.is_none() && input == ChoiceInput::Begin,
+            fixed_value,
         })
     }
 }
@@ -5159,7 +5178,7 @@ mod tests {
                 assert!(!out.stored);
                 assert_eq!(image.memory(), before);
                 let out = field.edit(&mut image, index, chosen(254)).unwrap();
-                if field.fixed_label(index).unwrap().is_some() {
+                if field.fixed_value(index).unwrap().is_some() {
                     assert!(!out.stored);
                     assert_eq!(image.memory(), before);
                     continue;
@@ -6946,7 +6965,7 @@ mod tests {
                 assert_eq!(image.memory(), before);
                 let out = field.edit(&mut image, index, chosen(-1)).unwrap();
                 if field == AmplifierField::Attenuator && index >= 13 {
-                    assert_eq!(out.fixed_label, Some("---"));
+                    assert_eq!(out.fixed_value, Some(FixedValue::NotApplicable));
                     assert!(!out.stored);
                     assert_eq!(image.memory(), before);
                     continue;

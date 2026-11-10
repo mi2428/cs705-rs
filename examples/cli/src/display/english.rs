@@ -126,7 +126,7 @@ pub fn choices(key: &str, image: Option<&Icf<'_>>) -> Result<Value> {
             .chain(settings::extended::rf_choice_fields())
             .find(|f| (f.name() == name || f.feature_id() == name) && f.accepts_index(index))
         {
-            if choice.fixed_label(index)?.is_some() {
+            if choice.fixed_value(index)?.is_some() {
                 actual = Some(Vec::new());
             }
             if let Some(image) = image {
