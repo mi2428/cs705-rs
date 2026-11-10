@@ -28,7 +28,7 @@ pub trait Transport: Read + Write {
 
 #[cfg(test)]
 #[path = "session_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Echo {
@@ -179,6 +179,8 @@ pub enum Failure {
     EarlyResponse,
     EndCount,
     MissingCoverage,
+    /// Native read completion rejected the internal revision/signature image.
+    ImageValidation,
     OutsideImage,
     OutsideCoverage,
     DrainTimeout,
@@ -198,6 +200,7 @@ impl Failure {
             Self::Timeout | Self::DrainTimeout => 5,
             Self::EndCount => 7,
             Self::MissingCoverage => 8,
+            Self::ImageValidation => 15,
             Self::OutsideImage | Self::OutsideCoverage => 9,
             Self::Protocol(Error::Rejected(_)) => 10,
             Self::MalformedAck => 10,

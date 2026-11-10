@@ -118,7 +118,7 @@ pub struct Request<'a> {
 fn number(n: u32) -> Vec<u8> {
     format!("{:02}", n as i32).into_bytes()
 }
-fn one_decimal(n: u32, point: u8, sign: bool) -> Vec<u8> {
+pub(crate) fn one_decimal(n: u32, point: u8, sign: bool) -> Vec<u8> {
     let mut out = format!("{}{}.{}", if sign { "-" } else { "" }, n / 10, n % 10).into_bytes();
     if let Some(p) = out.iter_mut().find(|b| **b == b'.') {
         *p = point;
@@ -525,7 +525,7 @@ pub fn utc_text(minutes: i32) -> Result<Vec<u8>, Error> {
     )
     .into_bytes())
 }
-fn ssid(raw: [u8; 2]) -> Vec<u8> {
+pub(crate) fn ssid(raw: [u8; 2]) -> Vec<u8> {
     match raw {
         [255, 255] => Vec::new(),
         [b'0', 255] => b"(-0)".to_vec(),
@@ -533,14 +533,14 @@ fn ssid(raw: [u8; 2]) -> Vec<u8> {
         [a, b] => vec![a, b],
     }
 }
-fn speed(n: u16, point: u8) -> Vec<u8> {
+pub(crate) fn speed(n: u16, point: u8) -> Vec<u8> {
     if n == 65535 {
         Vec::new()
     } else {
         one_decimal((u32::from(n) * 1852 / 1000) as u16 as u32, point, false)
     }
 }
-fn temperature(n: i16, point: u8) -> Vec<u8> {
+pub(crate) fn temperature(n: i16, point: u8) -> Vec<u8> {
     if n == 32767 {
         return Vec::new();
     }
@@ -552,7 +552,7 @@ fn temperature(n: i16, point: u8) -> Vec<u8> {
     }
     out
 }
-fn rain(n: u16, point: u8) -> Vec<u8> {
+pub(crate) fn rain(n: u16, point: u8) -> Vec<u8> {
     if n == 65535 {
         Vec::new()
     } else {
@@ -563,7 +563,7 @@ fn rain(n: u16, point: u8) -> Vec<u8> {
         )
     }
 }
-fn wind(n: u16, point: u8) -> Vec<u8> {
+pub(crate) fn wind(n: u16, point: u8) -> Vec<u8> {
     if n == 65535 {
         Vec::new()
     } else {

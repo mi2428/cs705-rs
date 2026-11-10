@@ -4,6 +4,9 @@
 
 use super::{Error, datetime, payload, table};
 
+#[path = "history/paint.rs"]
+pub mod paint;
+
 /// Normal portable profile. Textual calendar/era tokens need actual native
 /// outputs; they are not reconstructed from import-era names or host locale.
 pub fn format(
@@ -30,7 +33,7 @@ pub fn format_with_date(
             table::portable_label(payload::Kind::ReceiveHistory, &request, b'.')?
                 .ok_or(Error::SourceUnavailable("Rx static label adapter"))
         }
-        A::Symbol => symbol(request.source, symbol_pe),
+        A::Symbol => symbol(request.source, symbol_pe, false, true),
         A::HistoryDate => {
             let raw = request
                 .source
@@ -66,21 +69,35 @@ pub fn format_with_date(
             } else {
                 43
             };
-            if request.source.len() != width {
-                return Err(Error::Invalid("Rx message requires exact raw20/raw43"));
-            }
             // 47E14 C-prefix -> TrimRight -> 479EC('_'). Extra0 skips478C8;
             // half-width kana survive. The compact1 B62E8 pass happens last.
-            let mut text = super::export_call(request.source, width);
-            for byte in &mut text {
-                if !matches!(*byte, 0x20..=0x7e | 0xa1..=0xdf) {
-                    *byte = b'_';
-                }
-            }
+            let text = message(request.source, width, false)?;
             Ok(super::export_text(&text, width))
         }
         _ => Err(Error::Invalid("request is not an Rx history formatter")),
     }
+}
+
+// 479EC is byte-wise, unlike nls::sanitize's valid-DBCS-pair grammar. Keep this
+// existing Rx primitive shared;478C8 is a separate, later half-width-kana pass.
+fn message(source: &[u8], width: usize, extra: bool) -> Result<Vec<u8>, Error> {
+    if source.len() != width {
+        return Err(Error::Invalid("Rx message requires exact raw20/raw43"));
+    }
+    let mut text = super::export_call(source, width);
+    for byte in &mut text {
+        if !matches!(*byte, 0x20..=0x7e | 0xa1..=0xdf) {
+            *byte = b'_';
+        }
+    }
+    if extra {
+        for byte in &mut text {
+            if (0xa1..=0xdf).contains(byte) {
+                *byte = b'_';
+            }
+        }
+    }
+    Ok(text)
 }
 
 fn span(source: &[u8], at: usize, len: usize) -> Result<&[u8], Error> {
@@ -100,7 +117,7 @@ fn dword(source: &[u8], at: usize) -> Result<u32, Error> {
 
 // CS-705's PE32/x86/ImageBase schema only. Each lookup is bounded to at most96
 // section headers and the actual file-backed tail; virtual/BSS bytes are not0.
-fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
+pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
     if span(source, 0, 2)? != b"MZ" {
         return Err(Error::Invalid("symbol source is not PE"));
     }
@@ -143,15 +160,27 @@ fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
     found.ok_or(Error::SourceUnavailable("PE symbol RVA is not file-backed"))
 }
 
-fn symbol(raw: &[u8], source: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+fn symbol(
+    raw: &[u8],
+    source: Option<&[u8]>,
+    locale: bool,
+    compact: bool,
+) -> Result<Vec<u8>, Error> {
     let [first, second]: [u8; 2] = raw
         .try_into()
         .map_err(|_| Error::Invalid("Rx symbol requires raw2"))?;
     if first == 255 {
-        return Ok(Vec::new());
+        return Ok(if compact { Vec::new() } else { b"---".to_vec() });
     }
+    let finish = |text: &[u8], width| {
+        if compact {
+            super::export_text(text, width)
+        } else {
+            super::export_call(text, width)
+        }
+    };
     let direct = || {
-        super::export_text(
+        finish(
             &[first, second].map(|b| if (32..=126).contains(&b) { b } else { b' ' }),
             2,
         )
@@ -163,12 +192,12 @@ fn symbol(raw: &[u8], source: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         "Rx Symbol requires original PE source asset",
     ))?;
     let special = [first, second] == *b"IY";
-    // C88B8 takes locale0 for compact1. The other locale pointer is NOT read.
+    // C88B8 forces locale0 for compact1. Native paint uses48B44's canonical bit.
     let slot = if special {
         0x419518
     } else {
         (if first == b'/' { 0x418f18 } else { 0x419218 }) + 8 * u32::from(second - 33)
-    };
+    } + u32::from(locale && !compact) * 4;
     let pointer = dword(pe_tail(pe, slot)?, 0)?;
     let rva = pointer
         .checked_sub(0x400000)
@@ -195,7 +224,7 @@ fn symbol(raw: &[u8], source: Option<&[u8]>) -> Result<Vec<u8>, Error> {
             "Rx symbol exceeds native38-byte buffer",
         ));
     }
-    Ok(super::export_text(&out, 38))
+    Ok(finish(&out, 38))
 }
 
 #[cfg(test)]
@@ -203,7 +232,7 @@ mod tests {
     use super::*;
     use payload::Adapter as A;
 
-    fn context() -> datetime::Context<'static> {
+    pub(super) fn context() -> datetime::Context<'static> {
         datetime::Context {
             short_date: b"yyyy/mm/dd",
             date_separator: b'/',
@@ -227,7 +256,7 @@ mod tests {
     fn put32(bytes: &mut [u8], at: usize, value: u32) {
         bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
     }
-    fn symbol_source() -> Vec<u8> {
+    pub(super) fn symbol_source() -> Vec<u8> {
         // Synthetic PE geometry, not copied resource tables or a factory image.
         let mut pe = vec![0; 0xa00];
         pe[..2].copy_from_slice(b"MZ");

@@ -88,7 +88,7 @@ pub struct FileImage {
     pub status: Status,
     /// Selected layout if the reader completed and the signature gate was reached.
     pub layout: Option<Layout>,
-    /// M bytes on success; initial 49E3A-byte bound object on a failed outer gate.
+    /// M bytes on success; the caller's original bound length on a failed gate.
     pub image: Vec<u8>,
 }
 
@@ -130,12 +130,37 @@ pub fn read(source: &[u8]) -> Result<FileImage, Error> {
     )
 }
 
+/// O002 binds a copy of current M bytes, preserving its unwritten working tail.
+/// Missing storage records still fail coverage; old bytes never fill that gate.
+pub fn read_bound(source: &[u8], image: Vec<u8>) -> Result<FileImage, Error> {
+    if image.len() != IMAGE_CAPACITY {
+        return Err(Error::Invalid {
+            line: 0,
+            reason: "bound ICF reader requires exactly M bytes",
+        });
+    }
+    let fragments = text::fragments(source);
+    read_bound_fragments(
+        &fragments
+            .iter()
+            .map(|line| Some(line.as_slice()))
+            .collect::<Vec<_>>(),
+        image,
+    )
+}
+
 /// Original normal-open path with explicit NULL `fgets` results for failure tests.
 /// Byte grammar lives in `text::Reader`; no second parser or stricter substitute
 /// is introduced here. All image mutations and status gates remain visible.
 pub fn read_fragments(fragments: &[Option<&[u8]>]) -> Result<FileImage, Error> {
+    read_bound_fragments(fragments, vec![0; OPEN_CAPACITY])
+}
+
+fn read_bound_fragments(
+    fragments: &[Option<&[u8]>],
+    mut image: Vec<u8>,
+) -> Result<FileImage, Error> {
     let mut reader = text::Reader::default();
-    let mut image = vec![0; OPEN_CAPACITY];
     let report = reader.read_fragments(&mut image, fragments, None)?;
     let mut result = FileImage {
         status: Status::Reader(report.status),
@@ -149,14 +174,11 @@ pub fn read_fragments(fragments: &[Option<&[u8]>]) -> Result<FileImage, Error> {
     }
     let layout = Layout::from_map_revision(result.reader.map_revision);
     result.layout = Some(layout);
-    if !(1..=6).contains(&result.image[layout.revision_offset()])
-        || &result.image[layout.signature_offset()..layout.signature_offset() + 16]
-            != IMAGE_SIGNATURE
-    {
+    if !validate_image(&result.image, layout)? {
         result.status = Status::Signature;
         return Ok(result);
     }
-    let mut required = vec![0; OPEN_CAPACITY.div_ceil(8)];
+    let mut required = vec![0; result.image.len().div_ceil(8)];
     required[..layout.storage_len() / 8].fill(0xff);
     // Every established storage length is a multiple of 32, hence also of 8.
     let coverage = text::coverage_status(Some(&result.report.coverage), Some(&required))?;
@@ -167,6 +189,25 @@ pub fn read_fragments(fragments: &[Option<&[u8]>]) -> Result<FileImage, Error> {
     result.image.truncate(IMAGE_CAPACITY);
     result.status = Status::Success;
     Ok(result)
+}
+
+/// Shared23690 image gate. Internal revision and layout metadata are distinct.
+/// This neither normalizes bytes nor checks wire/file coverage or checksums.
+pub fn validate_image(image: &[u8], layout: Layout) -> Result<bool, Error> {
+    let revision = image.get(layout.revision_offset()).ok_or(Error::Invalid {
+        line: 0,
+        reason: "image revision source unavailable",
+    })?;
+    if !(1..=6).contains(revision) {
+        return Ok(false);
+    }
+    let signature = image
+        .get(layout.signature_offset()..layout.signature_offset() + IMAGE_SIGNATURE.len())
+        .ok_or(Error::Invalid {
+            line: 0,
+            reason: "image signature source unavailable",
+        })?;
+    Ok(signature == IMAGE_SIGNATURE)
 }
 
 /// Write exactly one storage image in the requested layout, recomputing CD.
@@ -246,6 +287,53 @@ mod tests {
         image[revision] = selector as u8;
         image[length - 16..].copy_from_slice(b"IcomCloneFormat3");
         image
+    }
+
+    #[test]
+    fn bound_reader_preserves_tail_but_never_substitutes_old_bytes_for_coverage() {
+        let storage = storage(6);
+        let file = write_storage(&storage, Layout::from_map_revision(6), b"", 0).unwrap();
+        let original = vec![0xa5; IMAGE_CAPACITY];
+        let parsed = read_bound(&file, original.clone()).unwrap();
+        assert_eq!(parsed.status, Status::Success);
+        assert_eq!(&parsed.image[..storage.len()], storage);
+        assert_eq!(&parsed.image[storage.len()..], &original[storage.len()..]);
+
+        let mut missing = text::fragments(&file);
+        missing.remove(4);
+        let missing: Vec<_> = missing.into_iter().flatten().collect();
+        let parsed = read_bound(&missing, original.clone()).unwrap();
+        assert_eq!(
+            parsed.status,
+            Status::Coverage(text::Status::MissingCoverage)
+        );
+        assert_eq!(&parsed.image[..RECORD_BYTES], &original[..RECORD_BYTES]);
+        assert_eq!(parsed.image[RECORD_BYTES], storage[RECORD_BYTES]);
+
+        let parsed = read_bound(
+            b"40750001\n#MapRev=6\n#EtcData=00000000\n0000000001AA\nBROKEN\n",
+            original.clone(),
+        )
+        .unwrap();
+        assert_eq!(parsed.status, Status::Reader(text::Status::Syntax));
+        assert_eq!(parsed.image, original);
+        assert_eq!(parsed.reader.map_revision, 6);
+        assert!(read_bound(&file, Vec::new()).is_err());
+    }
+
+    #[test]
+    fn image_gate_preserves_internal_revision_domain_and_clone_result_fifteen() {
+        let layout = Layout::from_map_revision(6);
+        let mut image = storage(6);
+        for (revision, accepted) in [(0, false), (1, true), (6, true), (7, false)] {
+            image[layout.revision_offset()] = revision;
+            assert_eq!(validate_image(&image, layout).unwrap(), accepted);
+        }
+        image[layout.revision_offset()] = 1;
+        image[layout.signature_offset()] ^= 1;
+        assert!(!validate_image(&image, layout).unwrap());
+        assert!(validate_image(&[], layout).is_err());
+        assert_eq!(crate::clone::Failure::ImageValidation.result_code(), 15);
     }
 
     #[test]

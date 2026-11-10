@@ -2,7 +2,7 @@ use super::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
-fn config() -> SessionConfig {
+pub(crate) fn config() -> SessionConfig {
     SessionConfig {
         prepare_delay_ms: 0,
         poll_ms: 1,
@@ -13,14 +13,14 @@ fn config() -> SessionConfig {
 fn profile(n: u8) -> Profile {
     Profile::try_from(n).unwrap()
 }
-fn response(selector: u8) -> Vec<u8> {
+pub(crate) fn response(selector: u8) -> Vec<u8> {
     // Independent E1 literal: no production encoder, no BCD conversion.
     let mut r = vec![0xfe, 0xfe, 0xef, 0xee, 0xe1, 0x40, 0x75, 0, 1, 33, selector];
     r.extend_from_slice(&[0; 31]);
     r.push(0xfd);
     r
 }
-fn packet(address: u32, payload: &[u8]) -> Vec<u8> {
+pub(crate) fn packet(address: u32, payload: &[u8]) -> Vec<u8> {
     // Independent transcript recipe; intentionally does not call Frame.
     let mut body = address.to_be_bytes().to_vec();
     body.push(payload.len() as u8);
@@ -40,14 +40,14 @@ fn packet(address: u32, payload: &[u8]) -> Vec<u8> {
     out.push(253);
     out
 }
-fn end(count: usize) -> Vec<u8> {
+pub(crate) fn end(count: usize) -> Vec<u8> {
     let mut e = vec![254, 254, 239, 238, 229];
     e.extend_from_slice(format!("Icom Inc.{:02X}", count % 256).as_bytes());
     e.push(253);
     e
 }
 
-struct Mock {
+pub(crate) struct Mock {
     now: u64,
     chunk: usize,
     max_write: usize,
@@ -56,9 +56,9 @@ struct Mock {
     incoming: VecDeque<u8>,
     transmitted: Vec<u8>,
     partial: Vec<u8>,
-    commands: Vec<u8>,
-    read_data: Vec<u8>,
-    query_response: Option<Vec<u8>>,
+    pub(crate) commands: Vec<u8>,
+    pub(crate) read_data: Vec<u8>,
+    pub(crate) query_response: Option<Vec<u8>>,
     ack: Option<Vec<u8>>,
     ack_delay: u64,
     ack_at: Option<u64>,
@@ -70,14 +70,14 @@ struct Mock {
     pending: usize,
     stuck_after_ack: bool,
     close_failure: bool,
-    closes: usize,
+    pub(crate) closes: usize,
     shared_sent: Rc<Cell<usize>>,
     reads: usize,
     configurations: Vec<Vec<u8>>,
     reconfigure_failure: bool,
 }
 impl Mock {
-    fn new(selector: u8) -> Self {
+    pub(crate) fn new(selector: u8) -> Self {
         Self {
             now: 0,
             chunk: 8192,

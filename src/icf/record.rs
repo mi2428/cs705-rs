@@ -186,7 +186,9 @@ impl DecodedRecord {
         self.put_word(0x20, group);
     }
     /// Auxiliary range descriptorH38, distinct from the logical typed index.
-    pub fn range_index(&self)->i32 {self.word(0x38) as i32}
+    pub fn range_index(&self) -> i32 {
+        self.word(0x38) as i32
+    }
     /// Full decoded mode DWORD. Lookup truncation and mode guards are separate.
     pub fn mode(&self) -> u32 {
         self.word(0x58)
@@ -1640,51 +1642,142 @@ pub enum HistoryValue<'a> {
     Bytes(&'a [u8]),
 }
 
+fn receive_history_range(key: u32) -> Result<std::ops::Range<usize>, Error> {
+    let (at, width) = match key {
+        0x156 => (0x195, 1),
+        0x157 => (0x19d, 8),
+        0x158 => (0x1a5, 4),
+        0x159 => (0x1a9, 8),
+        0x15a => (0x1b1, 8),
+        0x15b => (0x1b9, 8),
+        0x15c => (0x198, 4),
+        0x15e => (0x1c1, 20),
+        0x15f => (0x1d5, 1),
+        0x160 => (0x1d8, 6),
+        0x161 => (0x1d6, 1),
+        0x162 => (0x1d7, 1),
+        0x163 => (0x1de, 4),
+        0x164 => (0x1e2, 4),
+        0x165 => (0x1e8, 4),
+        0x166 => (0x1ec, 2),
+        0x167 => (0x1ee, 2),
+        0x168 => (0x1f0, 2),
+        0x169 => (0x1f2, 2),
+        0x16a => (0x1f5, 3),
+        0x16b => (0x1f8, 1),
+        0x16c => (0x1f9, 1),
+        0x16d => (0x1fa, 1),
+        0x16e => (0x1fb, 1),
+        0x16f => (0x1fc, 9),
+        0x170 => (0x205, 1),
+        0x171 => (0x206, 2),
+        0x172 => (0x208, 2),
+        0x173 => (0x20a, 2),
+        0x174 => (0x20c, 2),
+        0x175 => (0x20e, 2),
+        0x176 => (0x210, 2),
+        0x177 => (0x212, 2),
+        0x178 => (0x214, 4),
+        0x179 => (0x218, 1),
+        0x17a => (0x219, 43),
+        _ => {
+            return Err(Error::Invalid {
+                line: 5,
+                reason: "key is not a native Rx history field",
+            });
+        }
+    };
+    Ok(at..at + width)
+}
+
+/// Borrow one of the 36 actual native Rx fields, without a display-validity gate.
+/// Mode15D is not a resource field. Date160 is raw6; Timestamp16A is raw3.
+pub fn receive_history_raw(holder: &DecodedRecord, key: u32) -> Result<&[u8], Error> {
+    if holder.kind() != 0x0e {
+        return Err(Error::Invalid {
+            line: 5,
+            reason: "native Rx history source requires kind0E",
+        });
+    }
+    Ok(&holder.bytes[receive_history_range(key)?])
+}
+
+/// Native FromDV/FM/ToDV/Ref paint gate, after the caller's initial empty assign.
+/// Raw getters retain their ungated meaning; mismatched keys/kinds are errors.
+pub fn history_field_visible(holder: &DecodedRecord, key: u32) -> Result<bool, Error> {
+    let visible = match (holder.kind(), key) {
+        (0x0f, 0x17b) | (0x10, 0x183) | (0x12, 0x188) | (0x14, 0x18c) => true,
+        (0x0f, 0x17c | 0x17e | 0x17f) | (0x10, 0x184 | 0x186 | 0x187) | (0x12, 0x189) => {
+            holder.history_supplemented()
+        }
+        (0x0f, 0x17d) => {
+            holder.history_supplemented() && holder.channel_field(ChannelField::FrequencyHz) != 0
+        }
+        (0x10, 0x185) => holder.channel_field(ChannelField::FrequencyHz) != 0,
+        _ => {
+            return Err(Error::Invalid {
+                line: 5,
+                reason: "native history field/key kind mismatch",
+            });
+        }
+    };
+    Ok(holder.valid() && visible)
+}
+
 /// Projection of the Rx decoder's fields, not another raw48/raw92 codec. Date
 /// and time stay separate here (CSV joins them through its existing formatter).
 pub fn receive_history_fields(holder: &DecodedRecord) -> Vec<(&'static str, HistoryValue<'_>)> {
     use HistoryValue::{Bytes as B, Signed as S, Unsigned as U};
     let b = &holder.bytes;
-    let word = |at| u16::from_le_bytes([b[at], b[at + 1]]);
+    let raw = |key| &b[receive_history_range(key).expect("fixed Rx projection key")];
+    let byte = |key| u32::from(raw(key)[0]);
+    let word = |key| {
+        u32::from(u16::from_le_bytes(
+            raw(key).try_into().expect("Rx WORD width"),
+        ))
+    };
+    let dword = |key| u32::from_le_bytes(raw(key).try_into().expect("Rx DWORD width"));
+    let timestamp = receive_history_range(0x16a).expect("fixed Rx timestamp key");
     vec![
-        ("type", U(u32::from(b[0x195]))),
-        ("frequency-hz", U(holder.word(0x198))),
+        ("type", U(byte(0x156))),
+        ("frequency-hz", U(dword(0x15c))),
         ("mode", U(u32::from(b[0x19c]))),
-        ("caller", B(&b[0x19d..0x1a5])),
-        ("caller2", B(&b[0x1a5..0x1a9])),
-        ("called", B(&b[0x1a9..0x1b1])),
-        ("repeater1", B(&b[0x1b1..0x1b9])),
-        ("repeater2", B(&b[0x1b9..0x1c1])),
-        ("message", B(&b[0x1c1..0x1d5])),
-        ("status", U(u32::from(b[0x1d5]))),
-        ("bk", U(u32::from(b[0x1d6]))),
-        ("emr", U(u32::from(b[0x1d7]))),
-        ("date", B(&b[0x1d8..0x1db])),
-        ("time", B(&b[0x1db..0x1de])),
-        ("latitude", B(&b[0x1de..0x1e2])),
-        ("longitude", B(&b[0x1e2..0x1e6])),
-        ("altitude-tenths-ft", S(holder.word(0x1e8) as i32)),
-        ("ssid", B(&b[0x1ec..0x1ee])),
-        ("symbol", B(&b[0x1ee..0x1f0])),
-        ("course", U(u32::from(word(0x1f0)))),
-        ("speed", U(u32::from(word(0x1f2)))),
-        ("gps-timestamp", B(&b[0x1f4..0x1f8])),
-        ("power", U(u32::from(b[0x1f8]))),
-        ("height", U(u32::from(b[0x1f9]))),
-        ("gain", U(u32::from(b[0x1fa]))),
-        ("directivity", U(u32::from(b[0x1fb]))),
-        ("object-name", B(&b[0x1fc..0x205])),
-        ("data-type", U(u32::from(b[0x205]))),
-        ("temperature-f", S(i32::from(word(0x206) as i16))),
-        ("rain", U(u32::from(word(0x208)))),
-        ("rain24", U(u32::from(word(0x20a)))),
-        ("rain-midnight", U(u32::from(word(0x20c)))),
-        ("wind-direction", U(u32::from(word(0x20e)))),
-        ("wind-speed", U(u32::from(word(0x210)))),
-        ("gust-speed", U(u32::from(word(0x212)))),
-        ("pressure", U(holder.word(0x214))),
-        ("humidity", U(u32::from(b[0x218]))),
-        ("gps-message", B(&b[0x219..0x244])),
+        ("caller", B(raw(0x157))),
+        ("caller2", B(raw(0x158))),
+        ("called", B(raw(0x159))),
+        ("repeater1", B(raw(0x15a))),
+        ("repeater2", B(raw(0x15b))),
+        ("message", B(raw(0x15e))),
+        ("status", U(byte(0x15f))),
+        ("bk", U(byte(0x161))),
+        ("emr", U(byte(0x162))),
+        ("date", B(&raw(0x160)[..3])),
+        ("time", B(&raw(0x160)[3..])),
+        ("latitude", B(raw(0x163))),
+        ("longitude", B(raw(0x164))),
+        ("altitude-tenths-ft", S(dword(0x165) as i32)),
+        ("ssid", B(raw(0x166))),
+        ("symbol", B(raw(0x167))),
+        ("course", U(word(0x168))),
+        ("speed", U(word(0x169))),
+        // The typed projection retains the leading byte before native raw3.
+        ("gps-timestamp", B(&b[timestamp.start - 1..timestamp.end])),
+        ("power", U(byte(0x16b))),
+        ("height", U(byte(0x16c))),
+        ("gain", U(byte(0x16d))),
+        ("directivity", U(byte(0x16e))),
+        ("object-name", B(raw(0x16f))),
+        ("data-type", U(byte(0x170))),
+        ("temperature-f", S(i32::from(word(0x171) as i16))),
+        ("rain", U(word(0x172))),
+        ("rain24", U(word(0x173))),
+        ("rain-midnight", U(word(0x174))),
+        ("wind-direction", U(word(0x175))),
+        ("wind-speed", U(word(0x176))),
+        ("gust-speed", U(word(0x177))),
+        ("pressure", U(dword(0x178))),
+        ("humidity", U(byte(0x179))),
+        ("gps-message", B(raw(0x17a))),
     ]
 }
 
@@ -2651,9 +2744,106 @@ mod tests {
             HistoryValue::Unsigned(n) => assert_eq!(*n, 25),
             _ => panic!("mode must be unsigned"),
         }
+        let widths = [
+            1, 8, 4, 8, 8, 8, 4, 0, 20, 1, 6, 1, 1, 4, 4, 4, 2, 2, 2, 2, 3, 1, 1, 1, 1, 9, 1, 2, 2,
+            2, 2, 2, 2, 2, 4, 1, 43,
+        ];
+        let base = h.as_bytes().as_ptr() as usize;
+        let mut count = 0;
+        for (index, width) in widths.into_iter().enumerate() {
+            let key = 0x156 + index as u32;
+            let raw = receive_history_raw(&h, key);
+            if width == 0 {
+                assert!(raw.is_err()); // Mode15D has no actual native resource cell.
+                continue;
+            }
+            let raw = raw.unwrap();
+            assert_eq!(raw.len(), width, "Rx key {key:x}");
+            assert!((base..=base + DECODED_BYTES - width).contains(&(raw.as_ptr() as usize)));
+            count += 1;
+        }
+        assert_eq!(count, 36);
+        let date = receive_history_raw(&h, 0x160).unwrap();
+        for (name, expected) in [("date", &date[..3]), ("time", &date[3..])] {
+            match &fields.iter().find(|(field, _)| *field == name).unwrap().1 {
+                HistoryValue::Bytes(raw) => assert!(std::ptr::eq(raw.as_ptr(), expected.as_ptr())),
+                _ => panic!("date/time must borrow bytes"),
+            }
+        }
+        match &fields
+            .iter()
+            .find(|(name, _)| *name == "gps-timestamp")
+            .unwrap()
+            .1
+        {
+            HistoryValue::Bytes(raw) => {
+                assert_eq!(raw.len(), 4);
+                assert!(std::ptr::eq(
+                    receive_history_raw(&h, 0x16a).unwrap().as_ptr(),
+                    raw[1..].as_ptr()
+                ));
+            }
+            _ => panic!("timestamp must borrow bytes"),
+        }
+        assert!(std::ptr::eq(
+            receive_history_raw(&h, 0x157).unwrap().as_ptr(),
+            h.as_bytes()[0x19d..].as_ptr()
+        ));
         drop(fields);
         load_receive_history_storage_into(&image, 2, &mut h).unwrap();
         assert!(!h.valid());
+        assert_eq!(receive_history_raw(&h, 0x157).unwrap(), b"FIRST  B");
+        for key in [0x155, 0x15d, 0x17b, u32::MAX] {
+            assert!(receive_history_raw(&h, key).is_err());
+        }
+        for kind in [0, 0x0f, 0x11, 0x13, 0x14, u32::MAX] {
+            let mut wrong = h.clone();
+            wrong.set_header(kind, h.index(), h.binding());
+            assert!(receive_history_raw(&wrong, 0x156).is_err());
+        }
+        for (kind, key, supplemented, frequency) in [
+            (0x0f, 0x17b, false, false),
+            (0x0f, 0x17c, true, false),
+            (0x0f, 0x17d, true, true),
+            (0x0f, 0x17e, true, false),
+            (0x0f, 0x17f, true, false),
+            (0x10, 0x183, false, false),
+            (0x10, 0x184, true, false),
+            (0x10, 0x185, false, true),
+            (0x10, 0x186, true, false),
+            (0x10, 0x187, true, false),
+            (0x12, 0x188, false, false),
+            (0x12, 0x189, true, false),
+            (0x14, 0x18c, false, false),
+        ] {
+            for valid in [false, true] {
+                for extra in [0, 7] {
+                    for hz in [0, 0x8000_0000] {
+                        let mut row = reset_holder(kind, 0, 0);
+                        row.set_valid(valid);
+                        row.bytes[0x194] = extra;
+                        row.set_channel_field(ChannelField::FrequencyHz, hz);
+                        assert_eq!(
+                            history_field_visible(&row, key).unwrap(),
+                            valid && (!supplemented || extra != 0) && (!frequency || hz != 0),
+                            "kind {kind:x} key {key:x} valid {valid} extra {extra} hz {hz}"
+                        );
+                    }
+                }
+            }
+        }
+        for (kind, key) in [
+            (0x0e, 0x17b),
+            (0x0f, 0x183),
+            (0x10, 0x17d),
+            (0x11, 0x180),
+            (0x13, 0x18a),
+            (0x14, 0x189),
+        ] {
+            let mut row = reset_holder(kind, 0, 0);
+            row.set_valid(false);
+            assert!(history_field_visible(&row, key).is_err());
+        }
         let before = h.clone();
         assert!(load_receive_history_storage_into(&image, 50, &mut h).is_err());
         assert!(h == before);

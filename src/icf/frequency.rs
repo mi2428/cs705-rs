@@ -574,13 +574,7 @@ impl Ranges {
         kind: u32,
         candidate: u32,
     ) -> Result<super::special::FrequencyInput, Error> {
-        if !matches!(kind, 8 | 0x15) {
-            return Err(invalid("two-pass frequency input requires kind8 or15h"));
-        }
-        if !self.complete {
-            return Err(invalid("frequency input requires a completed B generation"));
-        }
-        let first = self.f760(kind, -1, 0);
+        let first = self.input_first_range(kind)?;
         let first_value = clamp_unsigned(candidate, first);
         let class = self.edf0(kind, first_value);
         let second = self.f760(kind, class, 0);
@@ -589,6 +583,50 @@ impl Ranges {
             second_value: clamp_unsigned(candidate, second),
             second_accepted: true,
         })
+    }
+
+    /// Native scan/user phase1 MHz text. Both parses consume the original bytes;
+    /// unlike normal-memory input, the second range query uses literal frequency0.
+    pub fn frequency_text_input(
+        &self,
+        kind: u32,
+        text: &[u8],
+        point: u8,
+    ) -> Result<super::special::FrequencyInput, Error> {
+        if !text.is_ascii() {
+            return Err(invalid("native frequency text requires the explicit ASCII domain"));
+        }
+        let parse = |bounds: FrequencyRange| {
+            if bounds.low > bounds.high {
+                return Err(invalid("native frequency input has no valid range source"));
+            }
+            super::settings::extended::numeric_text(
+                text,
+                point,
+                6,
+                i64::from(bounds.low),
+                i64::from(bounds.high),
+                1,
+            )
+        };
+        let (first, first_accepted) = parse(self.input_first_range(kind)?)?;
+        let class = self.edf0(kind, first as u32);
+        let (second, second_accepted) = parse(self.f760(kind, class, 0))?;
+        Ok(super::special::FrequencyInput {
+            first_accepted,
+            second_value: second as u32,
+            second_accepted,
+        })
+    }
+
+    fn input_first_range(&self, kind: u32) -> Result<FrequencyRange, Error> {
+        if !matches!(kind, 8 | 0x15) {
+            return Err(invalid("two-pass frequency input requires kind8 or15h"));
+        }
+        if !self.complete {
+            return Err(invalid("frequency input requires a completed B generation"));
+        }
+        Ok(self.f760(kind, -1, 0))
     }
 }
 fn q_kind(q: &Context) -> i32 {
@@ -1562,5 +1600,31 @@ mod tests {
             r.frequency_input(8, u32::MAX).unwrap().second_value,
             1_000_000_000
         ); // Not470M from the first clamp.
+    }
+
+    #[test]
+    fn native_scan_user_text_reuses_original_lexical_bytes_for_both_bounds() {
+        let mut ranges = Ranges::generate(&q(0, (1, 1, 3, 1, 1, 1, 1)), None).unwrap();
+        for kind in [8, 0x15] {
+            for (text, expected) in [
+                (b"200".as_slice(), 199_999_999),
+                (b"400".as_slice(), 400_000_000),
+                (b"1e-3".as_slice(), 1_000_000),
+                (b"145\0unread".as_slice(), 145_000_000),
+            ] {
+                let input = ranges.frequency_text_input(kind, text, b'.').unwrap();
+                assert!(input.first_accepted && input.second_accepted);
+                assert_eq!(input.second_value, expected);
+            }
+        }
+        ranges.lists[Container::L30 as usize][3] = range(0, 1_000_000_000);
+        assert_eq!(
+            ranges.frequency_text_input(8, b"4294.967295", b'.').unwrap().second_value,
+            1_000_000_000
+        );
+        assert!(ranges.frequency_text_input(2, b"145", b'.').is_err());
+        assert!(ranges.frequency_text_input(8, b"\xff", b'.').is_err());
+        ranges.complete = false;
+        assert!(ranges.frequency_text_input(8, b"145", b'.').is_err());
     }
 }
