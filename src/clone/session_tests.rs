@@ -318,6 +318,154 @@ fn read_failure_prefix_overlap_and_per_packet_coverage_length() {
 }
 
 #[test]
+fn post_probe_read_sends_e2_without_a_second_e0() {
+    for echo in [false, true] {
+        let mut t = Mock::new(1);
+        t.echo = echo;
+        t.chunk = 7;
+        let mut response = response(1);
+        response[9 + 0x18] = 4;
+        t.query_response = Some(response);
+        let query = Session::query(config()).unwrap().run(&mut t, || false);
+        assert_eq!(query.failure, None);
+        t.commands.clear();
+        let end_address = read_range(1).unwrap().end;
+        let mut count = 0;
+        for address in (0..end_address).step_by(64) {
+            t.read_data.extend(packet(address, &[7; 64]));
+            count += 1;
+        }
+        t.read_data.extend(end(count));
+        let mut c = config();
+        c.settings.data_preamble = 13;
+        let read = Session::read_after_query(c, profile(1), &query).unwrap();
+        assert_eq!(read.config.settings.data_preamble, 13);
+        let out = read.run(&mut t, || false);
+        assert_eq!(out.failure, None);
+        assert_eq!(t.commands, [226]);
+        assert_eq!(out.echo, query.echo);
+        assert_eq!(out.identity, query.identity);
+        assert_eq!(out.payload_bytes, u64::from(end_address));
+        assert_eq!(t.closes, 2);
+    }
+}
+
+#[test]
+fn post_probe_transfers_reject_failed_edited_and_mismatched_query_outcomes() {
+    let image = vec![0; IMAGE_CAPACITY];
+    let reject = |c: SessionConfig, p: Profile, query: &Outcome| {
+        assert!(Session::read_after_query(c.clone(), p, query).is_err());
+        assert!(Session::write_after_query(c, p, 0, &image, query).is_err());
+    };
+    let mut t = Mock::new(1);
+    let mut query = Session::query(config()).unwrap().run(&mut t, || false);
+    reject(config(), profile(2), &query);
+    let mut changed = config();
+    changed.expected_context = Some(ContextFields([1; 12]));
+    changed.flag57 = 1;
+    reject(changed.clone(), profile(1), &query);
+    changed.flag57 = 2;
+    assert!(Session::write_after_query(changed, profile(1), 0, &image, &query).is_ok());
+    query.identity.as_mut().unwrap().tail[1] = 2;
+    reject(config(), profile(2), &query);
+    query.identity.as_mut().unwrap().tail[1] = 1;
+    query.echo = Echo::Known;
+    reject(config(), profile(1), &query);
+    query.echo = Echo::None;
+    query.identity_gate.cached_tail.as_mut().unwrap()[1] = 2;
+    reject(config(), profile(1), &query);
+    query.identity_gate.cached_tail.as_mut().unwrap()[1] = 1;
+    query.terminal_phase = State::Closed;
+    reject(config(), profile(1), &query);
+    query.terminal_phase = State::Drain;
+    query.operation = Operation::Read;
+    reject(config(), profile(1), &query);
+
+    let mut t = Mock::new(1);
+    t.close_failure = true;
+    let mut failed = Session::query(config()).unwrap().run(&mut t, || false);
+    failed.failure = None;
+    failed.close_error = None;
+    reject(config(), profile(1), &failed);
+    let mut t = Mock::new(1);
+    t.query_response = Some(Vec::new());
+    let mut failed = Session::query(config()).unwrap().run(&mut t, || false);
+    failed.failure = None;
+    reject(config(), profile(1), &failed);
+}
+
+#[test]
+fn post_probe_write_sends_e3_and_adopts_the_probe_preamble() {
+    let image = vec![0; IMAGE_CAPACITY];
+    for echo in [false, true] {
+        for flag in [0, 4] {
+            let mut t = Mock::new(6);
+            t.echo = echo;
+            t.chunk = 7;
+            t.max_write = 3;
+            let mut response = response(6);
+            response[9 + 0x18] = flag;
+            t.query_response = Some(response);
+            let query = Session::query(config()).unwrap().run(&mut t, || false);
+            assert_eq!(query.failure, None);
+            let sent = t.transmitted.len();
+            t.commands.clear();
+            let mut c = config();
+            c.settings.extra_preamble = 5;
+            c.settings.data_preamble = 13;
+            let out = Session::write_after_query(c, profile(6), 0, &image, &query)
+                .unwrap()
+                .run(&mut t, || false);
+            assert_eq!(out.failure, None);
+            assert_eq!(t.commands.first(), Some(&227));
+            assert!(!t.commands.contains(&224));
+            assert_eq!(out.identity, query.identity);
+            assert_eq!(out.echo, query.echo);
+            assert_eq!(out.write_disposition, WriteDisposition::Acknowledged);
+            let frames: Vec<_> = t.transmitted[sent..]
+                .split_inclusive(|b| *b == 253)
+                .collect();
+            let preambles = |frame: &[u8]| frame.iter().take_while(|b| **b == 254).count();
+            assert_eq!(preambles(frames[0]), 7);
+            assert_eq!(preambles(frames[1]), if flag == 4 { 10 } else { 2 });
+            assert_eq!(preambles(frames.last().unwrap()), 2);
+            assert_eq!(
+                out.transmitted_wire_bytes,
+                (t.transmitted.len() - sent) as u64
+            );
+            assert_eq!(t.closes, 2);
+        }
+    }
+}
+
+#[test]
+fn post_probe_write_failure_keeps_its_prefix_and_closes_once() {
+    let image = vec![0; IMAGE_CAPACITY];
+    for cancel in [false, true] {
+        let mut t = Mock::new(6);
+        let query = Session::query(config()).unwrap().run(&mut t, || false);
+        let sent = t.transmitted.len();
+        t.fail_after = Some(sent + 1);
+        t.close_failure = true;
+        let out = Session::write_after_query(config(), profile(6), 0, &image, &query)
+            .unwrap()
+            .run(&mut t, || cancel);
+        assert_eq!(out.close_error, Some(io::ErrorKind::Other));
+        assert_eq!(t.closes, 2);
+        if cancel {
+            assert_eq!(out.failure, Some(Failure::Cancelled));
+            assert_eq!(out.write_disposition, WriteDisposition::NotStarted);
+            assert_eq!(t.transmitted.len(), sent);
+        } else {
+            assert_eq!(out.failure, Some(Failure::Io(io::ErrorKind::BrokenPipe)));
+            assert_eq!(out.write_disposition, WriteDisposition::Unconfirmed);
+            assert_eq!(out.transmitted_wire_bytes, 1);
+            assert_eq!(t.transmitted.len(), sent + 1);
+        }
+    }
+}
+
+#[test]
 fn timeout_truncation_echo_nak_early_ack_and_deadline_priority() {
     let mut t = Mock::new(6);
     t.query_response = Some(vec![]);

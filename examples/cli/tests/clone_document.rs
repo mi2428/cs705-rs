@@ -120,7 +120,8 @@ fn operation() -> CloneWrite {
 }
 
 fn read_events(image: &[u8], selector: u8) -> Vec<Value> {
-    let mut events = query_events(&[identity(selector), identity(selector)]);
+    // Document read owns the sole identity probe; its read session starts at E2.
+    let mut events = query_events(&[identity(selector)]);
     events.push(json!({"write_hex":hex(&Frame::Read.encode(Direction::ToRadio).unwrap())}));
     let end = clone::read_range(selector).unwrap().end as usize;
     let mut blocks = 0u8;
@@ -1120,7 +1121,8 @@ fn complete_events(session: &Session, doc: &Document, mask: u8) -> Vec<Value> {
     let mut doc = doc.clone();
     let mut prep = ClonePreparation::default();
     prep.prepare(&mut doc, session, &mut reset()).unwrap();
-    let mut events = query_events(&vec![identity(6); 4]);
+    // The third document probe authorizes E3; the write session does not probe again.
+    let mut events = query_events(&vec![identity(6); 3]);
     events.push(json!({"write_hex":hex(&Frame::Write.encode(Direction::ToRadio).unwrap())}));
     let blocks = clone::write_blocks(6, mask).unwrap();
     for r in &blocks {
@@ -1196,7 +1198,7 @@ fn logic_phase_write_final_callback_releases_live_mask_only_after_normal_return(
                     reason: "synthetic information failure",
                 });
             }
-            op.active_mask = Some(vec![7..9]);
+            op.active_mask = Some(std::iter::once(7..9).collect());
             live.wrapper_state = 99;
             Ok(())
         });
@@ -1265,12 +1267,21 @@ fn logic_phase_process_read_and_option_producer_publish_only_completed_documents
     assert_eq!(r["title"]["dirty"], 1);
     assert_eq!(r["title"]["target"], 6);
     assert_eq!(r["sessions"].as_array().unwrap().len(), 2);
+    assert_eq!(r["sessions"][1]["transmitted_wire_bytes"], 10);
     let bytes = fs::read(&output).unwrap();
     assert_eq!(icf::Icf::parse(&bytes).unwrap().memory()[0x399a2], 0xa7);
 
-    let mut failed = identity(6);
-    failed.revision = 2;
-    let events = query_events(&[identity(6), failed]);
+    let mut malformed = Frame::Data {
+        address: 0,
+        payload: vec![0],
+    }
+    .encode(Direction::FromRadio)
+    .unwrap();
+    let checksum = malformed.len() - 2;
+    malformed[checksum] ^= 1;
+    let mut events = query_events(&[identity(6)]);
+    events.push(json!({"write_hex":hex(&Frame::Read.encode(Direction::ToRadio).unwrap())}));
+    events.push(json!({"read_hex":hex(&malformed)}));
     let mock = files.write(
         "failed-read.json",
         &serde_json::to_vec(&json!({"events":events})).unwrap(),
@@ -1282,6 +1293,7 @@ fn logic_phase_process_read_and_option_producer_publish_only_completed_documents
     args[at + 1] = p(&no_output).into();
     let result = cli(&args, &[]);
     assert_eq!(result.status.code(), Some(5));
+    assert_eq!(report(&result)["sessions"][1]["result_code"], 6);
     assert_eq!(report(&result)["validation"]["errors"], 0);
     assert!(!no_output.exists());
 
@@ -1412,6 +1424,11 @@ fn process_native_x_refuses_before_transport_and_warning_reaches_all_actual_quer
     assert_eq!(r["transmitted_wire_bytes"], 0);
     set_call(&mut doc, 123_000_000);
     let events = complete_events(&session, &doc, 0);
+    let expected_transmitted: u64 = events
+        .iter()
+        .filter_map(|e| e["write_hex"].as_str())
+        .map(|hex| hex.len() as u64 / 2)
+        .sum();
     let mock = files.write(
         "complete.json",
         &serde_json::to_vec(&json!({"events":events})).unwrap(),
@@ -1434,6 +1451,7 @@ fn process_native_x_refuses_before_transport_and_warning_reaches_all_actual_quer
     assert_eq!(r["status"], "Completed");
     assert_eq!(r["validation"]["flags"], json!([4]));
     assert_eq!(r["sessions"].as_array().unwrap().len(), 4);
+    assert_eq!(r["transmitted_wire_bytes"], expected_transmitted);
     assert_eq!(r["sync_requests"], json!([0x1b, 0x2a, 0x38, 0x11]));
     assert_eq!(r["close_error"], Value::Null);
     assert_eq!(r["baseline_committed"], false);

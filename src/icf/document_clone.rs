@@ -1,6 +1,9 @@
 //! Native clone-write document gates, distinct from file Save and raw protocol.
 //! Each yielded query must run once on the same prepared transport sequence.
 //! Sync requests expose a live boundary; this module does not deliver OS events.
+//! The third successful probe supplies identity and echo to E3 transfer. It does
+//! not request a fourth E0. Current normalization and the private converted wire
+//! image have separate owners; failed transfer never establishes a Save baseline.
 
 use super::{Document, Error, Session, ValidationReport, ValidationSource, invalid, io};
 use crate::{
@@ -375,13 +378,16 @@ impl CloneWrite {
                         .get(1)
                         .ok_or(invalid("clone selector unavailable"))?,
                 )?;
-                let write = clone::Session::write(
+                let write = clone::Session::write_after_query(
                     self.config(session, controls)?,
                     selector,
                     self.options
                         .as_ref()
                         .map_or(self.mask, super::CloneOptions::mask),
                     &self.wire_image,
+                    self.outcomes
+                        .last()
+                        .ok_or(invalid("successful write probe unavailable"))?,
                 )?;
                 self.active_mask = Some(clone::write_blocks_with_cap(
                     selector.selector(),

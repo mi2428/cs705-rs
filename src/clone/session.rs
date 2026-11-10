@@ -1,3 +1,18 @@
+//! Standalone sessions probe before transferring; document callers can reuse a
+//! completed query through the checked post-probe boundary.
+//!
+//! ```text
+//! standalone: Startup -> E0/E1 -> E2/DATA/END or E3/DATA/END/E6
+//! post-probe: Startup ---------> E2/DATA/END or E3/DATA/END/E6
+//!                                   | terminal result or failure
+//!                                   v
+//!                            close -> owned Outcome
+//! ```
+//!
+//! The transport is borrowed and closed once per run. The caller reopens the
+//! same selected port between operations. Images and failure-prefix coverage
+//! belong to Outcome; no callback borrows an engine-owned image after return.
+
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::ops::Range;
@@ -234,6 +249,9 @@ pub struct Outcome {
     pub echo: Echo,
     pub write_disposition: WriteDisposition,
     pub terminal_phase: State,
+    // Only run creates this proof, after a successful query AND close. Public
+    // diagnostic fields cannot turn a failed or edited outcome into a probe.
+    completed_query: Option<(Identity, Echo)>,
 }
 
 impl Outcome {
@@ -308,6 +326,7 @@ pub struct Session {
     extractor: Extractor,
     read_partial: Vec<u8>,
     phase: State,
+    entry_phase: State,
     deadline: u64,
     last_now: u64,
     block_index: usize,
@@ -322,6 +341,55 @@ impl Session {
     pub fn read(config: SessionConfig, profile: Profile) -> Result<Self, Error> {
         Self::new(config, Operation::Read, Some(profile), &[], 0)
     }
+    /// Start E2 after an actual successful query, without another E0. The caller
+    /// reopens the same selected port before run; this API does not open it.
+    /// Identity and detected echo are retained, but wire counters start at zero.
+    /// Startup settings/script and input draining still run for the new epoch.
+    /// The proof establishes software completion, not physical port continuity.
+    pub fn read_after_query(
+        config: SessionConfig,
+        profile: Profile,
+        query: &Outcome,
+    ) -> Result<Self, Error> {
+        let mut session = Self::read(config, profile)?;
+        session.adopt_query(query)?;
+        session.entry_phase = State::ReadSend;
+        Ok(session)
+    }
+
+    fn adopt_query(&mut self, query: &Outcome) -> Result<(), Error> {
+        let (identity, echo) = query.completed_query.as_ref().ok_or(Error::Invalid(
+            "post-probe transfer requires a completed query",
+        ))?;
+        if query.operation != Operation::Query
+            || query.failure.is_some()
+            || query.close_error.is_some()
+            || query.terminal_phase != State::Drain
+            || query.identity.as_ref() != Some(identity)
+            || query.echo != *echo
+            || *echo == Echo::Auto
+            || Some(identity.validate()?) != self.profile
+        {
+            return Err(Error::Invalid("post-probe query state or profile mismatch"));
+        }
+        let mut gate = IdentityGate::default();
+        if gate.apply(
+            identity,
+            self.config.expected_context,
+            self.config.saved_selector,
+            self.config.flag57,
+        )? != 0
+            || query.identity_gate != gate
+        {
+            return Err(Error::Invalid("post-probe identity gate mismatch"));
+        }
+        self.out.identity = Some(identity.clone());
+        self.out.identity_gate = gate;
+        self.config.settings.echo = *echo;
+        self.out.echo = *echo;
+        self.adopt_write_preamble();
+        Ok(())
+    }
     pub fn write(
         config: SessionConfig,
         profile: Profile,
@@ -332,6 +400,35 @@ impl Session {
             return Err(Error::Invalid("write image length"));
         }
         Self::new(config, Operation::Write, Some(profile), image, mask)
+    }
+
+    /// Start E3 from the same checked query proof as read_after_query. The image
+    /// is copied before run and must use that query's exact profile. Only after
+    /// the identity/context gates succeed does E1 tail bit2 set DATA preamble.
+    pub fn write_after_query(
+        config: SessionConfig,
+        profile: Profile,
+        mask: u8,
+        image: &[u8],
+        query: &Outcome,
+    ) -> Result<Self, Error> {
+        let mut session = Self::write(config, profile, mask, image)?;
+        session.adopt_query(query)?;
+        session.entry_phase = State::WriteStart;
+        Ok(session)
+    }
+
+    fn adopt_write_preamble(&mut self) {
+        if self.out.operation == Operation::Write {
+            // 56C80 -> 27518 -> 27A4A: only write adopts E1 bit2 into
+            // W40/C18/C1C. Read retains its existing DATA preamble setting.
+            self.config.settings.data_preamble =
+                if self.out.identity.as_ref().expect("identity set").tail[0x18] & 4 != 0 {
+                    8
+                } else {
+                    0
+                };
+        }
     }
     fn new(
         config: SessionConfig,
@@ -372,6 +469,7 @@ impl Session {
             echo: config.settings.echo,
             write_disposition: WriteDisposition::NotStarted,
             terminal_phase: State::Startup,
+            completed_query: None,
         };
         Ok(Self {
             config,
@@ -384,6 +482,7 @@ impl Session {
             extractor: Extractor::default(),
             read_partial: Vec::new(),
             phase: State::Startup,
+            entry_phase: State::QuerySend,
             deadline: 0,
             last_now: 0,
             block_index: 0,
@@ -413,6 +512,9 @@ impl Session {
             }
         }
         self.phase = State::Closed;
+        if self.out.operation == Operation::Query && self.out.failure.is_none() {
+            self.out.completed_query = self.out.identity.clone().map(|id| (id, self.out.echo));
+        }
         self.out.coverage = self.coverage.bytes[..self.coverage.len].to_vec();
         self.out
     }
@@ -563,16 +665,7 @@ impl Session {
         {
             return Err(Failure::Identity(14));
         }
-        if self.out.operation == Operation::Write {
-            // 56C80 -> 27518 -> 27A4A: only write adopts E1 bit2 into
-            // W40/C18/C1C. Read retains its existing data preamble setting.
-            self.config.settings.data_preamble =
-                if self.out.identity.as_ref().expect("identity set").tail[0x18] & 4 != 0 {
-                    8
-                } else {
-                    0
-                };
-        }
+        self.adopt_write_preamble();
         Ok(())
     }
 
@@ -691,7 +784,7 @@ impl Session {
         self.receive.clear();
         self.mirror.clear();
         self.out.echo = self.config.settings.echo;
-        self.transition(State::QuerySend, t.now_ms());
+        self.transition(self.entry_phase, t.now_ms());
         loop {
             if cancelled() {
                 return Err(Failure::Cancelled);

@@ -593,7 +593,7 @@ fn file(args: FileArgs, operation: FileOperation) -> Result<u8> {
             }
             if target != 6 && matches!(legacy, 7 | 2) {
                 let status = doc
-                    .save(&session, Vec::new(), target, legacy, &mut Vec::new())
+                    .save(&mut session, Vec::new(), target, legacy, &mut Vec::new())
                     .map_err(|e| match e {
                         icf::document::FileError::Image(e) => AppError::from(e),
                         icf::document::FileError::Output(e) => AppError::from(e),
@@ -622,7 +622,7 @@ fn file(args: FileArgs, operation: FileOperation) -> Result<u8> {
             };
             let report = doc
                 .save_with_validation(
-                    &session,
+                    &mut session,
                     SaveRequest {
                         path,
                         target_revision: target,

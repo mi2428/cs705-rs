@@ -1,4 +1,9 @@
 //! Native read controller and borrowed-result document callback.
+//!
+//! The probe and acquisition are separate port operations. The last successful
+//! probe supplies identity, profile and echo mode; acquisition starts with E2,
+//! not another E0. Failed acquisition bytes remain on the outcome and never
+//! replace document current, baseline or path.
 
 use super::{
     CloneControls, CloneError, DefaultSource, Document, Error, InitialBoundary, InitialRequest,
@@ -222,9 +227,12 @@ impl CloneRead {
         config.saved_selector = self.initial.saved_selector;
         config.flag57 = controls.form_flag57;
         self.phase = Phase::Read;
-        Ok(CloneReadStep::Read(clone::Session::read(
+        Ok(CloneReadStep::Read(clone::Session::read_after_query(
             config,
             self.selector.try_into()?,
+            self.outcomes
+                .last()
+                .ok_or(invalid("successful read probe unavailable"))?,
         )?))
     }
 
@@ -266,6 +274,10 @@ impl CloneRead {
 impl Document {
     /// 4D2BC: borrow R24 through conversion and copy; never consume a synthetic
     /// success flag or replace a failed outcome with a completed image.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The callback borrows independent saved state, result, assets and UI sources."
+    )]
     pub fn receive_clone_read(
         &mut self,
         session: &mut Session,

@@ -1,5 +1,20 @@
 //! Concrete offline document file driver. Factory data are explicit source
 //! fields, never an embedded compiled image or a caller-supplied finalized G.
+//!
+//! Current and baseline contain M working bytes. The file contains only the
+//! selected layout's storage prefix; rebuilding links/counts belongs to a copy,
+//! not to the live logical row maps. Save has two distinct mutation boundaries:
+//!
+//! ```text
+//! current -> stage9 -> copy + storage metadata -> MapRev -> writer
+//!                                                        |
+//!        legacy current round-trip + slot08 <--- success -+
+//!        path/target/baseline commit follows the required reload
+//! ```
+//!
+//! A writer error retains prior current normalization and any output prefix.
+//! A post-writer reload error can leave a completed file beside a changed current
+//! and the old baseline. Neither condition authorizes an implicit clean commit.
 
 use super::{Document, Error, invalid};
 use crate::{
@@ -341,7 +356,9 @@ impl From<Error> for FileError {
 }
 
 impl Document {
-    /// Shared slot08 image body. Native node/Sync25 delivery is a separate edge.
+    /// Slot08 clears document flags before stage8 and stage9 read them. Open and
+    /// post-writer legacy reload share this order; failures retain the cleared
+    /// flags and any image prefix. Native node/Sync25 delivery is a separate edge.
     pub(crate) fn reload_after_conversion(
         &mut self,
         session: &mut Session,
@@ -553,8 +570,7 @@ impl Document {
         self.original = source.to_vec();
         self.comment = file.report.source_comment;
         self.extra_data = file.reader.extra_data;
-        stage8(&mut self.current, &session.context, session.system_langid)?;
-        self.normalize(session)?;
+        self.reload_after_conversion(session)?;
         if foreign {
             self.dirty = 1;
         } else {
@@ -582,7 +598,7 @@ impl Document {
     /// baseline commit only after successful write and legacy roundtrip/slot08.
     pub fn save(
         &mut self,
-        session: &Session,
+        session: &mut Session,
         path: Vec<u8>,
         target_revision: u32,
         legacy_choice: i32,
@@ -609,7 +625,7 @@ impl Document {
     /// A missing reset state is an error only when that branch is reached.
     pub fn save_with_validation(
         &mut self,
-        session: &Session,
+        session: &mut Session,
         request: SaveRequest<'_>,
         state: Option<&mut normalizer::ResetState>,
         output: &mut impl Write,
@@ -625,7 +641,7 @@ impl Document {
 
     pub(super) fn save_with_validation_uncommitted(
         &mut self,
-        session: &Session,
+        session: &mut Session,
         request: SaveRequest<'_>,
         state: Option<&mut normalizer::ResetState>,
         output: &mut impl Write,
@@ -678,8 +694,7 @@ impl Document {
             let saved = storage(&self.current)?; // Native post-writer current re-copy.
             let downgraded = convert(&saved, 6, layout.selector(), session.defaults()?)?;
             self.current = convert(&downgraded, layout.selector(), 6, session.defaults()?)?;
-            stage8(&mut self.current, &session.context, session.system_langid)?;
-            self.normalize(session)?;
+            self.reload_after_conversion(session)?;
         }
         Ok(SaveReport {
             status: SaveStatus::Saved,
@@ -961,8 +976,12 @@ mod tests {
                         outcome.write_disposition,
                         clone::WriteDisposition::Acknowledged
                     );
-                    assert_eq!(&transport.commands[..2], &[0xe0, 0xe3]);
+                    assert_eq!(transport.commands.first(), Some(&0xe3));
+                    assert!(!transport.commands.contains(&0xe0));
                     assert_eq!(transport.commands.last(), Some(&0xe5));
+                    let probe = operation.outcomes.last().unwrap();
+                    assert_eq!(outcome.identity, probe.identity);
+                    assert_eq!(outcome.echo, probe.echo);
                     reply = CloneReply::Written(outcome);
                 }
                 CloneStep::Finalize => {
@@ -1017,8 +1036,12 @@ mod tests {
                 match operation.advance(&session, controls, reply).unwrap() {
                     CloneReadStep::Query(query) => {
                         let mut transport = wire_for_session();
+                        if reprobe && probes != 0 {
+                            transport.query_response.as_mut().unwrap()[10] = 5;
+                        }
                         let outcome = query.run(&mut transport, || false);
                         assert_eq!(outcome.failure, None);
+                        assert_eq!(transport.commands, [0xe0]);
                         if reprobe && probes == 0 {
                             // The sync boundary sees live Q, not the entry snapshot.
                             let mut fields = session.context.fields();
@@ -1045,7 +1068,10 @@ mod tests {
                             outcome.failure,
                             fail.then_some(clone::Failure::MissingCoverage)
                         );
-                        assert_eq!(transport.commands, [0xe0, 0xe2]);
+                        assert_eq!(transport.commands, [0xe2]);
+                        let probe = operation.outcomes.last().unwrap();
+                        assert_eq!(outcome.identity, probe.identity);
+                        assert_eq!(outcome.echo, probe.echo);
                         assert!(outcome.acquired(0));
                         reply = CloneReadReply::Read(outcome);
                     }
@@ -1086,6 +1112,7 @@ mod tests {
                 assert_eq!(boundaries, [super::super::InitialBoundary::Sync(0x11)]);
             } else {
                 assert_eq!(doc.current()[0x399a2], 6);
+                assert_eq!(doc.target_revision(), if reprobe { 5 } else { 6 });
                 assert_eq!(doc.baseline(), before.baseline());
                 assert!(doc.path().is_empty());
                 assert_eq!(doc.dirty(), 1);
@@ -1201,7 +1228,7 @@ mod tests {
         assert_eq!(doc.timer_ms(), Some(250));
         let mut output = Vec::new();
         assert_eq!(
-            doc.save(&session, b"/x/output.icf".to_vec(), 6, 6, &mut output)
+            doc.save(&mut session, b"/x/output.icf".to_vec(), 6, 6, &mut output)
                 .unwrap(),
             SaveStatus::Saved
         );
@@ -1231,6 +1258,57 @@ mod tests {
     }
 
     #[test]
+    fn open_resets_document_flags_only_after_outer_gates_and_before_stage8() {
+        let fields = source_fields();
+        let (mut session, mut doc) = session_and_document(&fields);
+        session.document_flags = [3, 5];
+        let before = doc.clone();
+        assert!(matches!(
+            doc.read(Some(b""), b"REJECTED".to_vec(), 7, None, &mut session, None)
+                .unwrap(),
+            OpenStatus::Rejected(_)
+        ));
+        assert_eq!(doc, before);
+        assert_eq!(session.document_flags, [3, 5]);
+
+        let mut broken = fields.clone();
+        // The outer gates accept storage with a next-slot address outside M.
+        broken[0x355c1..0x355c3].copy_from_slice(&0xfffe_u16.to_le_bytes());
+        broken[0x36114] = 0;
+        assert!(
+            doc.read(
+                Some(&literal_file(&broken, 6, 0x40001)),
+                b"FAILED-STAGE8".to_vec(),
+                7,
+                None,
+                &mut session,
+                None,
+            )
+            .is_err()
+        );
+        assert_eq!(session.document_flags, [0, 0]);
+        assert_eq!(doc.path(), b"FAILED-STAGE8");
+        assert_eq!(&doc.current()[0x355c1..0x355c3], &[0xfe, 0xff]);
+        assert_eq!(doc.baseline(), before.baseline());
+
+        session.document_flags = [3, 5];
+        assert!(matches!(
+            doc.read(
+                Some(&literal_file(&fields, 6, 0x40001)),
+                b"OPENED".to_vec(),
+                7,
+                None,
+                &mut session,
+                None,
+            )
+            .unwrap(),
+            OpenStatus::Opened { .. }
+        ));
+        assert_eq!(session.document_flags, [0, 0]);
+        assert_eq!(doc.baseline(), doc.current());
+    }
+
+    #[test]
     fn legacy_save_roundtrip_changes_current_only_after_writer_success_and_new_keeps_pending() {
         struct FailAfterPrefix(Vec<u8>);
         impl Write for FailAfterPrefix {
@@ -1247,7 +1325,7 @@ mod tests {
             }
         }
         let fields = source_fields();
-        let (session, mut doc) = session_and_document(&fields);
+        let (mut session, mut doc) = session_and_document(&fields);
         doc.begin_pending_name(17, b"PENDING".to_vec());
         assert!(!doc.new_file(&session, 2).unwrap());
         assert_eq!(doc.path(), b"OLD");
@@ -1259,11 +1337,13 @@ mod tests {
         doc.compare_dirty();
         let baseline = doc.baseline().to_vec();
         let mut failed = FailAfterPrefix(Vec::new());
+        session.document_flags = [3, 5];
         assert!(matches!(
-            doc.save(&session, b"FAILED".to_vec(), 5, 6, &mut failed),
+            doc.save(&mut session, b"FAILED".to_vec(), 5, 6, &mut failed),
             Err(FileError::Output(_))
         ));
         assert_eq!(failed.0.len(), 17);
+        assert_eq!(session.document_flags, [3, 5]);
         assert_eq!(doc.current()[0x37158], b'A');
         assert_eq!(doc.current()[0x399bb], 5);
         assert_eq!(doc.baseline(), baseline);
@@ -1271,10 +1351,11 @@ mod tests {
         assert!(doc.path().is_empty());
         let mut out = Vec::new();
         assert_eq!(
-            doc.save(&session, b"OLD-FORMAT".to_vec(), 5, 6, &mut out)
+            doc.save(&mut session, b"OLD-FORMAT".to_vec(), 5, 6, &mut out)
                 .unwrap(),
             SaveStatus::Saved
         );
+        assert_eq!(session.document_flags, [0, 0]);
         assert_eq!(doc.current()[0x399bb], 1);
         assert_eq!(doc.target_revision(), 5);
         assert_eq!(doc.dirty(), 0);
@@ -1285,7 +1366,7 @@ mod tests {
         assert_eq!(read.layout.unwrap().selector(), 5);
         let before = doc.clone();
         assert_eq!(
-            doc.save(&session, b"NO".to_vec(), 4, 7, &mut Vec::new())
+            doc.save(&mut session, b"NO".to_vec(), 4, 7, &mut Vec::new())
                 .unwrap(),
             SaveStatus::RetrySaveAs
         );
@@ -1295,29 +1376,31 @@ mod tests {
     #[test]
     fn save_keeps_raw_target_gates_separate_from_converter_local_layout_six() {
         let fields = source_fields();
-        let (session, mut doc) = session_and_document(&fields);
+        let (mut session, mut doc) = session_and_document(&fields);
         doc.new_file(&session, 7).unwrap();
+        session.document_flags = [3, 5];
         let inactive = 0x2eda3 + 8 * 299;
         doc.patch_current(&[(inactive, b"INACTIVE")]).unwrap();
         let before = doc.clone();
         for target in [0, 7, 255, u32::MAX] {
             let mut output = Vec::new();
             assert_eq!(
-                doc.save(&session, b"NO".to_vec(), target, 7, &mut output)
+                doc.save(&mut session, b"NO".to_vec(), target, 7, &mut output)
                     .unwrap(),
                 SaveStatus::RetrySaveAs
             );
             assert_eq!(
-                doc.save(&session, b"CANCEL".to_vec(), target, 2, &mut output)
+                doc.save(&mut session, b"CANCEL".to_vec(), target, 2, &mut output)
                     .unwrap(),
                 SaveStatus::Cancelled
             );
             assert!(output.is_empty());
             assert_eq!(doc, before);
+            assert_eq!(session.document_flags, [3, 5]);
         }
         let mut output = Vec::new();
         assert_eq!(
-            doc.save(&session, b"RAW255".to_vec(), 255, 6, &mut output)
+            doc.save(&mut session, b"RAW255".to_vec(), 255, 6, &mut output)
                 .unwrap(),
             SaveStatus::Saved
         );
@@ -1327,6 +1410,7 @@ mod tests {
         assert_eq!(&file.image[inactive..inactive + 8], b"INACTIVE");
         assert_eq!(&doc.current()[inactive..inactive + 8], b"CALLSIGN"); // Post-write slot08 reached.
         assert_eq!(doc.target_revision(), 255); // Raw target is not rewritten to6.
+        assert_eq!(session.document_flags, [0, 0]);
         assert_eq!(doc.path(), b"RAW255");
         assert_eq!(doc.baseline(), doc.current());
     }
@@ -1530,7 +1614,7 @@ mod tests {
         );
         for target in [6, 5] {
             let mut output = Vec::new();
-            doc.save(&session, b"NEW".to_vec(), target, 6, &mut output)
+            doc.save(&mut session, b"NEW".to_vec(), target, 6, &mut output)
                 .unwrap();
             assert_eq!(format::read(&output).unwrap().reader.extra_data, 0x40001);
         }
@@ -1546,7 +1630,7 @@ mod tests {
         .unwrap();
         assert_eq!(doc.extra_data(), 0); // Reader observation is NOT rewritten.
         let mut output = Vec::new();
-        doc.save(&session, b"SAVED".to_vec(), 6, 6, &mut output)
+        doc.save(&mut session, b"SAVED".to_vec(), 6, 6, &mut output)
             .unwrap();
         assert_eq!(format::read(&output).unwrap().reader.extra_data, 0x40001);
         assert_eq!(doc.extra_data(), 0);
@@ -1583,7 +1667,7 @@ mod tests {
             record_image,
         };
         let fields = source_fields();
-        let (session, mut doc) = session_and_document(&fields);
+        let (mut session, mut doc) = session_and_document(&fields);
         doc.new_file(&session, 7).unwrap();
         let view = ValidationView {
             kind: 3,
@@ -1615,7 +1699,7 @@ mod tests {
             validation: ValidationSource::Views(&[view]),
         };
         let report = doc
-            .save_with_validation(&session, request, None, &mut output)
+            .save_with_validation(&mut session, request, None, &mut output)
             .unwrap();
         assert_eq!(report.status, SaveStatus::Saved);
         assert!(report.correction.is_none());
@@ -1635,7 +1719,7 @@ mod tests {
             let mut output = Vec::new();
             let report = no
                 .save_with_validation(
-                    &session,
+                    &mut session,
                     SaveRequest {
                         path: b"NO-CONTINUES".to_vec(),
                         target_revision: 6,
@@ -1661,7 +1745,7 @@ mod tests {
         let mut output = Vec::new();
         let report = doc
             .save_with_validation(
-                &session,
+                &mut session,
                 SaveRequest {
                     path: b"YES-CORRECTS".to_vec(),
                     target_revision: 6,
