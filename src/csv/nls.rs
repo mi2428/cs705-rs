@@ -6,6 +6,9 @@
 
 use super::{Error, clip_dbcs, is_lead, trim_fixed_spaces};
 
+#[cfg(windows)]
+mod native;
+
 /// 476E4 walks logical bytes, not a C-prefix. Valid DBCS pairs are kept without
 /// checking assigned CP932 codepoints. An invalid lead/trail pair replaces BOTH
 /// bytes; isolated leads and invalid single bytes replace one. Return indicates
@@ -173,6 +176,60 @@ pub fn ascii_map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
     i32::try_from(source.len()).map_err(|_| Error::Limit("callsign NLS result length"))
 }
 
+/// Default native producer on Windows, portable ASCII elsewhere. The Windows
+/// request uses the caller's distinct, equal-sized2n buffers with explicit counts,
+/// not NUL termination. A native zero and partial destination writes are retained.
+/// This does not change ascii_map's explicitly portable domain.
+/// Windows rejects empty, odd, unequal or non-INT-sized buffers before FFI;
+/// other platforms retain ascii_map's ASCII and destination-capacity checks.
+pub fn platform_map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
+    #[cfg(windows)]
+    {
+        native::map(source, destination)
+    }
+    #[cfg(not(windows))]
+    {
+        ascii_map(source, destination)
+    }
+}
+
+/// Windows CharUpperBuffA on the separate n-byte copy; ASCII-only elsewhere.
+/// The native count is observable, never a gate or a replacement output length.
+pub fn platform_uppercase(bytes: &mut [u8]) -> Result<u32, Error> {
+    #[cfg(windows)]
+    {
+        native::uppercase(bytes)
+    }
+    #[cfg(not(windows))]
+    {
+        if !bytes.is_ascii() {
+            return Err(Error::SourceUnavailable(
+                "non-ASCII CharUpperBuffA output required",
+            ));
+        }
+        let count = u32::try_from(bytes.len())
+            .map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD"))?;
+        bytes.make_ascii_uppercase();
+        Ok(count)
+    }
+}
+
+// Pure preflight is shared with boundary tests that never call Windows APIs.
+#[cfg(any(windows, test))]
+fn native_map_count(source_bytes: usize, destination_bytes: usize) -> Result<i32, Error> {
+    if source_bytes == 0 || source_bytes % 2 != 0 || source_bytes != destination_bytes {
+        return Err(Error::Invalid(
+            "ANSI mapping requires distinct equal nonempty2n buffers",
+        ));
+    }
+    i32::try_from(source_bytes).map_err(|_| Error::Limit("ANSI mapping count exceeds INT"))
+}
+
+#[cfg(any(windows, test))]
+fn native_uppercase_count(bytes: usize) -> Result<u32, Error> {
+    u32::try_from(bytes).map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD"))
+}
+
 /// Captured descriptor flags relevant to96308, not keyboard/acceptance gates.
 #[derive(Debug, Clone, Copy)]
 pub struct Profile<'a> {
@@ -253,6 +310,58 @@ pub fn callsign_correction_count(c: u32, name_changed: bool) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_request_counts_reject_invalid_bounds_without_large_allocations() {
+        assert_eq!(native_map_count(2, 2).unwrap(), 2);
+        assert_eq!(
+            native_map_count(2 * 1024 * 1024, 2 * 1024 * 1024).unwrap(),
+            2 * 1024 * 1024
+        );
+        for (source, destination) in [(0, 0), (1, 1), (2, 1), (2, 3)] {
+            assert!(matches!(
+                native_map_count(source, destination),
+                Err(Error::Invalid(_))
+            ));
+        }
+        let too_long = i32::MAX as usize + 1;
+        assert!(matches!(
+            native_map_count(too_long, too_long),
+            Err(Error::Limit(_))
+        ));
+        assert_eq!(native_uppercase_count(0).unwrap(), 0);
+        assert_eq!(native_uppercase_count(u32::MAX as usize).unwrap(), u32::MAX);
+        if let Some(too_long) = (u32::MAX as usize).checked_add(1) {
+            assert!(matches!(
+                native_uppercase_count(too_long),
+                Err(Error::Limit(_))
+            ));
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn platform_nls_nonwindows_keeps_ascii_and_fail_closed_source_boundaries() {
+        let mut destination = [b'!'; 4];
+        assert_eq!(platform_map(b"ab  ", &mut destination).unwrap(), 4);
+        assert_eq!(destination, *b"ab  ");
+        let before = destination;
+        assert!(matches!(
+            platform_map(b"\xa1 ", &mut destination),
+            Err(Error::SourceUnavailable(_))
+        ));
+        assert_eq!(destination, before);
+        assert!(platform_map(b"ab", &mut [0; 1]).is_err());
+        let mut text = *b"a\0bz";
+        assert_eq!(platform_uppercase(&mut text).unwrap(), 4);
+        assert_eq!(text, *b"A\0BZ");
+        let mut foreign = [b'a', 0xa1];
+        assert!(matches!(
+            platform_uppercase(&mut foreign),
+            Err(Error::SourceUnavailable(_))
+        ));
+        assert_eq!(foreign, [b'a', 0xa1]);
+    }
+
     #[test]
     fn map_result_zero_partial_write_and_alias_count_have_distinct_meanings() {
         let mut source = b"abcd".to_vec();

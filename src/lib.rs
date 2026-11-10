@@ -6,7 +6,7 @@
 //! Static-source fidelity is scoped by each operation's contract, not a claim of
 //! complete application compatibility, radio suitability or hardware validation.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod clone;
 pub mod csv;

@@ -182,7 +182,14 @@ impl TextField {
         input: FixedTextInput<'_>,
         alignment: u32,
     ) -> Result<TextEffect, Error> {
-        self.edit_with_nls(image, index, input, alignment, nls::ascii_map, ascii_upper)
+        self.edit_with_nls(
+            image,
+            index,
+            input,
+            alignment,
+            nls::platform_map,
+            nls::platform_uppercase,
+        )
     }
     pub fn edit_with_nls(
         self,
@@ -224,15 +231,6 @@ impl TextField {
 
 fn c_prefix(bytes: &[u8]) -> &[u8] {
     bytes.split(|b| *b == 0).next().unwrap()
-}
-fn ascii_upper(bytes: &mut [u8]) -> Result<u32, Error> {
-    if !bytes.is_ascii() {
-        return Err(Error::SourceUnavailable(
-            "actual CharUpperBuffA output required",
-        ));
-    }
-    bytes.make_ascii_uppercase();
-    Ok(bytes.len() as u32)
 }
 fn profile(maximum: usize, call: bool, exceptions: &[u8]) -> nls::Profile<'_> {
     nls::Profile {
@@ -348,8 +346,8 @@ pub fn edit_allowed(
         input,
         alignment,
         effect,
-        nls::ascii_map,
-        ascii_upper,
+        nls::platform_map,
+        nls::platform_uppercase,
     )
 }
 /// 6FEB3/D196C mutate the actual image before the editor. A later false return
@@ -553,7 +551,7 @@ mod tests {
                             assert_eq!(&from[..3], b"a b");
                             Err(Error::SourceUnavailable("injected NLS failure"))
                         },
-                        ascii_upper
+                        nls::platform_uppercase
                     )
                     .is_err()
             );
@@ -648,6 +646,49 @@ mod tests {
         }
         image
     }
+    #[cfg(not(windows))]
+    #[test]
+    fn platform_defaults_reject_nonascii_and_keep_sanitation_and_insert_prefixes() {
+        for field in TextField::ALL {
+            let mut image = image();
+            let before = image.memory().to_vec();
+            let mut source = [b'a', 0, 0x82, 0xa0];
+            let result = field.edit(
+                &mut image,
+                0,
+                FixedTextInput::Text {
+                    source: &mut source,
+                    phase: 1,
+                },
+                0,
+            );
+            assert!(matches!(result, Err(Error::SourceUnavailable(_))));
+            assert_eq!(source, [b'a', b' ', 0x82, 0xa0]);
+            assert_eq!(image.memory(), before);
+        }
+        let mut image = allowed_image(0);
+        let mut expected = image.memory().to_vec();
+        expected[0x395ad..0x395b5].copy_from_slice(b"CALLSIGN");
+        let mut source = [b'a', 0, 0x82, 0xa0];
+        let mut effect = AllowedEffect::default();
+        let result = edit_allowed(
+            &mut image,
+            0,
+            13,
+            FixedTextInput::Text {
+                source: &mut source,
+                phase: 1,
+            },
+            0,
+            &mut effect,
+        );
+        assert!(matches!(result, Err(Error::SourceUnavailable(_))));
+        assert_eq!(source, [b'a', b' ', 0x82, 0xa0]);
+        assert!(effect.inserted && !effect.stored);
+        assert_eq!(effect.notifications, [0x40, 0x39]);
+        assert_eq!(image.memory(), expected);
+    }
+
     #[test]
     fn allowed_prefix_insert_false_edit_full_row_duplicate_warning_and_late_nls_prefix() {
         for count in 0..=30 {
@@ -742,7 +783,7 @@ mod tests {
                 0,
                 &mut effect,
                 |_, _| Err(Error::SourceUnavailable("injected late NLS failure")),
-                ascii_upper
+                nls::platform_uppercase
             )
             .is_err()
         );
