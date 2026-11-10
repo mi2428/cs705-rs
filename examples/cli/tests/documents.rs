@@ -331,6 +331,54 @@ fn no_clobber_dry_run_stdin_competition_and_broken_output_never_report_saved() {
 }
 
 #[test]
+fn publication_accepts_full_length_destination_components() {
+    let f = Files::new();
+    let out = f.write(&"x".repeat(255), b"KEEP");
+    let mut args = vec![
+        "display".into(),
+        "--list-fields".into(),
+        "-o".into(),
+        p(&out).into(),
+    ];
+    assert_eq!(cli(&args, &[]).status.code(), Some(4));
+    assert_eq!(fs::read(&out).unwrap(), b"KEEP");
+    args.push("--overwrite".into());
+    success(&cli(&args, &[]));
+    assert!(
+        serde_json::from_slice::<Value>(&fs::read(&out).unwrap())
+            .unwrap()
+            .is_array()
+    );
+    fs::remove_file(&out).unwrap();
+    args.pop();
+    success(&cli(&args, &[]));
+    assert_eq!(fs::read_dir(&f.0).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn overwrite_refuses_symlinks_without_touching_the_referent() {
+    let f = Files::new();
+    let target = f.write("target", b"KEEP");
+    let link = f.path("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let result = cli(
+        &[
+            "display".into(),
+            "--list-fields".into(),
+            "--overwrite".into(),
+            "-o".into(),
+            p(&link).into(),
+        ],
+        &[],
+    );
+    assert_eq!(result.status.code(), Some(4));
+    assert_eq!(fs::read(&target).unwrap(), b"KEEP");
+    assert_eq!(fs::read_link(&link).unwrap(), target);
+    assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
+}
+
+#[test]
 fn captured_g_is_not_regenerated_from_live_q_and_stdin_asset_is_owned_once() {
     use cs705::{
         clone::IMAGE_CAPACITY,

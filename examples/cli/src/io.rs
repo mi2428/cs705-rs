@@ -3,6 +3,10 @@
 //! File publication: create_new sibling -> write_all -> sync_all -> link/rename.
 //! A hard link provides atomic no-clobber publication without an exists race.
 //! There is no fallback to truncating the destination when publication fails.
+//! Stdout is a stream: write or flush failure can leave an emitted prefix.
+//! File paths come from explicit CLI selections, never from payload labels.
+//! Unlike the native ICF reader's EOF merge, input acquisition rejects read
+//! errors before parser entry. Accepting parser prefixes does not waive I/O errors.
 
 use crate::{AppError, Result, args::Write};
 use serde_json::{Value, json};
@@ -190,16 +194,16 @@ fn atomic(path: &Path, bytes: &[u8], overwrite: bool) -> Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let name = path
-        .file_name()
-        .ok_or_else(|| AppError::io("output needs a file name"))?;
-    let mut temporary = name.to_os_string();
-    temporary.push(format!(
+    if path.file_name().is_none() {
+        return Err(AppError::io("output needs a file name"));
+    }
+    // A valid destination may already use the filesystem's full name budget.
+    // The sibling name stays bounded independently of the destination name.
+    let temporary_path = parent.join(format!(
         ".cs705-{}-{}.tmp",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    let temporary_path = parent.join(temporary);
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -288,10 +292,7 @@ mod tests {
         let _cleanup = Cleanup(root.clone());
         let output = root.join("output");
         let sequence = NEXT.load(Ordering::Relaxed);
-        let collision = root.join(format!(
-            "output.cs705-{}-{sequence}.tmp",
-            std::process::id()
-        ));
+        let collision = root.join(format!(".cs705-{}-{sequence}.tmp", std::process::id()));
         fs::write(&collision, b"unrelated existing file").unwrap();
         assert!(atomic(&output, b"new payload", false).is_err());
         assert_eq!(fs::read(&collision).unwrap(), b"unrelated existing file");
