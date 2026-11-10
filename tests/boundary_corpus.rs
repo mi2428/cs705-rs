@@ -6,6 +6,29 @@
 use cs705::{clone, gps, icf, repeater};
 
 #[test]
+fn expanded_memory_adoption_checks_maps_but_stored_counts_are_not_display_bounds() {
+    let mut raw = vec![0; 0x4997a];
+    raw[0x3fb40..0x3fb44].copy_from_slice(&1u32.to_le_bytes());
+    raw[0x3662d..0x3662d + 500].fill(1);
+    for cell in raw[0x3fcd4..0x49914].as_chunks_mut::<4>().0 {
+        cell.copy_from_slice(&65535u32.to_le_bytes());
+    }
+    raw[0x3fb44 + 4 * 99..0x3fb48 + 4 * 99].copy_from_slice(&1u32.to_le_bytes());
+    let at = 0x3fcd4 + 400 * 99 + 4 * 7;
+    raw[at..at + 4].copy_from_slice(&3u32.to_le_bytes());
+    raw[0x3662d + 3] = 0;
+    let model = icf::rows::NormalMemory::from_working(raw.clone()).unwrap();
+    assert_eq!(model.group_count(), 1);
+    assert_eq!(model.group_used_slots(0).unwrap(), 0);
+    assert_eq!(model.group_used_slots(99).unwrap(), 1);
+    assert!(model.group_used_slots(100).is_err());
+    assert_eq!(model.working(), raw);
+    raw[0x3662d + 3] = 1;
+    assert!(icf::rows::NormalMemory::from_working(raw).is_err());
+    assert!(icf::rows::NormalMemory::from_working(vec![]).is_err());
+}
+
+#[test]
 fn home_dr_l30_membership_does_not_inherit_the_common_context_bypass() {
     let mut raw = [0; 24];
     raw[..4].copy_from_slice(&16u32.to_le_bytes());

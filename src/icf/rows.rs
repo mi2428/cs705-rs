@@ -55,6 +55,15 @@ pub fn ur_default(index: u32, binding: u32) -> super::record::DecodedRecord {
 }
 
 impl NormalMemory {
+    /// B37EC reads the stored DWORD even beyond displayed group_count. Do not
+    /// recount slots or silently repair an inconsistent working generation.
+    pub fn group_used_slots(&self, group: usize) -> Result<usize, Error> {
+        if group >= 100 {
+            return Err(invalid("normal stored group index outside0..100"));
+        }
+        Ok(self.word(COUNTS + 4 * group) as usize)
+    }
+
     /// Expand storage links/masks into the normal working map, without field edits.
     ///
     /// Uses the existing checked topology decoder. This is an explicit normal-
