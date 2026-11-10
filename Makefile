@@ -6,8 +6,7 @@ CARGO                   ?= cargo
 CARGO_FLAGS             ?= --offline --locked
 TARGET_DIR              ?= target
 
-HELP_NAME_WIDTH         := 25
-HELP_EXAMPLE_WIDTH      := 41
+HELP_NAME_WIDTH         := 15
 
 ##@ Development
 
@@ -53,6 +52,3 @@ help: ## Show this help message
 	@printf "  \033[36m%-*s\033[0m%s\n" "$(HELP_NAME_WIDTH)" "CARGO" "Cargo executable (default: cargo)"
 	@printf "  \033[36m%-*s\033[0m%s\n" "$(HELP_NAME_WIDTH)" "CARGO_FLAGS" "Cargo policy flags (default: --offline --locked)"
 	@printf "  \033[36m%-*s\033[0m%s\n" "$(HELP_NAME_WIDTH)" "TARGET_DIR" "Package-local output directory (default: target); overrides CARGO_TARGET_DIR"
-	@printf "\n\033[1mExamples:\033[0m\n"
-	@printf "  \033[36m%-*s\033[0m%s\n" "$(HELP_EXAMPLE_WIDTH)" "make quality" "# Check the library without building examples"
-	@printf "  \033[36m%-*s\033[0m%s\n" "$(HELP_EXAMPLE_WIDTH)" "make build TARGET_DIR=target/local" "# Select a library-only output directory"
