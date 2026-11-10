@@ -142,10 +142,10 @@ impl Resources<'_> {
                     let property = property.split(|b| *b == b')').next().unwrap();
                     if let Some(value) = property.strip_prefix(b"ImageIndex=") {
                         command.image_index = Some(integer(value)?);
-                    } else if property.starts_with(b"%") {
-                        if let Some(at) = property.iter().position(|b| *b == b':') {
-                            command.shortcut18 = shortcut(&property[at + 1..])?;
-                        }
+                    } else if property.starts_with(b"%")
+                        && let Some(at) = property.iter().position(|b| *b == b':')
+                    {
+                        command.shortcut18 = shortcut(&property[at + 1..])?;
                     }
                 }
             }

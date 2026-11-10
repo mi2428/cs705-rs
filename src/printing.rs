@@ -195,9 +195,15 @@ impl Grid {
                         "portable print needs measured ASCII text or explicit byte notation",
                     ));
                 }
-                let hint = self.nodes.as_ref().map(|nodes| nodes[r][c].literal.as_slice());
+                let hint = self
+                    .nodes
+                    .as_ref()
+                    .map(|nodes| nodes[r][c].literal.as_slice());
                 let (auto_width, auto_height) = self.nodes.as_ref().map_or((true, true), |nodes| {
-                    (nodes[r][c].flags1c & 0x10 != 0, nodes[r][c].flags1c & 0x20 != 0)
+                    (
+                        nodes[r][c].flags1c & 0x10 != 0,
+                        nodes[r][c].flags1c & 0x20 != 0,
+                    )
                 });
                 let mut needed_width = padding;
                 let mut needed_height = padding;
@@ -208,20 +214,20 @@ impl Grid {
                     for part in value.split(|b| *b == b'\n') {
                         lines += 1;
                         if auto_width {
-                          let width = i32::try_from(part.len())
-                            .ok()
-                            .and_then(|n| n.checked_mul(advance))
-                            .and_then(|n| n.checked_add(padding))
-                            .ok_or_else(|| invalid("print text width overflow"))?;
-                        needed_width = needed_width.max(width);
+                            let width = i32::try_from(part.len())
+                                .ok()
+                                .and_then(|n| n.checked_mul(advance))
+                                .and_then(|n| n.checked_add(padding))
+                                .ok_or_else(|| invalid("print text width overflow"))?;
+                            needed_width = needed_width.max(width);
                         }
                     }
                     if auto_height {
-                      let height = lines
-                        .checked_mul(line)
-                        .and_then(|n| n.checked_add(padding))
-                        .ok_or_else(|| invalid("print text height overflow"))?;
-                    needed_height = needed_height.max(height);
+                        let height = lines
+                            .checked_mul(line)
+                            .and_then(|n| n.checked_add(padding))
+                            .ok_or_else(|| invalid("print text height overflow"))?;
+                        needed_height = needed_height.max(height);
                     }
                 }
                 let width = selected_extent(&widths, 0, cs.clone())?;
@@ -375,11 +381,16 @@ pub fn html_page(
                         .unwrap();
                     }
                     if node.flags1d & 6 != 0 && cs.end < widths.len() {
-                        let top = if node.flags1d & 6 == 2 { y } else { y + (i64::from(height) * 7 / 10) as i32 };
+                        let top = if node.flags1d & 6 == 2 {
+                            y
+                        } else {
+                            y + (i64::from(height) * 7 / 10) as i32
+                        };
                         write!(
                             html,
                             "<path d=\"M{} {top}v{}\" stroke=\"black\"/>",
-                            x + width - 1, y + height - top
+                            x + width - 1,
+                            y + height - top
                         )
                         .unwrap();
                     }
@@ -403,12 +414,19 @@ pub fn html_page(
                     .ok_or_else(|| invalid("merged text height overflow"))?;
                 let ty = match node.map(|n| n.flags1c & 12) {
                     Some(4) => i64::from(y) + (i64::from(height) - i64::from(block_height)) / 2,
-                    Some(8) => i64::from(y) + i64::from(height) - i64::from(metrics.padding) - i64::from(block_height),
+                    Some(8) => {
+                        i64::from(y) + i64::from(height)
+                            - i64::from(metrics.padding)
+                            - i64::from(block_height)
+                    }
                     _ => i64::from(y) + i64::from(metrics.padding),
                 };
                 for (i, text) in text.split('\n').enumerate() {
                     if !text.is_empty() {
-                        let length = i32::try_from(text.len()).ok().and_then(|n| n.checked_mul(advance)).ok_or_else(|| invalid("print text advance overflow"))?;
+                        let length = i32::try_from(text.len())
+                            .ok()
+                            .and_then(|n| n.checked_mul(advance))
+                            .ok_or_else(|| invalid("print text advance overflow"))?;
                         let tx = match node.map(|n| n.flags1c & 3) {
                             Some(1) => x + (width - length) / 2,
                             Some(2) => x + width - metrics.padding - length,
@@ -417,7 +435,9 @@ pub fn html_page(
                         write!(html, "<text x=\"{tx}\" y=\"{}\" font-family=\"monospace\" font-size=\"{}\" textLength=\"{length}\" lengthAdjust=\"spacingAndGlyphs\">{}</text>", ty + (i as i64 + 1) * i64::from(line_height), page.font_height.abs(), escape(text)).unwrap();
                     }
                 }
-                if node.is_some() { html.push_str("</g>"); }
+                if node.is_some() {
+                    html.push_str("</g>");
+                }
             }
             x += widths[c];
         }

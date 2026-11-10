@@ -381,7 +381,7 @@ impl State {
         self.invalidate();
         let view = ViewState::from_image_with_split(current, kind, group, self.settings.split)?;
         let id = self.views.register(view);
-        self.current = Some(Grid::build(
+        let grid = Grid::build(
             current,
             id,
             &self.settings,
@@ -389,7 +389,13 @@ impl State {
             self.metrics,
             q,
             None,
-        )?);
+        );
+        // A failed build owns no displayed grid. Retire only its new query
+        // receiver; the earlier invalidation and saved selection remain.
+        if grid.is_err() {
+            self.views.deactivate(id);
+        }
+        self.current = Some(grid?);
         self.saved = Some((kind, group, self.views.states[id].current_row, 0));
         Ok(())
     }
@@ -418,6 +424,10 @@ impl State {
     }
     /// Menu evaluation and Click share Checked, but evaluation never mutates C.
     /// Confirmation is a real external modal return, required only if reached.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The menu boundary preserves command inputs and independent native flag outputs."
+    )]
     pub fn menu(
         &mut self,
         current: &[u8],

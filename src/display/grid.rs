@@ -168,7 +168,7 @@ pub fn channel_value_paint(
         0x111 => b"GI_Sheet_Sel_Mch_DTCS_Polarity",
         0x112 => b"GI_Sheet_Sel_Mch_DSQL",
         0x117 => b"GI_Sheet_Sel_Mch_Scan_Sel",
-        0x10e | 0x10f | 0x110 => {
+        0x10e..=0x110 => {
             let field = match key {
                 0x10e => ToneField::Tx,
                 0x10f => ToneField::Rx,
@@ -422,7 +422,7 @@ impl Grid {
                 grid.push_row(&holder, index + 1, row, 1, &keys, metrics)?;
             }
         }
-        grid.apply_columns(settings);
+        grid.apply_columns(settings)?;
         Ok(grid)
     }
     fn push_row(
@@ -462,8 +462,8 @@ impl Grid {
         });
         Ok(())
     }
-    pub(super) fn apply_columns(&mut self, settings: &Settings) {
-        let mut x = 0;
+    pub(super) fn apply_columns(&mut self, settings: &Settings) -> io::Result<()> {
+        let mut x = 0_i32;
         for column in &mut self.columns {
             column.hidden = column_hidden(column.key, self.rx, settings, self.sql_mask);
             column.width = if column.hidden {
@@ -472,7 +472,9 @@ impl Grid {
                 column.measured_width
             };
             column.x = x;
-            x += column.width;
+            x = x
+                .checked_add(column.width)
+                .ok_or_else(|| invalid("display grid width overflow"))?;
         }
         // The portable schema has two structural cells before Name.31AF4
         // expands the fixed area until the first bit10 boundary, not all cells.
@@ -490,21 +492,23 @@ impl Grid {
             }
         }
         self.rebuilds += 1;
+        Ok(())
     }
     pub(super) fn align_selection(&mut self) {
         // 36986 aligns to fixed_columns-extra while preserving the live row.
         self.selected_column = self.frozen_columns.saturating_sub(self.fixed_origin);
     }
     /// Scrolling applies only after the frozen area; hidden columns occupy0.
-    pub fn column_positions(&self, horizontal_scroll: i32) -> Vec<i32> {
+    /// Widen before subtracting so every signed32 scroll remains representable.
+    pub fn column_positions(&self, horizontal_scroll: i32) -> Vec<i64> {
         self.columns
             .iter()
             .enumerate()
             .map(|(i, c)| {
                 if i < self.frozen_columns {
-                    c.x
+                    i64::from(c.x)
                 } else {
-                    c.x - horizontal_scroll
+                    i64::from(c.x) - i64::from(horizontal_scroll)
                 }
             })
             .collect()
@@ -515,6 +519,73 @@ impl Grid {
 mod tests {
     use super::*;
     use crate::icf::{rows::native, settings::extended::NumberInput};
+
+    fn state(padding: i32) -> State {
+        let settings = Settings {
+            language: 0,
+            system_language: 0,
+            font_percent: 100,
+            toolbar: 0,
+            split: 0,
+            callsign_dialog: 1,
+            auto_correct: 1,
+            fixed_name: 0,
+            column_bits: 15,
+            column_bits_high: 0,
+        };
+        State::new(
+            settings,
+            FontMetrics {
+                em: 16,
+                advance: 8,
+                line: 16,
+                dpi: 96,
+                padding,
+                explicit_height: 0,
+            },
+            [0; 4],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn display_grid_rejects_total_width_overflow() {
+        let mut state = state(300_000_000);
+        assert!(
+            state
+                .open(&vec![0; 0x4997a], ViewKind::Call, 0, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn display_scroll_preserves_the_full_signed_input_domain() {
+        let mut state = state(1);
+        state
+            .open(&vec![0; 0x4997a], ViewKind::Call, 0, None)
+            .unwrap();
+        let grid = state.current.as_ref().unwrap();
+        for scroll in [i32::MIN, 0, i32::MAX] {
+            let positions = grid.column_positions(scroll);
+            for (column, x) in grid.columns.iter().zip(positions) {
+                assert_eq!(x, i64::from(column.x) - i64::from(scroll));
+            }
+        }
+    }
+
+    #[test]
+    fn failed_display_build_retires_its_query_receiver() {
+        let mut state = state(1);
+        state.metrics.explicit_height = i32::MIN;
+        assert!(
+            state
+                .open(&vec![0; 0x4997a], ViewKind::Call, 0, None)
+                .is_err()
+        );
+        assert!(state.current.is_none());
+        assert!(state.views.states.iter().all(|view| !view.active));
+        assert!(state.views.query(&[], 0x3f, 0).unwrap().is_empty());
+    }
 
     fn no_label(_: &[u8], _: u32, _: u32) -> io::Result<Vec<u8>> {
         panic!("this paint branch must not read a selector source")

@@ -174,8 +174,8 @@ fn native_display_options_queries_geometry_and_cli() {
     let grid = state.current.as_ref().unwrap();
     assert_eq!(grid.frozen_columns, 3);
     let positions = grid.column_positions(50);
-    assert_eq!(positions[2], grid.columns[2].x);
-    assert_eq!(positions[3], grid.columns[3].x - 50);
+    assert_eq!(positions[2], i64::from(grid.columns[2].x));
+    assert_eq!(positions[3], i64::from(grid.columns[3].x) - 50);
     let old_height = grid.rows[0].height;
     menu(&mut state, &image, 0x36, 150, None);
     assert!(state.current.is_none() && state.font_changed);

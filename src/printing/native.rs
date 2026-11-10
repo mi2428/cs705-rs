@@ -1,4 +1,9 @@
 //! Bounded original resource producers. No GUI bus or second field codec.
+//!
+//! PE bytes are explicit caller-owned input, not bundled runtime resources.
+//! The optional reader captures bounded windows into sparse RAM without loading
+//! code. Portable layout and typed display remain separate from this provider;
+//! a missing native resource is an error, never an empty-caption fallback.
 
 pub mod menu;
 
@@ -214,14 +219,17 @@ impl Factory {
         }
         let node = parts.next().map(integer).transpose()?.unwrap_or(0);
         let parameter = trim(parts.next().unwrap_or_default()).to_vec();
+        // Node IDs and dataset groups are different signed index domains.
+        // Reject an unrepresentable translation before it can reach a loader.
         let group = match class {
-            Class::Gps => node - 252,
-            Class::Repeater => node - 123,
-            Class::Preset => node - 422,
-            Class::Split if node == 103 => 100,
-            Class::Split => node - 2,
-            _ => 0,
-        };
+            Class::Gps => node.checked_sub(252),
+            Class::Repeater => node.checked_sub(123),
+            Class::Preset => node.checked_sub(422),
+            Class::Split if node == 103 => Some(100),
+            Class::Split => node.checked_sub(2),
+            _ => Some(0),
+        }
+        .ok_or_else(|| invalid("native factory group index overflow"))?;
         Ok(Self {
             class,
             resource,
@@ -1060,9 +1068,11 @@ impl<'a> Resources<'a> {
         };
         view.bc = (view.bc & !1) | u8::from(disabled);
         let id = views.register(view);
-        let answer = views.nonempty(current, id)?;
+        let answer = views.nonempty(current, id);
+        // This temporary printer view has no owner after the predicate returns,
+        // including an error. Do not leave it in later live query traversals.
         views.deactivate(id);
-        Ok(answer)
+        answer
     }
 
     /// Generate loop rows and split merge metadata from the live image before
@@ -1197,6 +1207,10 @@ impl<'a> Resources<'a> {
 
     /// Cancellation still reaches the concrete factory and predicate first.
     /// This draws the resource grid through the same span/page/job consumer.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The render boundary keeps live views, job state, output and field dispatch separate."
+    )]
     pub fn render(
         &self,
         current: &[u8],
@@ -1263,10 +1277,50 @@ impl<'a> Resources<'a> {
     }
 }
 
+/// Byte notation is an explicit portable glyph projection, not SJIS decoding.
+pub fn byte_text(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for &b in bytes {
+        if (32..=126).contains(&b) || b == b'\n' {
+            out.push(char::from(b));
+        } else if b == b'\t' {
+            out.push(' ');
+        } else {
+            write!(out, "\\x{b:02X}").unwrap();
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::printing::{Metrics, Paper, html_page, layout};
+
+    #[test]
+    fn factory_node_subtraction_rejects_unrepresentable_groups() {
+        for class in ["St_ChGps", "St_RptList", "St_Preset", "St_ColCut_Split"] {
+            let target = format!("[{class}]GI_Sheet_Test,{}", i32::MIN);
+            assert!(Factory::parse(target.as_bytes()).is_err(), "{class}");
+        }
+        assert_eq!(
+            Factory::parse(b"[St_ChGps]GI_Sheet_Test,252")
+                .unwrap()
+                .group,
+            0
+        );
+    }
+
+    #[test]
+    fn failed_print_predicate_retires_its_query_receiver() {
+        let source = localized_source().with_language(0, false);
+        let factory = Factory::parse(b"[St_ChGps]GI_Sheet_Local,252").unwrap();
+        let mut views = super::super::Views::default();
+        assert!(source.eligible(&[], &factory, 0, &mut views).is_err());
+        assert!(views.states.iter().all(|view| !view.active));
+        assert!(views.query(&[], 0x3f, 0).unwrap().is_empty());
+    }
 
     fn localized_source() -> Resources<'static> {
         let entries = |literal: &'static [u8], model: &'static [u8]| {
@@ -1311,7 +1365,7 @@ mod tests {
     fn r2_language_binds_schema_models_menu_and_live_producer_without_fallback() {
         let factory = Factory::parse(b"[St_Common]GI_Sheet_Local,403").unwrap();
         let source = localized_source();
-        assert_eq!(source.tree(0).unwrap(), [factory.clone()]);
+        assert_eq!(source.tree(0).unwrap(), std::slice::from_ref(&factory));
         assert!(
             source
                 .schema(&factory, &[], |_| panic!("no condition"))
@@ -1885,14 +1939,14 @@ mod tests {
                         std::str::from_utf8(resource).unwrap(),
                     ))
             });
-            for index in 0..3 {
+            for (index, caption) in captions.iter().enumerate() {
                 let node = source
                     .selector_cells_at(index, resource)
                     .unwrap()
                     .into_iter()
                     .find(|node| node.key == key && i64::from(node.index) == value)
                     .unwrap();
-                assert_eq!(captions[index], node.alias.unwrap_or(node.literal));
+                assert_eq!(*caption, node.alias.unwrap_or(node.literal));
             }
             if captions[0] == captions[1] && captions[0] == captions[2] {
                 assert_eq!(
@@ -2205,20 +2259,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Byte notation is an explicit portable glyph projection, not SJIS decoding.
-pub fn byte_text(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut out = String::new();
-    for &b in bytes {
-        if (32..=126).contains(&b) || b == b'\n' {
-            out.push(char::from(b));
-        } else if b == b'\t' {
-            out.push(' ');
-        } else {
-            write!(out, "\\x{b:02X}").unwrap();
-        }
-    }
-    out
 }
