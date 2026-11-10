@@ -8,6 +8,8 @@ use crate::icf::{
     record_image::{self, ChannelKind},
 };
 
+pub mod call;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Selection {
     pub group: usize,
@@ -249,6 +251,19 @@ pub enum ChannelChoice {
     Polarity,
     DigitalSquelch,
 }
+
+// B5844's mode predicate is shared by input and normal paint. Gray styling and
+// empty/out-of-band entry redirection are separate caller operations.
+pub(crate) fn channel_mode_blocked(h: &DecodedRecord, key: u32) -> bool {
+    h.valid()
+        && match key {
+            0x109 => !matches!(h.mode(), 0 | 1 | 8 | 13),
+            0x10a => matches!(h.mode() as u8, 15 | 17),
+            0x10d..=0x111 => !matches!(h.mode(), 13 | 14),
+            0x112 | 0x113 => h.mode() != 16,
+            _ => false,
+        }
+}
 impl ChannelChoice {
     pub fn key(self) -> u32 {
         match self {
@@ -320,12 +335,7 @@ pub fn channel_choice_input(
             "channel choice requires normal/call; call SEL is read-only",
         ));
     }
-    let mode_blocked = h.valid()
-        && match field {
-            ChannelChoice::Polarity => !matches!(h.mode(), 13 | 14),
-            ChannelChoice::DigitalSquelch => h.mode() != 16,
-            _ => false,
-        };
+    let mode_blocked = channel_mode_blocked(h, field.key());
     let candidate = if mode_blocked {
         None
     } else {
@@ -353,6 +363,53 @@ pub struct ChoiceFrame {
     pub layout: u32,
     pub node_flags: u8,
 }
+
+/// Actual caller scalars used by642F9, before any field editor runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelCaller {
+    pub code: i32,
+    pub command: u32,
+    pub blocked: bool,
+    pub node_index: i32,
+    pub node_back: i32,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelEntry {
+    Edit,
+    Blocked,
+    Redirect { key: u32, index: i32, code: i32 },
+}
+
+/// Empty/out-of-band ordinary gestures move to frequency; they do not turn a
+/// sibling field value into an already accepted frequency or invoke its saver.
+pub fn channel_entry(
+    h: &DecodedRecord,
+    key: u32,
+    caller: ChannelCaller,
+    callsign_dialog: bool,
+) -> Result<ChannelEntry, Error> {
+    if !matches!(h.kind(), 2 | 3) {
+        return Err(invalid("channel entry requires a normal/call holder"));
+    }
+    if caller.blocked || caller.command == 0xdc {
+        return Ok(ChannelEntry::Blocked);
+    }
+    if matches!(caller.command, 0xd1 | 0xd2) && matches!(key, 0x114..=0x116) {
+        return Ok(ChannelEntry::Edit);
+    }
+    if (!h.valid() || h.channel_field(ChannelField::FrequencyHz) > 470_000_000)
+        && (caller.code <= 0x7f || matches!(caller.code, 0x7100 | 0x10007))
+        && !matches!(key, 0x105 | 0x107)
+        && !(callsign_dialog && matches!(key, 0x114..=0x116))
+    {
+        return Ok(ChannelEntry::Redirect {
+            key: 0x107,
+            index: caller.node_index.wrapping_sub(caller.node_back),
+            code: caller.code,
+        });
+    }
+    Ok(ChannelEntry::Edit)
+}
 pub struct ChoiceRequest<'a> {
     pub field: ChannelChoice,
     pub input: crate::icf::settings::extended::ChoiceInput,
@@ -365,6 +422,73 @@ pub struct NameRequest<'a> {
     pub context: EditorContext<'a>,
     pub frame: &'a mut ChoiceFrame,
     pub notification: Option<[u8; 24]>,
+}
+
+/// 68C48..68C98: only the live grid node index is external. Normal/call
+/// producers supply their node kind, selected group, zero auxiliary and type.
+pub fn name_notification(h: &DecodedRecord, node_index: u32) -> Result<[u8; 24], Error> {
+    if !matches!(h.kind(), 2 | 3) {
+        return Err(invalid("name notification requires a normal/call holder"));
+    }
+    let mut payload = [0; 24];
+    for (slot, word) in [h.kind() + 1, node_index, 0x105, h.group(), 0, h.kind()]
+        .into_iter()
+        .enumerate()
+    {
+        payload[4 * slot..4 * slot + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    Ok(payload)
+}
+pub struct CallsignTextRequest<'a> {
+    pub field: crate::icf::MemoryCallsign,
+    pub input: crate::icf::settings::extended::TextInput<'a>,
+    pub right_word: bool,
+    /// Actual17FFCC full-EAX result for the signed input byte, not LCMapStringA.
+    pub upper: &'a mut dyn FnMut(i32) -> Result<i32, Error>,
+    pub context: EditorContext<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallsignInline {
+    pub state_out: u32,
+    pub display: Vec<u8>,
+    pub cursor: usize,
+    pub selection: usize,
+    pub width: usize,
+}
+
+/// 9C44A..9C5A9's inline producer, after the caller has selected this branch.
+/// Enter with the dialog option disabled is not the separate commandD1 list.
+pub fn callsign_inline(
+    h: &DecodedRecord,
+    field: crate::icf::MemoryCallsign,
+    code: i32,
+) -> Result<CallsignInline, Error> {
+    if !matches!(code,13|0x7100|32|8|47|48..=57|65..=90|97..=122) {
+        return Err(invalid(
+            "callsign Begin code does not request an inline editor",
+        ));
+    }
+    let mut display = h
+        .callsign(field)
+        .split(|b| *b == 0)
+        .next()
+        .expect("fixed callsign prefix")
+        .trim_ascii_end()
+        .to_vec();
+    let (cursor, selection) = if matches!(code, 13 | 0x7100 | 32 | 8) {
+        (0, display.len())
+    } else {
+        display.push(code as u8);
+        (display.len(), 0)
+    };
+    Ok(CallsignInline {
+        state_out: 2,
+        display,
+        cursor,
+        selection,
+        width: 8,
+    })
 }
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct NameEffect {
@@ -405,48 +529,123 @@ fn scaled_channel_input(
     })
 }
 
-fn frequency_first(h:&DecodedRecord,request:&FrequencyRequest<'_>)->Result<NumericOutcome,Error> {
-    let bounds=request.context.ranges.f760(h.kind(),-1,0);
-    scaled_channel_input(request.input,h.channel_field(ChannelField::FrequencyHz),(bounds.low,bounds.high),request.point)
+fn frequency_first(
+    h: &DecodedRecord,
+    request: &FrequencyRequest<'_>,
+) -> Result<NumericOutcome, Error> {
+    let bounds = request.context.ranges.f760(h.kind(), -1, 0);
+    scaled_channel_input(
+        request.input,
+        h.channel_field(ChannelField::FrequencyHz),
+        (bounds.low, bounds.high),
+        request.point,
+    )
 }
-fn frequency_second(h:&DecodedRecord,first:u32,request:&FrequencyRequest<'_>)->Result<(NumericOutcome,i32),Error> {
-    let ranges=request.context.ranges;
-    let index=if h.kind()==3 {h.range_index()}else{ranges.edf0(h.kind(),first)};
-    let bounds=ranges.f760(h.kind(),index,first);
-    Ok((scaled_channel_input(request.input,first,(bounds.low,bounds.high),request.point)?,index))
+fn frequency_second(
+    h: &DecodedRecord,
+    first: u32,
+    request: &FrequencyRequest<'_>,
+) -> Result<(NumericOutcome, i32), Error> {
+    let ranges = request.context.ranges;
+    let index = if h.kind() == 3 {
+        h.range_index()
+    } else {
+        ranges.edf0(h.kind(), first)
+    };
+    let bounds = ranges.f760(h.kind(), index, first);
+    Ok((
+        scaled_channel_input(
+            request.input,
+            first,
+            (bounds.low, bounds.high),
+            request.point,
+        )?,
+        index,
+    ))
 }
-fn frequency_tail(h:&DecodedRecord,state:&EditorState,request:&FrequencyRequest<'_>,out:&mut FrequencyOutcome)->Result<(),Error> {
-    if out.first.state_out==2 && !state.pending.bytes.is_empty() {out.focus=1;}
-    if crate::icf::frequency::channel_frequency_bad(h,request.context.ranges,request.live_q)? {out.warning_bits|=4;}
-    if crate::icf::frequency::channel_bad(h,request.context.ranges,request.live_q,true)? {out.warning_bits|=8;}
+fn frequency_tail(
+    h: &DecodedRecord,
+    state: &EditorState,
+    request: &FrequencyRequest<'_>,
+    out: &mut FrequencyOutcome,
+) -> Result<(), Error> {
+    if out.first.state_out == 2 && !state.pending.bytes.is_empty() {
+        out.focus = 1;
+    }
+    if crate::icf::frequency::channel_frequency_bad(h, request.context.ranges, request.live_q)? {
+        out.warning_bits |= 4;
+    }
+    if crate::icf::frequency::channel_bad(h, request.context.ranges, request.live_q, true)? {
+        out.warning_bits |= 8;
+    }
     Ok(())
 }
 
-fn apply_frequency_candidate(h:&mut DecodedRecord,candidate:u32,pending:&mut PendingName)->Result<(),Error> {
-    let frequency=if candidate==0 {h.channel_field(ChannelField::FrequencyHz)}else{candidate};
-    if (candidate as i32)>=0 {
-        h.set_valid(true);h.set_channel_field(ChannelField::FrequencyHz,frequency);
+fn apply_frequency_candidate(
+    h: &mut DecodedRecord,
+    candidate: u32,
+    pending: &mut PendingName,
+) -> Result<(), Error> {
+    let frequency = if candidate == 0 {
+        h.channel_field(ChannelField::FrequencyHz)
+    } else {
+        candidate
+    };
+    if (candidate as i32) >= 0 {
+        h.set_valid(true);
+        h.set_channel_field(ChannelField::FrequencyHz, frequency);
         if pending.active && !pending.bytes.is_empty() {
-            if pending.bytes.len()>16 {return Err(invalid("pending name exceeds its accepted producer width"));}
-            let mut name=[b' ';16];name[..pending.bytes.len()].copy_from_slice(&pending.bytes);h.set_name(&name);pending.reset();
+            if pending.bytes.len() > 16 {
+                return Err(invalid("pending name exceeds its accepted producer width"));
+            }
+            let mut name = [b' '; 16];
+            name[..pending.bytes.len()].copy_from_slice(&pending.bytes);
+            h.set_name(&name);
+            pending.reset();
         }
     }
     Ok(())
 }
 
-fn name_candidate_input(h:&DecodedRecord,pending:&PendingName,input:crate::icf::settings::extended::TextInput<'_>,layout:u32,effect:&mut NameEffect)->Result<Option<Vec<u8>>,Error> {
+fn name_candidate_input(
+    h: &DecodedRecord,
+    pending: &PendingName,
+    input: crate::icf::settings::extended::TextInput<'_>,
+    layout: u32,
+    effect: &mut NameEffect,
+) -> Result<Option<Vec<u8>>, Error> {
     use crate::icf::settings::extended::TextInput;
-    *effect=NameEffect::default();
-    let index=h.index().wrapping_sub(u32::from(layout==1 && h.side()!=0));
-    effect.display=if pending.index==index {pending.bytes.clone()}else if h.valid(){h.name().split(|&b|b==0).next().expect("fixed name C prefix").to_vec()}else{Vec::new()};
+    *effect = NameEffect::default();
+    let index = h
+        .index()
+        .wrapping_sub(u32::from(layout == 1 && h.side() != 0));
+    effect.display = if pending.index == index {
+        pending.bytes.clone()
+    } else if h.valid() {
+        h.name()
+            .split(|&b| b == 0)
+            .next()
+            .expect("fixed name C prefix")
+            .to_vec()
+    } else {
+        Vec::new()
+    };
     match input {
-        TextInput::Begin(first)=>{effect.state_out=2;if let Some(first)=first{effect.display=vec![first];}Ok(None)}
-        TextInput::Text(source)=>{
-            effect.shared_input=source.to_vec();
-            let candidate=crate::csv::nls::name_candidate(&mut effect.shared_input,16).map_err(|_|invalid("native name byte grammar failed"))?;
-            effect.display=candidate.clone();Ok(Some(candidate))
+        TextInput::Begin(first) => {
+            effect.state_out = 2;
+            if let Some(first) = first {
+                effect.display = vec![first];
+            }
+            Ok(None)
         }
-        TextInput::Display|TextInput::Cancel=>Ok(None),
+        TextInput::Text(source) => {
+            effect.shared_input = source.to_vec();
+            let candidate = crate::csv::nls::name_candidate(&mut effect.shared_input, 16)
+                .map_err(|_| invalid("native name byte grammar failed"))?;
+            effect.display = candidate.clone();
+            Ok(Some(candidate))
+        }
+        TextInput::Display | TextInput::Cancel => Ok(None),
     }
 }
 
@@ -547,12 +746,7 @@ pub fn channel_enum_input(
             "mode/DATA/filter input requires a normal/call holder",
         ));
     }
-    let mode_blocked = h.valid()
-        && match field {
-            ChannelEnum::Data => !matches!(h.mode(), 0 | 1 | 8 | 13),
-            ChannelEnum::Filter => matches!(h.mode() as u8, 15 | 17),
-            _ => false,
-        };
+    let mode_blocked = channel_mode_blocked(h, field.key());
     if mode_blocked && field == ChannelEnum::Data {
         return Ok(ChoiceOutcome {
             stored: false,
@@ -614,7 +808,7 @@ impl ToneField {
             Self::Dtcs => 0x110,
         }
     }
-    fn value(self, h: &DecodedRecord) -> u32 {
+    pub(crate) fn value(self, h: &DecodedRecord) -> u32 {
         match self {
             Self::Tone => h.channel_field(ChannelField::Tone),
             Self::Tx => h.tx_tone(),
@@ -657,7 +851,7 @@ pub fn tone_choices(
         }
     })
 }
-fn tone_numeric_label(field: ToneField, value: u32) -> Option<Vec<u8>> {
+pub(crate) fn tone_numeric_label(field: ToneField, value: u32) -> Option<Vec<u8>> {
     match field {
         ToneField::Tone => None,
         ToneField::Dtcs => crate::csv::table::DTCS_CODES
@@ -719,7 +913,7 @@ pub fn channel_tone_input(
         ));
     }
     *effect = ToneEffect::default();
-    effect.mode_blocked = h.valid() && !matches!(h.mode(), 13 | 14);
+    effect.mode_blocked = channel_mode_blocked(h, input.field.key());
     if effect.mode_blocked {
         return Ok(());
     }
@@ -803,6 +997,12 @@ pub struct CodeOutcome {
     pub selection: (usize, usize),
 }
 
+/// 9A468's signed32 minimum-width2 display. No clipping, unsigned rewrite or
+/// low-byte projection belongs to this shared readonly formatter.
+pub fn digital_code_label(value: u32) -> Vec<u8> {
+    format!("{:02}", value as i32).into_bytes()
+}
+
 /// 9A468 is NOT A522C or A5EDC. Validate its one/two ASCII digits before the
 /// trivial decimal accumulation; selected events never supply its candidate.
 pub fn channel_code_input(
@@ -823,9 +1023,9 @@ pub fn channel_code_input(
     let mut out = CodeOutcome {
         stored: false,
         candidate: None,
-        mode_blocked: h.valid() && h.mode() != 16,
+        mode_blocked: channel_mode_blocked(h, 0x113),
         state_out: 0,
-        display: format!("{:02}", old as i32).into_bytes(),
+        display: digital_code_label(old),
         selection: (0, 0),
     };
     out.selection.1 = out.display.len();
@@ -872,7 +1072,7 @@ pub fn channel_code_input(
     };
     if let Some(candidate) = out.candidate {
         if matches!(input, NumberInput::Text(_)) {
-            out.display = format!("{:02}", candidate as i32).into_bytes();
+            out.display = digital_code_label(candidate);
             out.selection = (0, out.display.len());
         }
         h.set_channel_field(ChannelField::DigitalCode, candidate);
@@ -1075,20 +1275,7 @@ pub fn channel_save_cached_into(
     effects: &mut Effects,
     mut before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let kind = match h.kind() {
-        2 => ChannelKind::Normal,
-        3 => ChannelKind::Call,
-        _ => return Err(invalid("channel cache saver requires normal or call")),
-    };
-    state.mode_transition(h, &request)?;
-    save_reload_into(w, kind, h, &mut before_store)?;
-    if kind == ChannelKind::Call {
-        call_after_into(w, (h.index() as i32) / 2, context.ranges, effects)?;
-    } else if u32::from(raw::<1>(w, 0x3c84b)?[0]) == h.group()
-        && u16::from_le_bytes(raw(w, 0x3c84c)?) == (h.index() / 2 % 100) as u16
-    {
-        effects.home_invalidated = 1;
-    }
+    channel_save_mode_into(w, h, state, &request, context, effects, &mut before_store)?;
     if !same_filter_entry(&state.filter_cache, h) {
         state.filter_enabled = 0;
     }
@@ -1124,7 +1311,648 @@ pub fn channel_save_cached_into(
             default_filter_into(context.generation.get(w), context.ranges, h)?;
         }
     }
+    let kind = if h.kind() == 2 {
+        ChannelKind::Normal
+    } else {
+        ChannelKind::Call
+    };
     save_reload_into(w, kind, h, &mut before_store)
+}
+
+/// The first53830 saver is also D1's complete save path; it does not execute
+/// the second53A6C filter-cache transition used by ordinary field handlers.
+fn channel_save_mode_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: &CacheWrite<'_>,
+    context: EditorContext<'_>,
+    effects: &mut Effects,
+    mut before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let kind = match h.kind() {
+        2 => ChannelKind::Normal,
+        3 => ChannelKind::Call,
+        _ => return Err(invalid("channel cache saver requires normal or call")),
+    };
+    state.mode_transition(h, request)?;
+    save_reload_into(w, kind, h, &mut before_store)?;
+    if kind == ChannelKind::Call {
+        call_after_into(w, (h.index() as i32) / 2, context.ranges, effects)?;
+    } else if u32::from(raw::<1>(w, 0x3c84b)?[0]) == h.group()
+        && u16::from_le_bytes(raw(w, 0x3c84c)?) == (h.index() / 2 % 100) as u16
+    {
+        effects.home_invalidated = 1;
+    }
+    Ok(())
+}
+
+fn checked_call_holder(h: &DecodedRecord) -> Result<(), Error> {
+    if h.kind() != 3 || h.index() >= 8 || !h.valid() {
+        return Err(invalid(
+            "call input requires an existing typed call side0..7",
+        ));
+    }
+    Ok(())
+}
+
+pub fn call_choice_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: ChoiceRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<ChoiceOutcome, Error> {
+    checked_call_holder(h)?;
+    if request.selection.is_some() {
+        return Err(invalid("call choice has no writable SEL/frame"));
+    }
+    let out = channel_choice_input(h, request.field, request.input)?;
+    if out.stored {
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: request.field.key(),
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+    }
+    Ok(out)
+}
+
+pub fn call_enum_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: EnumRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<EnumOutcome, Error> {
+    checked_call_holder(h)?;
+    if (request.field == ChannelEnum::Mode) != request.warning_bits.is_some() {
+        return Err(invalid("only mode requires actual warning bits"));
+    }
+    let previous = h.clone();
+    let choice = channel_enum_input(h, request.field, request.input)?;
+    if choice.stored {
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: request.field.key(),
+                previous: if request.field == ChannelEnum::Filter {
+                    None
+                } else {
+                    Some(&previous)
+                },
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+        if request.field == ChannelEnum::Mode {
+            effects.queue(0x3c, 1, 0);
+        }
+    }
+    Ok(EnumOutcome {
+        choice,
+        context_state: if request.field == ChannelEnum::Filter {
+            None
+        } else {
+            Some(2)
+        },
+        warning_bits: request
+            .warning_bits
+            .map(|flags| flags | if record::channel_mode_bad(h) { 4 } else { 0 }),
+    })
+}
+
+pub fn call_offset_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: OffsetRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<NumericOutcome, Error> {
+    checked_call_holder(h)?;
+    let out = channel_offset_input(h, request.input, request.point)?;
+    if out.accepted {
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: 0x10c,
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+    }
+    Ok(out)
+}
+
+pub fn call_tone_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    mut request: ToneRequest<'_>,
+    tone_effect: &mut ToneEffect,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    checked_call_holder(h)?;
+    channel_tone_input(h, &mut request.input, tone_effect)?;
+    if tone_effect.stored {
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: request.input.field.key(),
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn call_code_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: CodeRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<CodeOutcome, Error> {
+    checked_call_holder(h)?;
+    let out = channel_code_input(h, request.input, request.first, request.node_flags)?;
+    if out.stored {
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: 0x113,
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+    }
+    Ok(out)
+}
+
+pub fn call_name_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: NameRequest<'_>,
+    text_effect: &mut NameEffect,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    checked_call_holder(h)?;
+    let paired = h.split() == 1 || request.frame.layout != 0;
+    if let Some(mut candidate) = name_candidate_input(
+        h,
+        &state.pending,
+        request.input,
+        request.frame.layout,
+        text_effect,
+    )? {
+        candidate.resize(16, b' ');
+        h.set_name(candidate.as_slice().try_into().expect("native name width"));
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: 0x105,
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+        text_effect.stored = true;
+    }
+    request.frame.node_flags = (request.frame.node_flags & !1) | u8::from(paired);
+    Ok(())
+}
+
+/// The9C2C8 direct-text branch of UR/RPT, not its DR modal/list branches. Each
+/// native upper result commits one holder byte before the next call can fail.
+/// The return value is an actual completed save, not9C5C4's outer AL result.
+pub fn channel_callsign_text_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: CallsignTextRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<bool, Error> {
+    use crate::icf::settings::extended::TextInput;
+    if !matches!(h.kind(), 2 | 3) || h.index() >= if h.kind() == 2 { 20_000 } else { 8 } {
+        return Err(invalid(
+            "UR/RPT direct text requires a normal/call typed holder",
+        ));
+    }
+    if h.kind() == 3 {
+        checked_call_holder(h)?;
+    }
+    let source = match request.input {
+        TextInput::Text(source) => source,
+        TextInput::Cancel | TextInput::Display => return Ok(false),
+        TextInput::Begin(_) => {
+            return Err(invalid(
+                "UR/RPT Begin requires the actual DR modal consumer",
+            ));
+        }
+    };
+    let mut raw = *h.callsign(request.field);
+    for slot in 0..8 {
+        raw[slot] = if let Some(&byte) = source.get(slot) {
+            let value = (request.upper)(i32::from(byte as i8))?;
+            if matches!(value, 0x30..=0x39 | 0x41..=0x5a | 0x2f) {
+                value as u8
+            } else if matches!(value, 0x61..=0x7a) {
+                (value as u8).to_ascii_uppercase()
+            } else {
+                b' '
+            }
+        } else {
+            b' '
+        };
+        h.set_callsign(request.field, &raw);
+    }
+    crate::csv::nls::fold_callsign(&mut raw);
+    if request.right_word {
+        crate::icf::settings::extended::align_callsign(&mut raw);
+    }
+    h.set_callsign(request.field, &raw);
+    if !h.valid() && registration_count(w)? >= 500 {
+        return Ok(false);
+    }
+    save_callsign_into(
+        w,
+        h,
+        state,
+        request.field,
+        request.context,
+        effects,
+        before_store,
+    )?;
+    effects.queue(0x3c, 1, 0);
+    Ok(true)
+}
+
+fn save_callsign_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    field: crate::icf::MemoryCallsign,
+    context: EditorContext<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    channel_save_cached_into(
+        w,
+        h,
+        state,
+        CacheWrite {
+            key: callsign_key(field),
+            previous: None,
+        },
+        context,
+        effects,
+        before_store,
+    )
+}
+
+fn callsign_key(field: crate::icf::MemoryCallsign) -> u32 {
+    match field {
+        crate::icf::MemoryCallsign::Your => 0x114,
+        crate::icf::MemoryCallsign::Repeater1 => 0x115,
+        crate::icf::MemoryCallsign::Repeater2 => 0x116,
+    }
+}
+
+pub enum CallsignModal {
+    List(crate::icf::callsign_dialog::ListSelection),
+    Dr { modal_result: u32 },
+}
+pub struct CallsignModalRequest<'a> {
+    pub field: crate::icf::MemoryCallsign,
+    pub modal: CallsignModal,
+    pub sources: &'a crate::icf::callsign_dialog::Sources<'a>,
+    pub reads: &'a crate::icf::callsign_dialog::ReadInputs<'a>,
+    pub context: EditorContext<'a>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallsignModalOutcome {
+    pub stored: bool,
+    pub accepted: bool,
+    pub al: bool,
+    pub checkbox: bool,
+    pub initial_selection: Option<crate::icf::callsign_dialog::ListSelection>,
+}
+
+/// D1 keeps its false-return notifications. D2 saves even after modal Cancel;
+/// only accepting a new normal clone allocates and mirrors a pair.
+pub fn channel_callsign_modal_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: CallsignModalRequest<'_>,
+    effects: &mut Effects,
+    actions: impl FnOnce(&mut crate::icf::callsign_dialog::Dialog) -> Result<(), Error>,
+    mut before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<CallsignModalOutcome, Error> {
+    use crate::icf::callsign_dialog::{self as dialog, Dialog};
+    if !matches!(h.kind(), 2 | 3) || h.index() >= if h.kind() == 2 { 20_000 } else { 8 } {
+        return Err(invalid(
+            "callsign modal requires a normal/call typed holder",
+        ));
+    }
+    if h.kind() == 3 {
+        checked_call_holder(h)?;
+    }
+    let was_empty = !h.valid();
+    if matches!(&request.modal, CallsignModal::Dr { .. })
+        && was_empty
+        && registration_count(w)? >= 500
+    {
+        return Ok(CallsignModalOutcome {
+            stored: false,
+            accepted: false,
+            al: false,
+            checkbox: false,
+            initial_selection: None,
+        });
+    }
+    state.mode_cache.set_valid(false);
+    if !same_filter_entry(&state.filter_cache, h) {
+        state.filter_enabled = 0;
+    }
+    match request.modal {
+        CallsignModal::List(selection) => {
+            let mode = match request.field {
+                crate::icf::MemoryCallsign::Your => 0,
+                crate::icf::MemoryCallsign::Repeater1 => 1,
+                crate::icf::MemoryCallsign::Repeater2 => 2,
+            };
+            let initial = dialog::initial_selection(
+                request.sources,
+                h,
+                mode,
+                h.callsign(request.field),
+                h.mode(),
+                request.reads,
+            )?;
+            let out =
+                dialog::list_into(request.sources, h, request.field, selection, request.reads)?;
+            if out.save {
+                channel_save_mode_into(
+                    w,
+                    h,
+                    state,
+                    &CacheWrite {
+                        key: callsign_key(request.field),
+                        previous: None,
+                    },
+                    request.context,
+                    effects,
+                    &mut before_store,
+                )?;
+            }
+            effects.queue(0x11, 0, 0);
+            effects.notify(0x39, 0, 0);
+            Ok(CallsignModalOutcome {
+                stored: out.save,
+                accepted: out.save,
+                al: false,
+                checkbox: out.checkbox,
+                initial_selection: Some(initial),
+            })
+        }
+        CallsignModal::Dr { modal_result } => {
+            effects.queue(0x18, 0, 1);
+            let mut dialog = Dialog::open(request.sources, h, request.reads)?;
+            actions(&mut dialog)?;
+            let out = dialog.finish(h, modal_result);
+            effects.queue(0x18, 0, 0);
+            state.filter_enabled = u8::from(out.accepted);
+            if out.accepted {
+                state.filter_cache.set_valid(false);
+                state
+                    .filter_cache
+                    .set_header(h.kind(), h.index(), state.filter_cache.binding());
+            }
+            if was_empty && out.accepted && !allocate_registration_into(w, h, &mut state.pending)? {
+                return Ok(CallsignModalOutcome {
+                    stored: false,
+                    accepted: out.accepted,
+                    al: false,
+                    checkbox: out.checkbox,
+                    initial_selection: None,
+                });
+            }
+            save_callsign_into(
+                w,
+                h,
+                state,
+                request.field,
+                request.context,
+                effects,
+                &mut before_store,
+            )?;
+            let allocated = was_empty && out.accepted;
+            if allocated {
+                let index = h.index() ^ 1;
+                let mut other = record::reset_holder(2, index, h.binding());
+                other.copy_body_from(h);
+                record_image::store_channel_into(
+                    w,
+                    ChannelKind::Normal,
+                    index,
+                    &mut other,
+                    |write| before_store(index, write),
+                )?;
+            }
+            effects.queue(0x3c, 1, 0);
+            Ok(CallsignModalOutcome {
+                stored: true,
+                accepted: out.accepted,
+                al: allocated,
+                checkbox: out.checkbox,
+                initial_selection: None,
+            })
+        }
+    }
+}
+
+pub(crate) fn registration_count(w: &[u8]) -> Result<u64, Error> {
+    (0..100).try_fold(0u64, |count, group| {
+        Ok(count + u64::from(u32::from_le_bytes(raw(w, super::COUNTS + 4 * group)?)))
+    })
+}
+fn allocate_registration_into(
+    w: &mut [u8],
+    h: &DecodedRecord,
+    pending: &mut PendingName,
+) -> Result<bool, Error> {
+    if registration_count(w)? >= 500 {
+        pending.reset();
+        return Ok(false);
+    }
+    if h.index() / 200 >= u32::from_le_bytes(raw(w, super::GROUP_COUNT)?) {
+        return Err(invalid("logical group or row range outside normal map"));
+    }
+    super::allocate_into(
+        w,
+        h.index() as usize / 200,
+        h.index() as usize / 2 % 100..h.index() as usize / 2 % 100 + 1,
+    )?;
+    Ok(true)
+}
+
+/// Normal call rows already exist; there is no normal-slot allocation or first
+/// opposite-side mirror. H38 from the actual call adapter selects range12/13.
+pub fn call_frequency_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: FrequencyRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+) -> Result<FrequencyOutcome, Error> {
+    use crate::icf::settings::extended::NumberInput;
+    checked_call_holder(h)?;
+    if !request.context.ranges.is_complete() {
+        return Err(invalid("call frequency requires completed B"));
+    }
+    let first = frequency_first(h, &request)?;
+    let mut out = FrequencyOutcome {
+        stored: false,
+        first,
+        second: None,
+        notify_flags: 0,
+        warning_bits: request.warning_bits,
+        focus: request.focus,
+    };
+    if first.accepted || matches!(request.input, NumberInput::Text(_)) && state.pending.active {
+        let (second, _) = frequency_second(h, first.candidate, &request)?;
+        out.second = Some(second);
+        apply_frequency_candidate(h, second.candidate, &mut state.pending)?;
+        state.filter_enabled = 1;
+        state.filter_cache.set_valid(false);
+        state
+            .filter_cache
+            .set_header(3, h.index(), state.filter_cache.binding());
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: 0x107,
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+        effects.queue(0x3c, 1, 0);
+        out.stored = true;
+        out.notify_flags = 0x18;
+    }
+    frequency_tail(h, state, &request, &mut out)?;
+    Ok(out)
+}
+
+/// Native69977 uses the same split editor and cache saver for normal and call.
+/// Callers supply live grid scalars; requests are not simulated OS dispatch.
+pub fn channel_split_input_into(
+    w: &mut [u8],
+    h: &mut DecodedRecord,
+    state: &mut EditorState,
+    request: SplitRequest<'_>,
+    effects: &mut Effects,
+    before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
+    mut before_notice: impl FnMut(&Notification, &mut SplitFrame) -> Result<(), Error>,
+) -> Result<SplitOutcome, Error> {
+    use crate::icf::settings::extended::{ChoiceInput, choice_candidate};
+    if !h.valid()
+        || !matches!(h.kind(), 2 | 3)
+        || h.index() >= if h.kind() == 2 { 20_000 } else { 8 }
+    {
+        return Err(invalid(
+            "split case requires an existing normal/call typed holder",
+        ));
+    }
+    let frame = request.frame;
+    let step = frame.pre_step;
+    let previous = u32::from(h.split());
+    let candidate = choice_candidate(i64::from(previous), &[0, 1], request.input);
+    if let Some(candidate) = candidate {
+        h.set_split(candidate as u8);
+        channel_save_cached_into(
+            w,
+            h,
+            state,
+            CacheWrite {
+                key: 0x106,
+                previous: None,
+            },
+            request.context,
+            effects,
+            before_store,
+        )?;
+        if frame.layout == 0 && previous != candidate as u32 {
+            let notice = Notification {
+                id: if candidate == 0 { 0x46 } else { 0x45 },
+                synchronous: true,
+                arg1: 0,
+                arg2: 0,
+            };
+            before_notice(&notice, frame)?;
+            effects.notifications.push(notice);
+            frame.active = if candidate == 0 {
+                frame.selection_first
+            } else {
+                frame.node_index
+            };
+            frame.display_mode = 2;
+        }
+        frame.notify_flags |= 0x20;
+        let notice = Notification {
+            id: 0x3c,
+            synchronous: false,
+            arg1: 1,
+            arg2: 0,
+        };
+        before_notice(&notice, frame)?;
+        effects.notifications.push(notice);
+    }
+    frame.node_flags = (frame.node_flags & !1) | u8::from(step > 1);
+    Ok(SplitOutcome {
+        stored: candidate.is_some(),
+        candidate,
+        popup_requested: request.input == ChoiceInput::Begin,
+    })
 }
 
 impl NormalMemory {
@@ -1204,15 +2032,7 @@ impl NormalMemory {
         h: &DecodedRecord,
         pending: &mut PendingName,
     ) -> Result<bool, Error> {
-        if self.used_slots() >= 500 {
-            pending.reset();
-            return Ok(false);
-        }
-        self.allocate(
-            h.index() as usize / 200,
-            h.index() as usize / 2 % 100..h.index() as usize / 2 % 100 + 1,
-        )?;
-        Ok(true)
+        allocate_registration_into(&mut self.working, h, pending)
     }
     fn finish_registration(
         &mut self,
@@ -1240,7 +2060,7 @@ impl NormalMemory {
             }
             h.copy_body_from(&initial_holder);
         }
-        apply_frequency_candidate(h,candidate,pending)
+        apply_frequency_candidate(h, candidate, pending)
     }
 }
 
@@ -1376,7 +2196,7 @@ impl NormalMemory {
             ));
         }
         let ranges = request.context.ranges;
-        let first=frequency_first(h,&request)?;
+        let first = frequency_first(h, &request)?;
         let mut out = FrequencyOutcome {
             stored: false,
             first,
@@ -1388,7 +2208,7 @@ impl NormalMemory {
         if first.accepted || matches!(request.input, NumberInput::Text(_)) && state.pending.active {
             let was_empty = !h.valid();
             if !was_empty || self.allocate_registration(h, &mut state.pending)? {
-                let (second,class)=frequency_second(h,first.candidate,&request)?;
+                let (second, class) = frequency_second(h, first.candidate, &request)?;
                 out.second = Some(second);
                 let source = ranges.default_source_selector(None)?;
                 self.finish_registration(
@@ -1432,7 +2252,7 @@ impl NormalMemory {
             // Both flags are native normal-return writes, including capacity0.
             out.notify_flags |= 0x18;
         }
-        frequency_tail(h,state,&request,&mut out)?;
+        frequency_tail(h, state, &request, &mut out)?;
         Ok(out)
     }
 
@@ -1481,35 +2301,41 @@ impl NormalMemory {
             return Err(invalid("normal name requires a normal typed holder"));
         }
         let paired = h.split() == 1 || request.frame.layout != 0;
-        if let Some(mut candidate)=name_candidate_input(h,&state.pending,request.input,request.frame.layout,text_effect)? {
-                if h.valid() {
-                    candidate.resize(16, b' ');
-                    h.set_name(candidate.as_slice().try_into().expect("native name width"));
-                    self.native_save_cached(
-                        h,
-                        state,
-                        CacheWrite {
-                            key: 0x105,
-                            previous: None,
-                        },
-                        request.context,
-                        effects,
-                        before_store,
-                    )?;
-                    text_effect.stored = true;
-                } else {
-                    if !candidate.is_empty()
-                        && self.used_slots() < 500
-                        && request.notification.is_none()
-                    {
-                        return Err(invalid(
-                            "pending name requires the actual24-byte notification context",
-                        ));
-                    }
-                    if self.native_pending_name(h, &candidate, &mut state.pending)? {
-                        text_effect.pending_requested = request.notification;
-                    }
+        if let Some(mut candidate) = name_candidate_input(
+            h,
+            &state.pending,
+            request.input,
+            request.frame.layout,
+            text_effect,
+        )? {
+            if h.valid() {
+                candidate.resize(16, b' ');
+                h.set_name(candidate.as_slice().try_into().expect("native name width"));
+                self.native_save_cached(
+                    h,
+                    state,
+                    CacheWrite {
+                        key: 0x105,
+                        previous: None,
+                    },
+                    request.context,
+                    effects,
+                    before_store,
+                )?;
+                text_effect.stored = true;
+            } else {
+                if !candidate.is_empty()
+                    && self.used_slots() < 500
+                    && request.notification.is_none()
+                {
+                    return Err(invalid(
+                        "pending name requires the actual24-byte notification context",
+                    ));
                 }
+                if self.native_pending_name(h, &candidate, &mut state.pending)? {
+                    text_effect.pending_requested = request.notification;
+                }
+            }
         }
         request.frame.node_flags = (request.frame.node_flags & !1) | u8::from(paired);
         Ok(())
@@ -1569,63 +2395,22 @@ impl NormalMemory {
         request: SplitRequest<'_>,
         effects: &mut Effects,
         before_store: impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
-        mut before_notice: impl FnMut(&Notification, &mut SplitFrame) -> Result<(), Error>,
+        before_notice: impl FnMut(&Notification, &mut SplitFrame) -> Result<(), Error>,
     ) -> Result<SplitOutcome, Error> {
-        use crate::icf::settings::extended::{ChoiceInput, choice_candidate};
         if h.kind() != 2 || h.index() >= 20_000 || !h.valid() {
             return Err(invalid(
                 "split case requires an existing normal typed holder",
             ));
         }
-        let frame = request.frame;
-        let step = frame.pre_step;
-        let previous = u32::from(h.split());
-        let candidate = choice_candidate(i64::from(previous), &[0, 1], request.input);
-        if let Some(candidate) = candidate {
-            h.set_split(candidate as u8);
-            self.native_save_cached(
-                h,
-                state,
-                CacheWrite {
-                    key: 0x106,
-                    previous: None,
-                },
-                request.context,
-                effects,
-                before_store,
-            )?;
-            if frame.layout == 0 && previous != candidate as u32 {
-                let notice = Notification {
-                    id: if candidate == 0 { 0x46 } else { 0x45 },
-                    synchronous: true,
-                    arg1: 0,
-                    arg2: 0,
-                };
-                before_notice(&notice, frame)?;
-                effects.notifications.push(notice);
-                frame.active = if candidate == 0 {
-                    frame.selection_first
-                } else {
-                    frame.node_index
-                };
-                frame.display_mode = 2;
-            }
-            frame.notify_flags |= 0x20;
-            let notice = Notification {
-                id: 0x3c,
-                synchronous: false,
-                arg1: 1,
-                arg2: 0,
-            };
-            before_notice(&notice, frame)?;
-            effects.notifications.push(notice);
-        }
-        frame.node_flags = (frame.node_flags & !1) | u8::from(step > 1);
-        Ok(SplitOutcome {
-            stored: candidate.is_some(),
-            candidate,
-            popup_requested: request.input == ChoiceInput::Begin,
-        })
+        channel_split_input_into(
+            &mut self.working,
+            h,
+            state,
+            request,
+            effects,
+            before_store,
+            before_notice,
+        )
     }
 }
 
@@ -1954,8 +2739,9 @@ impl NormalMemory {
             )?;
         }
         let old = self.working.clone();
-        transfer(
-            self,
+        transfer_into(
+            &mut self.working,
+            ChannelKind::Normal,
             &old,
             s.typed(neighbor),
             0,
@@ -1964,8 +2750,9 @@ impl NormalMemory {
             &mut before_store,
         )?;
         let old = self.working.clone();
-        transfer(
-            self,
+        transfer_into(
+            &mut self.working,
+            ChannelKind::Normal,
             &old,
             s.typed(s.first),
             0,
@@ -2052,8 +2839,9 @@ impl NormalMemory {
             }
             processed += 1;
         }
-        let result = transfer(
-            self,
+        let result = transfer_into(
+            &mut self.working,
+            ChannelKind::Normal,
             &old,
             s.typed(start),
             mode,
@@ -2101,15 +2889,16 @@ fn prepare_source(h: &mut DecodedRecord) {
 }
 
 fn write_source(
-    model: &mut NormalMemory,
+    image: &mut [u8],
+    kind: ChannelKind,
     old: &[u8],
     index: u32,
     source: &mut DecodedRecord,
     preserve: bool,
     before_store: &mut impl FnMut(u32, &ChannelWrite<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let mut target = record::reset_holder(2, index, 0);
-    record_image::load_channel_into(old, ChannelKind::Normal, index, &mut target)?;
+    let mut target = record::reset_holder(0, index, 0);
+    record_image::load_channel_into(old, kind, index, &mut target)?;
     prepare_source(source);
     let saved = (
         source.split(),
@@ -2125,14 +2914,10 @@ fn write_source(
         );
     }
     source.set_header(source.kind(), index, target.binding());
-    if record_image::channel_address(model.working(), ChannelKind::Normal, index)?.is_some() {
-        record_image::store_channel_into(
-            &mut model.working,
-            ChannelKind::Normal,
-            index,
-            source,
-            |write| before_store(index, write),
-        )?;
+    if record_image::channel_address(image, kind, index)?.is_some() {
+        record_image::store_channel_into(image, kind, index, source, |write| {
+            before_store(index, write)
+        })?;
     } else if source.valid() {
         return Err(invalid("native valid paste destination was not allocated"));
     }
@@ -2145,8 +2930,9 @@ fn write_source(
 }
 
 /// A124/A328: preserve the FE double-call and separate returned native counter.
-fn transfer(
-    model: &mut NormalMemory,
+fn transfer_into(
+    image: &mut [u8],
+    kind: ChannelKind,
     old: &[u8],
     mut start: u32,
     mode: u32,
@@ -2161,8 +2947,8 @@ fn transfer(
         0 | 2 => {
             if mode == 0 {
             } else if mode == 2 {
-                let mut target = record::reset_holder(2, start, 0);
-                record_image::load_channel_into(old, ChannelKind::Normal, start, &mut target)?;
+                let mut target = record::reset_holder(0, start, 0);
+                record_image::load_channel_into(old, kind, start, &mut target)?;
                 if target.valid() {
                     preserve = true;
                 } else {
@@ -2179,8 +2965,8 @@ fn transfer(
             if limit != 1 {
                 limit = limit.wrapping_sub(1);
             }
-            let mut target = record::reset_holder(2, start, 0);
-            record_image::load_channel_into(old, ChannelKind::Normal, start, &mut target)?;
+            let mut target = record::reset_holder(0, start, 0);
+            record_image::load_channel_into(old, kind, start, &mut target)?;
             if target.valid() {
                 preserve = true;
             } else {
@@ -2202,7 +2988,8 @@ fn transfer(
             continue;
         }
         write_source(
-            model,
+            image,
+            kind,
             old,
             start.wrapping_add(writes as u32),
             source,
@@ -2212,7 +2999,8 @@ fn transfer(
         writes += 1;
         if duplicate {
             write_source(
-                model,
+                image,
+                kind,
                 old,
                 start.wrapping_add(writes as u32),
                 source,
@@ -2238,6 +3026,324 @@ fn transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_entry_uses_signed_code_source_delta_and_keeps_callsign_option_separate() {
+        let mut h = record::reset_holder(2, 10, 7);
+        h.set_group(4);
+        h.set_valid(false);
+        let caller = ChannelCaller {
+            code: -1,
+            command: 0,
+            blocked: false,
+            node_index: i32::MIN,
+            node_back: 1,
+        };
+        assert_eq!(
+            channel_entry(&h, 0x108, caller, false).unwrap(),
+            ChannelEntry::Redirect {
+                key: 0x107,
+                index: i32::MAX,
+                code: -1
+            }
+        );
+        assert_eq!(
+            channel_entry(&h, 0x114, caller, true).unwrap(),
+            ChannelEntry::Edit
+        );
+        assert!(matches!(
+            channel_entry(&h, 0x114, caller, false).unwrap(),
+            ChannelEntry::Redirect { .. }
+        ));
+        assert_eq!(
+            channel_entry(&h, 0x105, caller, false).unwrap(),
+            ChannelEntry::Edit
+        );
+        assert_eq!(
+            channel_entry(
+                &h,
+                0x108,
+                ChannelCaller {
+                    code: 0x10008,
+                    ..caller
+                },
+                false
+            )
+            .unwrap(),
+            ChannelEntry::Edit
+        );
+        assert_eq!(
+            channel_entry(
+                &h,
+                0x108,
+                ChannelCaller {
+                    command: 0xdc,
+                    ..caller
+                },
+                true
+            )
+            .unwrap(),
+            ChannelEntry::Blocked
+        );
+        h.set_valid(true);
+        h.set_channel_field(ChannelField::FrequencyHz, 470_000_000);
+        assert_eq!(
+            channel_entry(&h, 0x108, caller, false).unwrap(),
+            ChannelEntry::Edit
+        );
+        h.set_channel_field(ChannelField::FrequencyHz, 470_000_001);
+        assert!(matches!(
+            channel_entry(&h, 0x108, caller, false).unwrap(),
+            ChannelEntry::Redirect { .. }
+        ));
+        let payload = name_notification(&h, 701).unwrap();
+        let words: Vec<_> = payload
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert_eq!(words, [3, 701, 0x105, 4, 0, 2]);
+    }
+
+    #[test]
+    fn callsign_modal_wrapper_keeps_d1_false_notices_and_d2_cancel_two_savers() {
+        use crate::icf::{MemoryCallsign, callsign_dialog as d};
+        let ranges = crate::icf::frequency::Ranges::generate(
+            &crate::icf::context::Context::from_bytes([0; 24]),
+            None,
+        )
+        .unwrap();
+        let mut w = vec![0; 0x4997a];
+        let mut h = record::reset_holder(3, 0, 17);
+        h.set_valid(true);
+        h.set_mode(16);
+        h.set_channel_field(ChannelField::FrequencyHz, 145_000_000);
+        h.set_channel_field(ChannelField::Duplex, 0);
+        h.set_callsign(MemoryCallsign::Your, b"CQCQCQ  ");
+        record_image::store_channel_into(&mut w, ChannelKind::Call, 0, &mut h, |_| Ok(())).unwrap();
+        let current = w.clone();
+        let sources = d::Sources {
+            current: &current,
+            defaults: &[],
+            ranges: &ranges,
+            system_langid: None,
+            language: 0,
+        };
+        let reads = d::ReadInputs {
+            ur_name_tail: Some([b' '; 8]),
+            blank_source_index: Some(2500),
+            string_tail: &[0; 16],
+            initial_first_marker: None,
+        };
+        let context = EditorContext {
+            ranges: &ranges,
+            generation: ReferenceImage::Separate(&[]),
+        };
+        let mut state = EditorState::initialized();
+        for (modal, count, stored, accepted, ids) in [
+            (
+                CallsignModal::List(d::ListSelection {
+                    category: 0,
+                    name: 0,
+                    call: 0,
+                    modal_result: 0,
+                    checkbox: false,
+                }),
+                0,
+                false,
+                false,
+                vec![0x11, 0x39],
+            ),
+            (
+                CallsignModal::List(d::ListSelection {
+                    category: 0,
+                    name: 0,
+                    call: 0,
+                    modal_result: 0x100,
+                    checkbox: false,
+                }),
+                1,
+                true,
+                true,
+                vec![0x11, 0x39],
+            ),
+            (
+                CallsignModal::Dr { modal_result: 2 },
+                2,
+                true,
+                false,
+                vec![0x18, 0x18, 0x3c],
+            ),
+        ] {
+            let mut effects = Effects::default();
+            let mut saves = 0;
+            let out = channel_callsign_modal_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                CallsignModalRequest {
+                    field: MemoryCallsign::Your,
+                    modal,
+                    sources: &sources,
+                    reads: &reads,
+                    context,
+                },
+                &mut effects,
+                |dialog| dialog.action(&sources, d::Action::UrText(b"NEWCALL"), &reads),
+                |_, write| {
+                    if write.stage() == record::ChannelStage::Frequency {
+                        saves += 1;
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                (out.stored, out.accepted, out.al),
+                (stored, accepted, false)
+            );
+            assert_eq!(saves, count);
+            assert_eq!(
+                effects
+                    .notifications
+                    .iter()
+                    .map(|n| n.id)
+                    .collect::<Vec<_>>(),
+                ids
+            );
+            assert_eq!(h.callsign(MemoryCallsign::Your), b"CQCQCQ  ");
+        }
+        assert_ne!(
+            u32::from_le_bytes(h.as_bytes()[0xe4..0xe8].try_into().unwrap()),
+            0
+        );
+        let mut effects = Effects::default();
+        assert!(
+            channel_callsign_modal_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                CallsignModalRequest {
+                    field: MemoryCallsign::Your,
+                    modal: CallsignModal::Dr { modal_result: 1 },
+                    sources: &sources,
+                    reads: &reads,
+                    context
+                },
+                &mut effects,
+                |_| Err(invalid("injected action failure")),
+                |_, _| panic!("save after action error")
+            )
+            .is_err()
+        );
+        assert_eq!(
+            effects
+                .notifications
+                .iter()
+                .map(|n| n.id)
+                .collect::<Vec<_>>(),
+            [0x18]
+        );
+    }
+    #[test]
+    fn callsign_modal_initial_source_allocates_and_mirrors_only_after_accept() {
+        use crate::icf::{MemoryCallsign, callsign_dialog as d};
+        let ranges = crate::icf::frequency::Ranges::generate(
+            &crate::icf::context::Context::from_bytes([0; 24]),
+            None,
+        )
+        .unwrap();
+        let mut w = model().working().to_vec();
+        let before = NormalMemory::from_working(w.clone()).unwrap().used_slots();
+        let mut current = w.clone();
+        current[0x49914..0x49978].fill(0);
+        current[0x49914..0x49916].copy_from_slice(&1u16.to_le_bytes());
+        current[0x49978..0x4997a].fill(0);
+        let mut source = record::reset_holder(0x0c, 0, 0);
+        source.set_valid(true);
+        source.set_name(b"SELF SOURCE     ");
+        source.set_repeater_field(record::RepeaterField::Mode, 2);
+        source.set_repeater_text(record::RepeaterText::Call, b"RPT777 A");
+        source.set_repeater_text(record::RepeaterText::Gateway, b"RPT777 G");
+        source.set_channel_field(ChannelField::FrequencyHz, 145_250_000);
+        source.set_channel_field(ChannelField::Duplex, 1);
+        source.set_offset_hz(600_000);
+        crate::repeater::working::save_into(&mut current, 0, &source).unwrap();
+        let defaults = vec![0; 0x4997a];
+        let sources = d::Sources {
+            current: &current,
+            defaults: &defaults,
+            ranges: &ranges,
+            system_langid: None,
+            language: 0,
+        };
+        let reads = d::ReadInputs {
+            blank_source_index: Some(2500),
+            string_tail: &[0; 16],
+            initial_first_marker: Some(7),
+            ..Default::default()
+        };
+        let context = EditorContext {
+            ranges: &ranges,
+            generation: ReferenceImage::Separate(&[]),
+        };
+        let mut state = EditorState::initialized();
+        for result in [2, 1] {
+            let mut h = record::reset_holder(2, 10, 31);
+            record_image::load_channel_into(&w, ChannelKind::Normal, 10, &mut h).unwrap();
+            assert!(!h.valid());
+            let mut saves = 0;
+            let out = channel_callsign_modal_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                CallsignModalRequest {
+                    field: MemoryCallsign::Repeater1,
+                    modal: CallsignModal::Dr {
+                        modal_result: result,
+                    },
+                    sources: &sources,
+                    reads: &reads,
+                    context,
+                },
+                &mut Effects::default(),
+                |dialog| {
+                    dialog.action(
+                        &sources,
+                        d::Action::SourceList(d::ListSelection {
+                            category: 1,
+                            name: 0,
+                            call: 0,
+                            modal_result: 1,
+                            checkbox: false,
+                        }),
+                        &reads,
+                    )
+                },
+                |_, write| {
+                    if write.stage() == record::ChannelStage::Frequency {
+                        saves += 1;
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert!(out.stored);
+            assert_eq!(out.al, result == 1);
+            assert_eq!(saves, if result == 1 { 3 } else { 0 });
+            let model = NormalMemory::from_working(w.clone()).unwrap();
+            assert_eq!(model.used_slots(), before + usize::from(result == 1));
+            if result == 1 {
+                for index in [10, 11] {
+                    let h = holder(&model, index).unwrap();
+                    assert!(h.valid());
+                    assert_eq!(h.channel_field(ChannelField::FrequencyHz), 145_250_000);
+                    assert_eq!(h.mode(), 16);
+                    assert_eq!(h.callsign(MemoryCallsign::Your), b"CQCQCQ  ");
+                    assert_eq!(h.callsign(MemoryCallsign::Repeater1), b"RPT777 A");
+                }
+            }
+        }
+    }
     use record::ChannelStage;
     fn model() -> NormalMemory {
         let mut memory = vec![0xa6; 0x4997a];
@@ -3464,6 +4570,517 @@ mod tests {
         h.set_channel_field(ChannelField::FrequencyHz, 146_000_002);
         m.store_channel(5, &mut h).unwrap();
         m
+    }
+    fn call_model() -> Vec<u8> {
+        let mut w = model().working().to_vec();
+        w.truncate(0x3c9c0);
+        w[0x3c84b] = 100;
+        w[0x3c84c..0x3c84e].copy_from_slice(&0u16.to_le_bytes());
+        w[0x3c84a] = 0;
+        w[0x3a8c9] = 0;
+        w[0x3a8ca] = 0;
+        for index in 0..8 {
+            let mut h = record::reset_holder(3, index, 91);
+            h.set_mode(13);
+            h.set_filter(1);
+            h.set_name(b"CALL NATIVE     ");
+            h.set_channel_field(
+                ChannelField::FrequencyHz,
+                if index < 4 { 145_000_000 } else { 433_000_000 },
+            );
+            h.set_offset_hz(600_000);
+            record_image::store_channel_into(&mut w, ChannelKind::Call, index, &mut h, |_| Ok(()))
+                .unwrap();
+        }
+        w
+    }
+    fn call_holder(w: &[u8], index: u32) -> DecodedRecord {
+        let mut h = record::reset_holder(3, index, 91);
+        record_image::load_channel_into(w, ChannelKind::Call, index, &mut h).unwrap();
+        h
+    }
+    #[test]
+    fn call_post_save_uses_live_type1a_and_never_clamps_selection_bytes_or_signed_row() {
+        let q = crate::icf::context::Context::from_bytes([0; 24]);
+        let ranges = crate::icf::frequency::Ranges::generate(&q, None).unwrap();
+        for (frequency, row, selected, expected) in [
+            (145_000_000, 0, 0, true),
+            (145_000_000, 1, 1, true),
+            (145_000_000, 2, 0, false),
+            (433_000_000, 2, 0, true),
+            (433_000_000, 3, 1, true),
+            (433_000_000, 1, 1, false),
+            (145_000_000, 0, 2, false),
+            (433_000_000, 3, 255, false),
+            (145_000_000, -2, 0, true),
+        ] {
+            let mut w = call_model();
+            w[0x3c84a] = 1;
+            w[0x3a780] = selected;
+            w[0x3a781] = selected;
+            let mut dr = record::reset_holder(0x1a, 0, 0);
+            dr.set_valid(true);
+            dr.set_mode(13);
+            dr.set_channel_field(ChannelField::FrequencyHz, frequency);
+            record_image::store_paired_into(&mut w, 0x1a, 0, &mut dr, |_, _| Ok(())).unwrap();
+            let before = w.clone();
+            let mut effects = Effects {
+                home_invalidated: 0xa5,
+                dr_invalidated: 0x5a,
+                ..Effects::default()
+            };
+            call_after_into(&w, row, &ranges, &mut effects).unwrap();
+            assert_eq!(effects.dr_invalidated, if expected { 1 } else { 0x5a });
+            assert_eq!(effects.home_invalidated, if row == 0 { 1 } else { 0xa5 });
+            assert_eq!(w, before);
+        }
+    }
+    #[test]
+    fn call_consumers_share_field_engine_two_savers_and_do_not_require_normal_maps() {
+        use crate::icf::settings::extended::{ChoiceInput, NumberInput, TextInput};
+        let q = crate::icf::context::Context::from_bytes([0; 24]);
+        let ranges = crate::icf::frequency::Ranges::generate(&q, None).unwrap();
+        for family in 0..7 {
+            let mut w = call_model();
+            let mut h = call_holder(&w, 0);
+            if family == 5 {
+                h.set_mode(16);
+                record_image::store_channel_into(&mut w, ChannelKind::Call, 0, &mut h, |_| Ok(()))
+                    .unwrap();
+            }
+            assert_eq!((h.group(), h.range_index(), h.side()), (100, 12, 0));
+            let other = w[0xa21c + 34..0xa21c + 67].to_vec();
+            let mut state = EditorState::initialized();
+            let mut effects = Effects::default();
+            let context = EditorContext {
+                ranges: &ranges,
+                generation: ReferenceImage::Separate(&[]),
+            };
+            let mut saves = 0;
+            let mut before = |_: u32, event: &ChannelWrite<'_>| {
+                if event.stage() == ChannelStage::Frequency {
+                    saves += 1;
+                }
+                Ok(())
+            };
+            match family {
+                0 => {
+                    let out = call_choice_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        ChoiceRequest {
+                            field: ChannelChoice::Duplex,
+                            input: ChoiceInput::Next,
+                            context,
+                            selection: None,
+                        },
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(out.stored);
+                    assert_eq!(h.channel_field(ChannelField::Duplex), 1);
+                }
+                1 => {
+                    let out = call_enum_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        EnumRequest {
+                            field: ChannelEnum::Mode,
+                            input: ChoiceInput::Next,
+                            context,
+                            warning_bits: Some(0x81),
+                        },
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(out.choice.stored);
+                    assert_eq!(h.mode(), 16);
+                    assert_eq!(out.warning_bits, Some(0x81));
+                }
+                2 => {
+                    let out = call_offset_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        OffsetRequest {
+                            input: NumberInput::Text(b"0.00015"),
+                            point: b'.',
+                            context,
+                        },
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(out.accepted);
+                    assert_eq!(h.offset_hz(), 200);
+                }
+                3 => {
+                    let mut effect = ToneEffect::default();
+                    let mut upper = |s: &mut [u8]| {
+                        s.make_ascii_uppercase();
+                        Ok(())
+                    };
+                    call_tone_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        ToneRequest {
+                            input: ToneInput {
+                                field: ToneField::Tx,
+                                input: NumberInput::Text(b"88.5"),
+                                point: b'.',
+                                live_q: Some(&q),
+                                inline: false,
+                                first: None,
+                                upper: &mut upper,
+                            },
+                            context,
+                        },
+                        &mut effect,
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(effect.stored);
+                    assert_eq!(h.tx_tone(), 8);
+                }
+                4 => {
+                    let mut effect = NameEffect::default();
+                    let mut frame = ChoiceFrame {
+                        layout: 0,
+                        node_flags: 0xa5,
+                    };
+                    call_name_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        NameRequest {
+                            input: TextInput::Text(b"A\0CALL "),
+                            context,
+                            frame: &mut frame,
+                            notification: None,
+                        },
+                        &mut effect,
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(effect.stored);
+                    assert_eq!(h.name(), b"A CALL          ");
+                    assert_eq!(frame.node_flags, 0xa4);
+                }
+                5 => {
+                    let mut flags = 0xa5;
+                    let out = call_code_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        CodeRequest {
+                            input: NumberInput::Text(b"09"),
+                            first: None,
+                            node_flags: &mut flags,
+                            context,
+                        },
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(out.stored);
+                    assert_eq!(h.channel_field(ChannelField::DigitalCode), 9);
+                    assert_eq!(flags, 0xa6);
+                }
+                _ => {
+                    let out = call_frequency_input_into(
+                        &mut w,
+                        &mut h,
+                        &mut state,
+                        FrequencyRequest {
+                            input: NumberInput::Text(b"150"),
+                            point: b'.',
+                            context,
+                            live_q: &q,
+                            warning_bits: 0x81,
+                            focus: 0,
+                        },
+                        &mut effects,
+                        &mut before,
+                    )
+                    .unwrap();
+                    assert!(out.stored);
+                    assert_eq!(out.first.candidate, 150_000_000);
+                    assert_eq!(out.second.unwrap().candidate, 148_000_000);
+                    assert_eq!(h.channel_field(ChannelField::FrequencyHz), 148_000_000);
+                    assert_eq!(out.notify_flags, 0x18);
+                }
+            }
+            assert_eq!(saves, 2);
+            assert_eq!(&w[0xa21c + 34..0xa21c + 67], other);
+            assert_eq!(effects.home_invalidated, 1);
+        }
+        let mut w = call_model();
+        let mut h = call_holder(&w, 6);
+        let mut state = EditorState::initialized();
+        let out = call_frequency_input_into(
+            &mut w,
+            &mut h,
+            &mut state,
+            FrequencyRequest {
+                input: NumberInput::Text(b"400"),
+                point: b'.',
+                context: EditorContext {
+                    ranges: &ranges,
+                    generation: ReferenceImage::Separate(&[]),
+                },
+                live_q: &q,
+                warning_bits: 0,
+                focus: 0,
+            },
+            &mut Effects::default(),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(h.range_index(), 13);
+        assert_eq!(out.first.candidate, 400_000_000);
+        assert_eq!(out.second.unwrap().candidate, 420_000_000);
+    }
+    #[test]
+    fn callsign_direct_text_uses_logical_slots_full_upper_and_two_real_savers() {
+        use crate::icf::{MemoryCallsign, settings::extended::TextInput};
+        let q = crate::icf::context::Context::from_bytes([0; 24]);
+        let ranges = crate::icf::frequency::Ranges::generate(&q, None).unwrap();
+        for field in [
+            MemoryCallsign::Your,
+            MemoryCallsign::Repeater1,
+            MemoryCallsign::Repeater2,
+        ] {
+            let mut w = call_model();
+            let mut h = call_holder(&w, 0);
+            h.set_mode(16);
+            record_image::store_channel_into(&mut w, ChannelKind::Call, 0, &mut h, |_| Ok(()))
+                .unwrap();
+            let other = w[0xa21c + 34..0xa21c + 67].to_vec();
+            let mut state = EditorState::initialized();
+            let mut effects = Effects::default();
+            let mut saves = 0;
+            let mut inputs = Vec::new();
+            let mut upper = |v| {
+                inputs.push(v);
+                Ok(match v {
+                    -128 => 65,
+                    -127 => 0x141,
+                    other => other,
+                })
+            };
+            assert!(
+                channel_callsign_text_input_into(
+                    &mut w,
+                    &mut h,
+                    &mut state,
+                    CallsignTextRequest {
+                        field,
+                        input: TextInput::Text(b"\x80\x81\xffa\0b"),
+                        right_word: false,
+                        upper: &mut upper,
+                        context: EditorContext {
+                            ranges: &ranges,
+                            generation: ReferenceImage::Separate(&[])
+                        }
+                    },
+                    &mut effects,
+                    |_, event| {
+                        if event.stage() == ChannelStage::Frequency {
+                            saves += 1;
+                        }
+                        Ok(())
+                    }
+                )
+                .unwrap()
+            );
+            assert_eq!(inputs, [-128, -127, -1, 97, 0, 98]);
+            assert_eq!(h.callsign(field), b"A  A B  ");
+            assert_eq!(saves, 2);
+            assert_eq!(&w[0xa21c + 34..0xa21c + 67], other);
+            assert_eq!(effects.notifications.last().unwrap().id, 0x3c);
+        }
+        let mut w = call_model();
+        let mut h = call_holder(&w, 0);
+        h.set_mode(16);
+        h.set_callsign(MemoryCallsign::Your, b"OLDTAIL ");
+        let before = w.clone();
+        let mut state = EditorState::initialized();
+        let mut effects = Effects::default();
+        let mut upper = |v| {
+            if v < 0 {
+                Err(invalid("native upper failed"))
+            } else {
+                Ok(v)
+            }
+        };
+        assert!(
+            channel_callsign_text_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                CallsignTextRequest {
+                    field: MemoryCallsign::Your,
+                    input: TextInput::Text(b"a\x80"),
+                    right_word: false,
+                    upper: &mut upper,
+                    context: EditorContext {
+                        ranges: &ranges,
+                        generation: ReferenceImage::Separate(&[])
+                    }
+                },
+                &mut effects,
+                |_, _| panic!("upper failure precedes every saver")
+            )
+            .is_err()
+        );
+        assert_eq!(h.callsign(MemoryCallsign::Your), b"ALDTAIL ");
+        assert_eq!(w, before);
+        assert!(effects.notifications.is_empty());
+    }
+
+    #[test]
+    fn call_split_shares_full_candidate_two_savers_and_pre_step_tail() {
+        use crate::icf::settings::extended::ChoiceInput;
+        let q = crate::icf::context::Context::from_bytes([0; 24]);
+        let ranges = crate::icf::frequency::Ranges::generate(&q, None).unwrap();
+        for (candidate, raw, notices) in [
+            (Some(1), 1, vec![0x45, 0x3c]),
+            (Some(256), 0, vec![0x45, 0x3c]),
+            (Some(0), 0, vec![0x3c]),
+            (None, 0, vec![]),
+        ] {
+            let input = candidate.map_or(ChoiceInput::Cancel, |candidate| {
+                ChoiceInput::Selected(crate::icf::settings::Selection {
+                    key: 1,
+                    phase: 2,
+                    candidate,
+                    accepted: true,
+                })
+            });
+            let mut w = call_model();
+            let mut h = call_holder(&w, 0);
+            let other = w[0xa21c + 34..0xa21c + 67].to_vec();
+            let mut state = EditorState::initialized();
+            let mut effects = Effects::default();
+            let mut frame = split_frame();
+            frame.pre_step = 1;
+            let mut saves = 0;
+            let out = channel_split_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                SplitRequest {
+                    input,
+                    context: EditorContext {
+                        ranges: &ranges,
+                        generation: ReferenceImage::Separate(&[]),
+                    },
+                    frame: &mut frame,
+                },
+                &mut effects,
+                |_, event| {
+                    if event.stage() == ChannelStage::Frequency {
+                        saves += 1;
+                    }
+                    Ok(())
+                },
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(out.stored, !notices.is_empty());
+            assert_eq!(saves, if out.stored { 2 } else { 0 });
+            assert_eq!(h.split(), raw);
+            assert_eq!(frame.node_flags, 0xa4);
+            assert_eq!(
+                effects
+                    .notifications
+                    .iter()
+                    .map(|n| n.id)
+                    .collect::<Vec<_>>(),
+                notices
+            );
+            assert_eq!(&w[0xa21c + 34..0xa21c + 67], other);
+        }
+    }
+
+    #[test]
+    fn call_sel_rejection_and_late_g_failure_keep_real_cache_and_dr_prefixes() {
+        use crate::icf::settings::{Selection as InputSelection, extended::ChoiceInput};
+        let q = crate::icf::context::Context::from_bytes([0; 24]);
+        let ranges = crate::icf::frequency::Ranges::generate(&q, None).unwrap();
+        let mut w = call_model();
+        let mut h = call_holder(&w, 0);
+        let original = w.clone();
+        let mut state = EditorState::initialized();
+        let mut effects = Effects::default();
+        let context = EditorContext {
+            ranges: &ranges,
+            generation: ReferenceImage::Separate(&[]),
+        };
+        assert!(
+            call_choice_input_into(
+                &mut w,
+                &mut h,
+                &mut state,
+                ChoiceRequest {
+                    field: ChannelChoice::Selection,
+                    input: ChoiceInput::Next,
+                    context,
+                    selection: None
+                },
+                &mut effects,
+                |_, _| panic!("call SEL cannot store")
+            )
+            .is_err()
+        );
+        assert_eq!(w, original);
+        w[0x3c84a] = 1;
+        w[0x3a780] = 0;
+        let mut dr = record::reset_holder(0x1a, 0, 0);
+        dr.set_valid(true);
+        dr.set_mode(13);
+        dr.set_channel_field(ChannelField::FrequencyHz, 145_000_000);
+        record_image::store_paired_into(&mut w, 0x1a, 0, &mut dr, |_, _| Ok(())).unwrap();
+        state.filter_enabled = 1;
+        state.filter_cache.set_header(3, 0, 0);
+        state.filter_cache.set_valid(false);
+        let mut saves = 0;
+        let out = call_enum_input_into(
+            &mut w,
+            &mut h,
+            &mut state,
+            EnumRequest {
+                field: ChannelEnum::Mode,
+                input: ChoiceInput::Selected(InputSelection {
+                    key: 7,
+                    phase: 2,
+                    candidate: 0,
+                    accepted: true,
+                }),
+                context,
+                warning_bits: Some(0),
+            },
+            &mut effects,
+            |_, event| {
+                if event.stage() == ChannelStage::Frequency {
+                    saves += 1;
+                }
+                Ok(())
+            },
+        );
+        assert!(out.is_err());
+        assert_eq!(saves, 1);
+        assert_eq!(call_holder(&w, 0).mode(), 0);
+        assert_eq!((effects.home_invalidated, effects.dr_invalidated), (1, 1));
+        assert!(effects.notifications.is_empty());
+        assert!(state.filter_cache.valid());
     }
     #[test]
     fn split_full_candidate_keeps_other_side_and_ordered_notice_requests() {

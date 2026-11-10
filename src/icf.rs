@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+pub mod callsign_dialog;
 mod common;
 pub mod context;
 pub mod document;
