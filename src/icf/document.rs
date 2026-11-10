@@ -5,12 +5,18 @@
 //! and is sticky: reverting bytes alone never clears an already nonzero value.
 //! Source: A2 ownership-and-lifecycle-ba01 and accepted BA26 common edit tail.
 //!
-//! This module implements the lifecycle commit boundaries, not the stage-7/9
-//! normalizer, factory source producer, MapRev codec or native GUI. Callers must
-//! complete those explicit operations before `accept_saved`; no placeholder
-//! normalization callback silently claims that they have been implemented.
+//! File entry points consume the actual shared stage7/8/9 driver and MapRev
+//! conversion. Native GUI callbacks and file publication remain separate from
+//! image normalization; neither is replaced with a successful no-op callback.
 
 use super::{Error, image::apply_patches};
+
+#[path = "document_io.rs"]
+mod io;
+pub use io::{
+    DefaultSource, FileError, OpenStatus, ResetEffects, SaveReport, SaveRequest, SaveStatus,
+    Session, ValidationReport, ValidationSource, ValidationView,
+};
 
 /// Original Yes/No/Cancel prompt's save result, separate from the user's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,10 +60,10 @@ pub struct ActionContext {
 /// Pending normal-memory name state is outside current/baseline image contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingName {
-    /// Saved group value; no inferred current-view generation is attached.
-    pub group: u32,
-    /// Saved row value.
-    pub row: u32,
+    /// document+190 byte, tested for nonzero rather than canonicalized to bool.
+    pub active: u8,
+    /// document+194 typed index, not a group or physical-slot ordinal.
+    pub index: i32,
     /// Logical byte string, including any NULs supplied by its text producer.
     pub name: Vec<u8>,
 }
@@ -83,6 +89,10 @@ pub struct Document {
     dirty: u32,
     timer_ms: Option<u32>,
     pending_name: Option<PendingName>,
+    directory: Vec<u8>,
+    original: Vec<u8>,
+    comment: Vec<u8>,
+    extra_data: u32,
 }
 
 impl Document {
@@ -97,6 +107,10 @@ impl Document {
             dirty: 0,
             timer_ms: None,
             pending_name: None,
+            directory: Vec::new(),
+            original: Vec::new(),
+            comment: Vec::new(),
+            extra_data: 0,
         }
     }
 
@@ -131,6 +145,43 @@ impl Document {
     /// Publish/reset pending state explicitly; image replacement does not guess it.
     pub fn set_pending_name(&mut self, pending: Option<PendingName>) {
         self.pending_name = pending;
+    }
+
+    /// 53218: publish active flag, typed index and the live logical string.
+    pub fn begin_pending_name(&mut self, index: i32, name: Vec<u8>) {
+        self.pending_name = Some(PendingName {
+            active: 1,
+            index,
+            name,
+        });
+    }
+
+    /// 53240's inactive/index-FFFFFFFF/empty-string state.
+    pub fn reset_pending_name(&mut self) {
+        self.pending_name = None;
+    }
+
+    /// Test flag/index without inventing a content epoch or image identity check.
+    pub fn pending_matches(&self, index: i32) -> bool {
+        self.pending_name
+            .as_ref()
+            .is_some_and(|p| p.active != 0 && p.index == index)
+    }
+
+    /// B5A78's nonempty handoff resets pending before a later image writer.
+    /// Empty names do not take this branch. A failed later writer must not restore
+    /// the consumed pending state. Queue receivers read the live name, not a name
+    /// supposedly captured by their copied24-byte notification.
+    pub fn take_pending_nonempty(&mut self) -> Option<Vec<u8>> {
+        if self
+            .pending_name
+            .as_ref()
+            .is_some_and(|p| p.active != 0 && !p.name.is_empty())
+        {
+            self.pending_name.take().map(|p| p.name)
+        } else {
+            None
+        }
     }
 
     /// Checked atomic raw integration edit; this does not request a GUI callback.
@@ -304,8 +355,8 @@ mod tests {
     fn new_cancel_and_pending_generations_are_not_implicit_rollback() {
         let mut doc = Document::from_current(vec![1, 2], b"OLD".to_vec(), 5);
         doc.set_pending_name(Some(PendingName {
-            group: 3,
-            row: 4,
+            active: 1,
+            index: 4,
             name: b"PENDING".to_vec(),
         }));
         let before = doc.clone();
@@ -317,5 +368,23 @@ mod tests {
         assert_eq!(doc.target_revision(), 6);
         assert!(doc.path().is_empty());
         assert_eq!(doc.pending_name(), before.pending_name());
+    }
+
+    #[test]
+    fn pending_keeps_live_content_and_resets_before_a_later_writer_failure() {
+        let mut doc = Document::from_current(vec![1, 2], Vec::new(), 6);
+        doc.begin_pending_name(7, b"FIRST".to_vec());
+        let copied_payload_index = 7;
+        doc.begin_pending_name(9, b"LATER".to_vec());
+        assert!(!doc.pending_matches(copied_payload_index));
+        assert!(doc.pending_matches(9));
+        assert_eq!(doc.take_pending_nonempty().unwrap(), b"LATER");
+        assert_eq!(doc.pending_name(), None);
+        assert_eq!(doc.current(), [1, 2]);
+        assert!(doc.patch_current(&[(usize::MAX, &[0])]).is_err());
+        assert_eq!(doc.pending_name(), None);
+        doc.begin_pending_name(9, Vec::new());
+        assert_eq!(doc.take_pending_nonempty(), None);
+        assert!(doc.pending_matches(9));
     }
 }
