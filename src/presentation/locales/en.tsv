@@ -1,0 +1,495 @@
+# Message ID<TAB>UTF-8 text. Named placeholders are part of the message contract.
+field.134	Selected own callsign
+field.136	Own callsign
+field.137	Own callsign suffix
+field.13a	Transmit message
+field.13b	Selected transmit message
+field.1a5	Connection IP address list
+field.1a7	Gateway address
+field.1a8	Gateway callsign
+field.1af	Transmit picture
+field.1b2	Picture recipient callsign
+field.1c2	Manual GPS latitude
+field.1c3	Manual GPS longitude
+field.1c7	GPS alarm memory group
+field.1ce	D-PRS UNPROTO address
+field.1d1	D-PRS position symbol
+field.1da	D-PRS position comment
+field.1e6	D-PRS object name
+field.1e8	D-PRS object symbol
+field.1ea	D-PRS object comment
+field.1eb	D-PRS object latitude
+field.1ec	D-PRS object longitude
+field.1f7	D-PRS item name
+field.1f9	D-PRS item symbol
+field.1fb	D-PRS item comment
+field.1fc	D-PRS item latitude
+field.1fd	D-PRS item longitude
+field.207	D-PRS weather symbol
+field.20a	D-PRS weather comment
+field.20c	Transmitted NMEA sentences
+field.20d	GPS message
+field.210	GPS logger sentences
+field.227	NTP server address
+field.253	1 Hz tuning
+field.25b	VOX
+field.2a6	Delta frequency scan span
+field.2a8	Select memory scan group
+field.2b0	Clone comment
+field.2c0	CW keyer memory
+field.2d8	RTTY FFT waveform color
+field.2de	RTTY received text color
+field.2df	RTTY transmitted text color
+field.31e	Access point SSID
+field.31f	Access point password
+field.321	Network name
+field.328	User 1 identifier
+field.329	User 1 password
+field.32b	User 2 identifier
+field.32c	User 2 password
+field.32e	Network radio name
+field.359	Audio FFT waveform color
+field.35d	Audio oscilloscope waveform color
+field.35e	Spectrum scope mode
+field.36a	Spectrum scope waveform fill color
+field.36b	Spectrum scope waveform outline color
+field.36c	Spectrum scope maximum hold color
+choice.transmit_data_high	DATA transmit bandwidth: upper cutoff frequency
+choice.transmit_data_low	DATA transmit bandwidth: lower cutoff frequency
+choice.transmit_mid_high	Medium transmit bandwidth: upper cutoff frequency
+choice.transmit_mid_low	Medium transmit bandwidth: lower cutoff frequency
+choice.transmit_narrow_high	Narrow transmit bandwidth: upper cutoff frequency
+choice.transmit_narrow_low	Narrow transmit bandwidth: lower cutoff frequency
+choice.transmit_wide_high	Wide transmit bandwidth: upper cutoff frequency
+choice.transmit_wide_low	Wide transmit bandwidth: lower cutoff frequency
+diagnostic.address_overflow	The data address exceeds the supported range.
+diagnostic.ambiguous_field	Select the semantic field descriptor instead of its shared source key.
+diagnostic.checksum_mismatch	The checksum does not match the data.
+diagnostic.conversion	The value could not be converted.
+diagnostic.index	 (zero-based index: {index})
+diagnostic.invalid	The supplied data is invalid.
+diagnostic.invalid_index	The requested index is outside this field's axis.
+diagnostic.invalid_symbol_width	A symbol requires exactly two raw bytes.
+diagnostic.limit	The supported size or count limit was exceeded.
+diagnostic.line	 (line: {line})
+diagnostic.operation	The operation failed; earlier changes may remain in memory.
+diagnostic.rejected	The radio returned a nonzero clone status; the transfer was not acknowledged.
+diagnostic.row_index	The requested row does not exist.
+diagnostic.source_bounds	The operation would access data outside its source buffer.
+diagnostic.source_unavailable	Required source data or runtime context is unavailable.
+diagnostic.summary	{domain}: {message}{line}{index}{value}
+diagnostic.unregistered_field	No translation is registered for this field.
+diagnostic.unsupported	This input or operation is not supported.
+diagnostic.unsupported_command	The clone command is not supported.
+diagnostic.unsupported_language	This display language is not supported.
+diagnostic.value	 (0x{value})
+domain.clone	Clone
+domain.csv	CSV
+domain.gps_csv	GPS CSV
+domain.icf	ICF
+domain.io	I/O
+domain.presentation	Presentation
+domain.repeater_csv	Repeater CSV
+error.ambiguous_field	presentation field {key} requires its semantic descriptor
+error.invalid_index	presentation index outside field axis
+error.invalid_symbol_width	presentation symbol requires two raw bytes
+error.unregistered_field	unregistered presentation field {key}
+error.unsupported_language	unsupported presentation language
+field.105	Memory channel name
+field.106	Split operation
+field.107	Operating frequency
+field.108	Operating mode
+field.10a	IF filter
+field.10b	Duplex operation
+field.10c	Duplex frequency offset
+field.10d	Tone function
+field.10e	Transmit tone frequency
+field.10f	Receive tone frequency
+field.110	DTCS code
+field.111	DTCS polarity
+field.112	Digital squelch
+field.113	Digital squelch code
+field.114	Destination callsign (UR)
+field.115	Repeater 1 callsign (RPT1)
+field.116	Repeater 2 callsign (RPT2)
+field.117	Select memory scan
+field.120	DTMF speed
+field.123	DR noise reduction
+field.124	DR noise reduction level
+field.12b	Passband tuning
+field.146	Repeater operating mode
+field.14d	Repeater tone function
+field.14e	Repeater tone frequency
+field.14f	Repeater use selection
+field.150	Repeater position accuracy
+field.153	Repeater UTC offset
+field.18d	Automatic reply
+field.18e	DV automatic transmit
+field.18f	DV fast data
+field.190	GPS data speed in fast data mode
+field.191	Fast data PTT delay
+field.192	Digital monitor
+field.193	Digital repeater setting
+field.194	DV automatic detection
+field.195	Received callsign recording
+field.198	Received callsign display
+field.19a	Received position indicator
+field.19b	Received position display
+field.19c	Received position display time
+field.19d	Reply position display
+field.19e	Received picture indicator
+field.19f	Transmit callsign display
+field.1a1	Callsign or name in receive history
+field.1a2	Standby beep
+field.1a3	EMR receive audio level (raw)
+field.1a4	Repeater monitor timer
+field.1a6	Gateway connection type
+field.1a9	Gateway type
+field.1aa	Gateway UDP hole punching
+field.1ab	Gateway callsign setting
+field.1b0	Picture size
+field.1b1	Picture quality
+field.1bc	GPS position source
+field.1bd	SBAS augmentation
+field.1be	GLONASS reception
+field.1bf	GPS power save
+field.1c0	GPS satellite data output
+field.1c4	Manual GPS altitude
+field.1c5	GPS compass
+field.1c8	GPS memory alarm area
+field.1cb	GPS alarm memory
+field.1cc	GPS transmit mode
+field.1cd	GPS automatic transmission
+field.1cf	GPS transmit format
+field.1d0	D-PRS symbol channel
+field.1d9	D-PRS comment channel
+field.1de	D-PRS position SSID
+field.1df	D-PRS position timestamp
+field.1e0	D-PRS position altitude
+field.1e1	D-PRS position extension
+field.1e2	D-PRS position power
+field.1e3	D-PRS position antenna height
+field.1e4	D-PRS position antenna gain
+field.1e5	D-PRS position directivity
+field.1e7	D-PRS object type
+field.1ed	D-PRS object altitude
+field.1ee	D-PRS object extension
+field.1ef	D-PRS object course
+field.1f0	D-PRS object speed
+field.1f1	D-PRS object power
+field.1f2	D-PRS object antenna height
+field.1f3	D-PRS object antenna gain
+field.1f4	D-PRS object directivity
+field.1f5	D-PRS object SSID
+field.1f6	D-PRS object timestamp
+field.1f8	D-PRS item type
+field.1fe	D-PRS item altitude
+field.1ff	D-PRS item extension
+field.200	D-PRS item course
+field.201	D-PRS item speed
+field.202	D-PRS item power
+field.203	D-PRS item antenna height
+field.204	D-PRS item antenna gain
+field.205	D-PRS item directivity
+field.206	D-PRS item SSID
+field.209	D-PRS weather SSID
+field.20b	D-PRS weather timestamp
+field.20e	GPS logger
+field.20f	GPS logging interval
+field.211	LCD backlight level (raw)
+field.212	Automatic backlight adjustment
+field.215	Meter peak hold
+field.216	Transmit meter
+field.217	Memory name display
+field.218	Group name popup
+field.21c	Backlight on reception
+field.21d	Text scrolling
+field.21e	Screen saver on battery power
+field.21f	Screen saver on external power
+field.220	Power-button screen-off function
+field.221	Receive indicator
+field.222	Opening message
+field.223	Power-on check
+field.224	Radio display language
+field.225	Radio system language
+field.226	NTP time synchronization
+field.228	GPS time correction
+field.229	UTC offset
+field.22a	Coordinate display format
+field.22b	Distance and altitude units
+field.22c	Speed units
+field.22d	Temperature units
+field.22e	Barometric pressure units
+field.22f	Rainfall units
+field.230	Wind speed units
+field.231	Beep level (raw)
+field.232	Beep level limit
+field.233	Key touch beep
+field.234	Home channel beep
+field.235	Band edge beep
+field.23b	Automatic power off
+field.23c	Power save
+field.23f	Quick split
+field.240	Quick split frequency offset
+field.241	Split lock
+field.242	Antenna tuner selection
+field.243	Tuner memory
+field.244	PTT tune
+field.245	Automatic repeater function
+field.246	Received callsign speech
+field.247	RX callsign speech
+field.248	Dial and microphone key speech
+field.249	S-meter speech
+field.24a	Operating-mode speech
+field.24b	Speech language
+field.24c	Callsign pronunciation
+field.24d	Speech speed
+field.24e	Speech level (raw)
+field.24f	Speech button function
+field.250	Lock function
+field.251	Memory pad channel count
+field.252	Automatic tuning step
+field.255	Quarter tuning function
+field.258	Microphone up/down speed
+field.259	Linked memory groups
+field.25a	Memory group display
+field.25c	VOX gain (raw)
+field.25d	Anti-VOX gain (raw)
+field.25e	VOX delay
+field.25f	VOX voice delay
+field.260	Speech compressor
+field.261	Speech compression level
+field.262	Transmit bandwidth with compressor off
+field.263	Transmit bandwidth with compressor on
+field.264	Transmit monitor
+field.265	Monitor level (raw)
+field.266	Battery selection display
+field.267	Charging with power on
+field.268	USB power during reception
+field.269	VOX front-key assignment
+field.26a	Auto-tune front-key assignment
+field.26b	Microphone key assignment
+field.26c	SSB mode selection
+field.26d	CW mode selection
+field.26e	RTTY mode selection
+field.26f	AM mode selection
+field.270	FM mode selection
+field.271	DV mode selection
+field.272	WFM mode selection
+field.273	Screen capture with power button
+field.274	Screen capture file type
+field.275	Keyboard type
+field.276	Full keyboard layout
+field.277	Voice memory transmit level (raw)
+field.278	Voice memory repeat interval
+field.279	Automatic voice memory monitor
+field.27a	Recording microphone selection
+field.27b	Recording microphone gain (raw)
+field.27d	Recorded transmit audio
+field.27e	Recording condition
+field.27f	Recording file split
+field.281	Automatic recording with PTT
+field.282	PTT pre-recording time
+field.283	Playback skip time
+field.284	QSO log
+field.285	Receive history log
+field.286	Log CSV separators
+field.287	Log CSV date format
+field.288	Import/export CSV separators
+field.289	Import/export CSV date format
+field.28a	RF transmit power (raw)
+field.28d	Maximum transmit power on external power
+field.28e	Maximum transmit power on battery
+field.28f	Transmit delay
+field.290	Transmit timeout timer
+field.291	PTT lock
+field.292	Noise blanker
+field.293	Noise blanker level (raw)
+field.294	Noise blanker depth
+field.295	Noise blanker width (raw)
+field.296	Noise reduction
+field.297	Noise reduction level
+field.298	Notch filter
+field.299	Manual notch width
+field.29a	Manual notch position
+field.29b	Notch key in SSB
+field.29c	Notch key in AM
+field.29d	Frequency shift when changing mode
+field.29e	Normal CW sideband
+field.29f	Scan speed
+field.2a0	Scan resume
+field.2a1	Scan pause timer
+field.2a2	Scan resume timer
+field.2a3	Temporary skip timer
+field.2a5	Main dial operation during scanning
+field.2a9	Weather channel
+field.2aa	Weather alert
+field.2ab	Microphone gain (raw)
+field.2ad	Reference frequency adjustment
+field.2b1	Bluetooth
+field.2b2	Bluetooth automatic connection
+field.2b3	Bluetooth audio output
+field.2b4	Bluetooth automatic disconnection
+field.2b5	Headset function mode
+field.2b6	Headset power saving
+field.2b7	Headset one-touch PTT
+field.2b8	Suppress headset PTT beep
+field.2b9	Headset key beep
+field.2ba	Bluetooth key assignment
+field.2bb	Bluetooth serial function
+field.2c1	CW keying speed (raw)
+field.2c2	CW pitch
+field.2c3	CW contest number style
+field.2c4	CW count-up trigger channel
+field.2c5	CW contest number
+field.2c6	CW sidetone level (raw)
+field.2c7	CW sidetone level limit
+field.2c8	CW memory repeat interval
+field.2c9	CW dot/dash ratio
+field.2ca	CW rise time
+field.2cb	CW key polarity
+field.2cc	CW key type
+field.2cd	CW keying with microphone up/down keys
+field.2ce	CW break-in
+field.2cf	CW break-in delay
+field.2d2	RTTY decode log
+field.2d3	RTTY log file type
+field.2d4	RTTY timestamp
+field.2d5	Time in RTTY timestamp
+field.2d6	Frequency in RTTY timestamp
+field.2d7	RTTY FFT scope averaging
+field.2d9	RTTY unshift on space
+field.2da	RTTY line feed code
+field.2db	RTTY decode threshold
+field.2dc	RTTY transmit unshift
+field.2e0	RTTY twin peak filter
+field.2e1	RTTY mark tone frequency
+field.2e2	RTTY frequency shift
+field.2e3	RTTY keying polarity
+field.2e5	Speaker jack function
+field.2e6	Headphone level balance
+field.2ee	USB output selection
+field.2ef	USB audio output level (raw)
+field.2f0	USB audio squelch
+field.2f1	USB beep and speech output
+field.2f2	USB IF output level (raw)
+field.2f3	Network output selection
+field.2f4	Network audio squelch
+field.2f6	USB modulation level (raw)
+field.2f7	Wireless LAN modulation level (raw)
+field.2f8	Modulation input with DATA off
+field.2f9	Modulation input with DATA on
+field.2fa	ACC SEND assignment
+field.2fb	USB SEND assignment
+field.2fc	USB CW keying assignment
+field.2fd	USB RTTY keying assignment
+field.2ff	External keypad for voice memories
+field.300	External keypad for keyer memories
+field.301	External keypad for RTTY memories
+field.307	CI-V address
+field.308	CI-V transceive
+field.30c	USB echo back
+field.30f	USB second serial port function
+field.311	GPS data output
+field.315	Microphone jack 8 V output
+field.316	Wireless LAN
+field.317	Wireless LAN connection type
+field.318	DHCP
+field.319	IPv4 address
+field.31a	IPv4 network prefix
+field.31b	IPv4 gateway address
+field.31c	Primary DNS server
+field.31d	Secondary DNS server
+field.320	Access point timeout
+field.322	Network control
+field.323	Power off through network
+field.324	Network control port
+field.325	Network serial port
+field.326	Network audio port
+field.327	Internet access line
+field.32a	User 1 administrator permission
+field.32d	User 2 administrator permission
+field.330	Narrow HF filter shape
+field.331	Wide HF filter shape
+field.332	Narrow VHF/UHF filter shape
+field.333	Wide VHF/UHF filter shape
+field.336	Automatic gain control
+field.339	Fast AGC delay
+field.33a	Medium AGC delay
+field.33b	Slow AGC delay
+field.33f	Tuning step
+field.341	Air band tuning step
+field.344	Receive high-pass filter
+field.345	Receive low-pass filter
+field.346	Receive bass
+field.347	Receive treble
+field.348	Transmit bass
+field.349	Transmit treble
+field.34a	Wide transmit bandwidth
+field.34b	Medium transmit bandwidth
+field.34c	Narrow transmit bandwidth
+field.34d	DATA transmit bandwidth
+field.355	SWR graph frequency step
+field.356	SWR graph bar count
+field.357	Audio FFT scope attenuator
+field.358	Audio FFT waveform type
+field.35a	Audio FFT waterfall
+field.35b	Audio oscilloscope level
+field.35c	Audio oscilloscope sweep time
+field.35f	Spectrum scope span
+field.361	Spectrum scope sweep speed
+field.362	Spectrum scope reference level
+field.363	Scope center during transmission
+field.364	Spectrum scope maximum hold
+field.365	Scope center display
+field.366	Scope marker position
+field.367	Spectrum scope video bandwidth
+field.368	Spectrum scope averaging
+field.369	Spectrum scope waveform type
+field.36d	Spectrum scope waterfall
+field.36e	Waterfall speed
+field.36f	Waterfall size
+field.370	Waterfall peak color level
+field.371	Automatically hide waterfall markers
+message.agc_delay_100_millis	0.1 seconds
+message.agc_fast	Fast
+message.cancelled	The operation was cancelled.
+message.code	Code {value}
+message.disabled	Disabled
+message.enabled	Enabled
+message.no_symbol	No symbol
+message.number	{value}
+message.out_of_range	Value outside the supported range: {value}
+message.not_applicable	Not applicable
+message.not_published	No output was published.
+message.partial_not_published	The operation stopped after partial changes. No output was published.
+message.partial_published	Partial output was published with explicit approval.
+message.read_file	Read settings from a file
+message.read_only	This value cannot be edited.
+message.read_radio	Read settings from the radio
+message.rows_processed.one	Processed {count} row.
+message.rows_processed.other	Processed {count} rows.
+message.save_file	Save settings to a file
+message.unknown_code	Unknown code {value}
+message.write_acknowledged	The radio acknowledged the transfer. This does not verify flash contents.
+message.write_radio	Write settings to the radio
+repeater.gateway_reference	Repeater gateway reference
+symbol.aprs	APRS {first}{second}
+value.agc_mid	Medium
+value.agc_slow	Slow
+value.filter_shape_sharp	Sharp
+value.filter_shape_soft	Soft
+value.repeater_duplex_minus	DUP-: transmit below receive
+value.repeater_duplex_off	Simplex
+value.repeater_duplex_plus	DUP+: transmit above receive
+value.repeater_duplex_rps	RPS
+value.repeater_mode_dd	DD
+value.repeater_mode_dv	DV
+value.repeater_mode_fm	FM
+value.repeater_mode_fm_narrow	FM-N
+value.repeater_position_approximate	Approximate position
+value.repeater_position_exact	Exact position
+value.repeater_position_none	Position not set
+value.repeater_tone_off	Tone off
+value.repeater_tone_tone	Transmit tone
+value.repeater_tone_tone_squelch	Tone squelch

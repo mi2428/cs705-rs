@@ -1,0 +1,495 @@
+# Message ID<TAB>UTF-8 text. Named placeholders are part of the message contract.
+field.134	Indicatif personnel sélectionné
+field.136	Indicatif personnel
+field.137	Suffixe de l'indicatif personnel
+field.13a	Message d'émission
+field.13b	Message d'émission sélectionné
+field.1a5	Liste des adresses IP de connexion
+field.1a7	Adresse de la passerelle
+field.1a8	Indicatif de la passerelle
+field.1af	Image à transmettre
+field.1b2	Indicatif du destinataire de l'image
+field.1c2	Latitude GPS manuelle
+field.1c3	Longitude GPS manuelle
+field.1c7	Groupe mémoire de l'alarme GPS
+field.1ce	Adresse UNPROTO D-PRS
+field.1d1	Symbole de position D-PRS
+field.1da	Commentaire de position D-PRS
+field.1e6	Nom de l'objet D-PRS
+field.1e8	Symbole de l'objet D-PRS
+field.1ea	Commentaire de l'objet D-PRS
+field.1eb	Latitude de l'objet D-PRS
+field.1ec	Longitude de l'objet D-PRS
+field.1f7	Nom de l'élément D-PRS
+field.1f9	Symbole de l'élément D-PRS
+field.1fb	Commentaire de l'élément D-PRS
+field.1fc	Latitude de l'élément D-PRS
+field.1fd	Longitude de l'élément D-PRS
+field.207	Symbole météo D-PRS
+field.20a	Commentaire météo D-PRS
+field.20c	Trames NMEA émises
+field.20d	Message GPS
+field.210	Trames de l'enregistreur GPS
+field.227	Adresse du serveur NTP
+field.253	Accord par pas de 1 Hz
+field.25b	VOX
+field.2a6	Étendue du balayage delta de fréquence
+field.2a8	Groupe du balayage des mémoires sélectionnées
+field.2b0	Commentaire de clonage
+field.2c0	Mémoire du manipulateur CW
+field.2d8	Couleur du tracé FFT RTTY
+field.2de	Couleur du texte RTTY reçu
+field.2df	Couleur du texte RTTY émis
+field.31e	SSID du point d'accès
+field.31f	Mot de passe du point d'accès
+field.321	Nom du réseau
+field.328	Identifiant de l'utilisateur 1
+field.329	Mot de passe de l'utilisateur 1
+field.32b	Identifiant de l'utilisateur 2
+field.32c	Mot de passe de l'utilisateur 2
+field.32e	Nom de l'émetteur-récepteur sur le réseau
+field.359	Couleur du tracé FFT audio
+field.35d	Couleur du tracé de l'oscilloscope audio
+field.35e	Mode du spectre
+field.36a	Couleur de remplissage du tracé du spectre
+field.36b	Couleur du contour du tracé du spectre
+field.36c	Couleur du maintien du maximum du spectre
+choice.transmit_data_high	Bande passante d'émission DATA: fréquence de coupure haute
+choice.transmit_data_low	Bande passante d'émission DATA: fréquence de coupure basse
+choice.transmit_mid_high	Bande passante moyenne en émission: fréquence de coupure haute
+choice.transmit_mid_low	Bande passante moyenne en émission: fréquence de coupure basse
+choice.transmit_narrow_high	Bande passante étroite en émission: fréquence de coupure haute
+choice.transmit_narrow_low	Bande passante étroite en émission: fréquence de coupure basse
+choice.transmit_wide_high	Bande passante large en émission: fréquence de coupure haute
+choice.transmit_wide_low	Bande passante large en émission: fréquence de coupure basse
+diagnostic.address_overflow	L'adresse des données dépasse la plage prise en charge.
+diagnostic.ambiguous_field	Sélectionnez le descripteur sémantique du champ plutôt que sa clé source partagée.
+diagnostic.checksum_mismatch	La somme de contrôle ne correspond pas aux données.
+diagnostic.conversion	La valeur n'a pas pu être convertie.
+diagnostic.index	 (indice à partir de zéro : {index})
+diagnostic.invalid	Les données fournies ne sont pas valides.
+diagnostic.invalid_index	L'indice demandé est hors de la plage de ce champ.
+diagnostic.invalid_symbol_width	Un symbole nécessite exactement deux octets bruts.
+diagnostic.limit	La limite de taille ou de nombre prise en charge a été dépassée.
+diagnostic.line	 (ligne : {line})
+diagnostic.operation	L'opération a échoué ; des modifications antérieures peuvent subsister en mémoire.
+diagnostic.rejected	L'émetteur-récepteur a renvoyé un état de clonage non nul ; le transfert n'a pas été confirmé.
+diagnostic.row_index	La ligne demandée n'existe pas.
+diagnostic.source_bounds	L'opération accéderait à des données hors du tampon source.
+diagnostic.source_unavailable	Les données sources ou le contexte d'exécution requis ne sont pas disponibles.
+diagnostic.summary	{domain}: {message}{line}{index}{value}
+diagnostic.unregistered_field	Aucune traduction n'est enregistrée pour ce champ.
+diagnostic.unsupported	Cette entrée ou cette opération n'est pas prise en charge.
+diagnostic.unsupported_command	La commande de clonage n'est pas prise en charge.
+diagnostic.unsupported_language	Cette langue d'affichage n'est pas prise en charge.
+diagnostic.value	 (0x{value})
+domain.clone	Clonage
+domain.csv	CSV
+domain.gps_csv	GPS CSV
+domain.icf	ICF
+domain.io	Entrée/sortie
+domain.presentation	Affichage
+domain.repeater_csv	CSV de répéteurs
+error.ambiguous_field	le champ d’affichage {key} nécessite son descripteur sémantique
+error.invalid_index	indice d’affichage hors de la plage du champ
+error.invalid_symbol_width	l’affichage du symbole nécessite deux octets bruts
+error.unregistered_field	champ d’affichage non enregistré {key}
+error.unsupported_language	langue d’affichage non prise en charge
+field.105	Nom du canal mémoire
+field.106	Fonctionnement semi-duplex
+field.107	Fréquence de fonctionnement
+field.108	Mode de fonctionnement
+field.10a	Filtre FI
+field.10b	Fonctionnement duplex
+field.10c	Décalage de fréquence duplex
+field.10d	Fonction de tonalité
+field.10e	Fréquence de tonalité d'émission
+field.10f	Fréquence de tonalité de réception
+field.110	Code DTCS
+field.111	Polarité DTCS
+field.112	Squelch numérique
+field.113	Code du squelch numérique
+field.114	Indicatif du destinataire (UR)
+field.115	Indicatif du répéteur 1 (RPT1)
+field.116	Indicatif du répéteur 2 (RPT2)
+field.117	Balayage des mémoires sélectionnées
+field.120	Vitesse DTMF
+field.123	Réduction du bruit DR
+field.124	Niveau de réduction du bruit DR
+field.12b	Réglage de la bande passante
+field.146	Mode du répéteur
+field.14d	Fonction de tonalité du répéteur
+field.14e	Fréquence de tonalité du répéteur
+field.14f	Sélection d'utilisation du répéteur
+field.150	Précision de position du répéteur
+field.153	Décalage UTC du répéteur
+field.18d	Réponse automatique
+field.18e	Émission automatique en DV
+field.18f	Données rapides DV
+field.190	Vitesse des données GPS en mode données rapides
+field.191	Délai PTT des données rapides
+field.192	Moniteur numérique
+field.193	Réglage du répéteur numérique
+field.194	Détection automatique DV
+field.195	Enregistrement des indicatifs reçus
+field.198	Affichage de l'indicatif reçu
+field.19a	Indicateur de position reçue
+field.19b	Affichage de la position reçue
+field.19c	Durée d'affichage de la position reçue
+field.19d	Affichage de la position de réponse
+field.19e	Indicateur d'image reçue
+field.19f	Affichage de l'indicatif émis
+field.1a1	Indicatif ou nom dans l'historique de réception
+field.1a2	Bip de veille
+field.1a3	Niveau audio de réception EMR (valeur brute)
+field.1a4	Durée du moniteur de répéteur
+field.1a6	Type de connexion à la passerelle
+field.1a9	Type de passerelle
+field.1aa	Traversée UDP de la passerelle
+field.1ab	Réglage de l'indicatif de passerelle
+field.1b0	Taille de l'image
+field.1b1	Qualité de l'image
+field.1bc	Source de position GPS
+field.1bd	Correction SBAS
+field.1be	Réception GLONASS
+field.1bf	Économie d'énergie GPS
+field.1c0	Sortie des données satellite GPS
+field.1c4	Altitude GPS manuelle
+field.1c5	Compas GPS
+field.1c8	Zone d'alarme de la mémoire GPS
+field.1cb	Mémoire d'alarme GPS
+field.1cc	Mode d'émission GPS
+field.1cd	Émission GPS automatique
+field.1cf	Format d'émission GPS
+field.1d0	Canal de symbole D-PRS
+field.1d9	Canal de commentaire D-PRS
+field.1de	SSID de position D-PRS
+field.1df	Horodatage de position D-PRS
+field.1e0	Altitude de position D-PRS
+field.1e1	Extension de position D-PRS
+field.1e2	Puissance de la position D-PRS
+field.1e3	Hauteur d'antenne de la position D-PRS
+field.1e4	Gain d'antenne de la position D-PRS
+field.1e5	Directivité de la position D-PRS
+field.1e7	Type d'objet D-PRS
+field.1ed	Altitude de l'objet D-PRS
+field.1ee	Extension d'objet D-PRS
+field.1ef	Cap de l'objet D-PRS
+field.1f0	Vitesse de l'objet D-PRS
+field.1f1	Puissance de l'objet D-PRS
+field.1f2	Hauteur d'antenne de l'objet D-PRS
+field.1f3	Gain d'antenne de l'objet D-PRS
+field.1f4	Directivité de l'objet D-PRS
+field.1f5	SSID de l'objet D-PRS
+field.1f6	Horodatage de l'objet D-PRS
+field.1f8	Type d'élément D-PRS
+field.1fe	Altitude de l'élément D-PRS
+field.1ff	Extension d'élément D-PRS
+field.200	Cap de l'élément D-PRS
+field.201	Vitesse de l'élément D-PRS
+field.202	Puissance de l'élément D-PRS
+field.203	Hauteur d'antenne de l'élément D-PRS
+field.204	Gain d'antenne de l'élément D-PRS
+field.205	Directivité de l'élément D-PRS
+field.206	SSID de l'élément D-PRS
+field.209	SSID météo D-PRS
+field.20b	Horodatage météo D-PRS
+field.20e	Enregistreur GPS
+field.20f	Intervalle d'enregistrement GPS
+field.211	Niveau du rétroéclairage LCD (valeur brute)
+field.212	Réglage automatique du rétroéclairage
+field.215	Maintien de crête du compteur
+field.216	Indicateur d'émission
+field.217	Affichage du nom de mémoire
+field.218	Affichage contextuel du nom de groupe
+field.21c	Rétroéclairage à la réception
+field.21d	Défilement du texte
+field.21e	Économiseur d'écran sur batterie
+field.21f	Économiseur d'écran sur alimentation externe
+field.220	Extinction de l'écran par le bouton d'alimentation
+field.221	Voyant de réception
+field.222	Message de démarrage
+field.223	Vérification au démarrage
+field.224	Langue d'affichage de l'émetteur-récepteur
+field.225	Langue système de l'émetteur-récepteur
+field.226	Synchronisation de l'heure NTP
+field.228	Correction de l'heure par GPS
+field.229	Décalage UTC
+field.22a	Format d'affichage des coordonnées
+field.22b	Unités de distance et d'altitude
+field.22c	Unités de vitesse
+field.22d	Unités de température
+field.22e	Unités de pression atmosphérique
+field.22f	Unités de précipitations
+field.230	Unités de vitesse du vent
+field.231	Niveau des bips (valeur brute)
+field.232	Limitation du niveau des bips
+field.233	Bip des touches
+field.234	Bip du canal d'accueil
+field.235	Bip de limite de bande
+field.23b	Arrêt automatique
+field.23c	Économie d'énergie
+field.23f	Semi-duplex rapide
+field.240	Décalage de fréquence du semi-duplex rapide
+field.241	Verrouillage de semi-duplex
+field.242	Sélection du coupleur d'antenne
+field.243	Mémoire du coupleur
+field.244	Accord par PTT
+field.245	Fonction répéteur automatique
+field.246	Annonce de l'indicatif reçu
+field.247	Annonce vocale de l'indicatif RX
+field.248	Annonce par la molette et les touches du microphone
+field.249	Annonce du niveau du S-mètre
+field.24a	Annonce du mode de fonctionnement
+field.24b	Langue des annonces vocales
+field.24c	Prononciation des indicatifs
+field.24d	Vitesse des annonces vocales
+field.24e	Niveau des annonces vocales (valeur brute)
+field.24f	Fonction de la touche vocale
+field.250	Fonction de verrouillage
+field.251	Nombre de canaux du bloc-notes mémoire
+field.252	Pas d'accord automatique
+field.255	Fonction d'accord au quart
+field.258	Vitesse des touches haut/bas du microphone
+field.259	Groupes mémoire liés
+field.25a	Affichage du groupe mémoire
+field.25c	Gain VOX (valeur brute)
+field.25d	Gain anti-VOX (valeur brute)
+field.25e	Délai VOX
+field.25f	Retard vocal VOX
+field.260	Compresseur vocal
+field.261	Niveau de compression vocale
+field.262	Bande passante d'émission sans compresseur
+field.263	Bande passante d'émission avec compresseur
+field.264	Moniteur d'émission
+field.265	Niveau du moniteur (valeur brute)
+field.266	Affichage de la sélection de batterie
+field.267	Charge lorsque l'appareil est allumé
+field.268	Alimentation USB à la réception
+field.269	Affectation de la touche VOX
+field.26a	Affectation de la touche d'accord automatique
+field.26b	Affectation des touches du microphone
+field.26c	Sélection du mode SSB
+field.26d	Sélection du mode CW
+field.26e	Sélection du mode RTTY
+field.26f	Sélection du mode AM
+field.270	Sélection du mode FM
+field.271	Sélection du mode DV
+field.272	Sélection du mode WFM
+field.273	Capture d'écran par le bouton d'alimentation
+field.274	Format des captures d'écran
+field.275	Type de clavier
+field.276	Disposition du clavier complet
+field.277	Niveau d'émission de la mémoire vocale (valeur brute)
+field.278	Intervalle de répétition de la mémoire vocale
+field.279	Moniteur automatique de mémoire vocale
+field.27a	Sélection du microphone d'enregistrement
+field.27b	Gain du microphone d'enregistrement (valeur brute)
+field.27d	Audio d'émission enregistré
+field.27e	Condition d'enregistrement
+field.27f	Découpage des fichiers d'enregistrement
+field.281	Enregistrement automatique par PTT
+field.282	Durée de pré-enregistrement PTT
+field.283	Durée du saut de lecture
+field.284	Journal des QSO
+field.285	Journal de l'historique de réception
+field.286	Séparateurs CSV du journal
+field.287	Format de date CSV du journal
+field.288	Séparateurs CSV d'importation et d'exportation
+field.289	Format de date CSV d'importation et d'exportation
+field.28a	Puissance d'émission RF (valeur brute)
+field.28d	Puissance d'émission maximale sur alimentation externe
+field.28e	Puissance d'émission maximale sur batterie
+field.28f	Délai d'émission
+field.290	Temporisation de limitation d'émission
+field.291	Verrouillage PTT
+field.292	Suppresseur de bruit impulsionnel
+field.293	Niveau du suppresseur de bruit impulsionnel (valeur brute)
+field.294	Profondeur du suppresseur de bruit impulsionnel
+field.295	Largeur du suppresseur de bruit impulsionnel (valeur brute)
+field.296	Réduction du bruit
+field.297	Niveau de réduction du bruit
+field.298	Filtre notch
+field.299	Largeur du notch manuel
+field.29a	Position du notch manuel
+field.29b	Touche notch en SSB
+field.29c	Touche notch en AM
+field.29d	Décalage de fréquence au changement de mode
+field.29e	Bande latérale CW normale
+field.29f	Vitesse de balayage
+field.2a0	Reprise du balayage
+field.2a1	Durée de pause du balayage
+field.2a2	Délai de reprise du balayage
+field.2a3	Durée du saut temporaire
+field.2a5	Molette principale pendant le balayage
+field.2a9	Canal météo
+field.2aa	Alerte météo
+field.2ab	Gain du microphone (valeur brute)
+field.2ad	Réglage de la fréquence de référence
+field.2b1	Bluetooth
+field.2b2	Connexion Bluetooth automatique
+field.2b3	Sortie audio Bluetooth
+field.2b4	Déconnexion Bluetooth automatique
+field.2b5	Mode de fonctionnement du casque
+field.2b6	Économie d'énergie du casque
+field.2b7	PTT à touche unique du casque
+field.2b8	Suppression du bip PTT du casque
+field.2b9	Bip des touches du casque
+field.2ba	Affectation des touches Bluetooth
+field.2bb	Fonction série Bluetooth
+field.2c1	Vitesse de manipulation CW (valeur brute)
+field.2c2	Tonalité CW
+field.2c3	Format du numéro de concours CW
+field.2c4	Canal de déclenchement du compteur CW
+field.2c5	Numéro de concours CW
+field.2c6	Niveau de tonalité locale CW (valeur brute)
+field.2c7	Limitation du niveau de tonalité locale CW
+field.2c8	Intervalle de répétition de la mémoire CW
+field.2c9	Rapport point/trait CW
+field.2ca	Temps de montée CW
+field.2cb	Polarité du manipulateur CW
+field.2cc	Type de manipulateur CW
+field.2cd	Manipulation CW par les touches haut/bas du microphone
+field.2ce	Break-in CW
+field.2cf	Délai de break-in CW
+field.2d2	Journal de décodage RTTY
+field.2d3	Format du journal RTTY
+field.2d4	Horodatage RTTY
+field.2d5	Heure dans l'horodatage RTTY
+field.2d6	Fréquence dans l'horodatage RTTY
+field.2d7	Moyennage du spectre FFT RTTY
+field.2d9	Retour lettres RTTY sur espace
+field.2da	Code de saut de ligne RTTY
+field.2db	Seuil de décodage RTTY
+field.2dc	Retour lettres RTTY à l'émission
+field.2e0	Filtre à double crête RTTY
+field.2e1	Fréquence de tonalité mark RTTY
+field.2e2	Écart de fréquence RTTY
+field.2e3	Polarité de manipulation RTTY
+field.2e5	Fonction de la prise haut-parleur
+field.2e6	Équilibre du niveau du casque
+field.2ee	Sélection de la sortie USB
+field.2ef	Niveau de sortie audio USB (valeur brute)
+field.2f0	Squelch de la sortie audio USB
+field.2f1	Sortie USB des bips et annonces vocales
+field.2f2	Niveau de sortie FI USB (valeur brute)
+field.2f3	Sélection de la sortie réseau
+field.2f4	Squelch de la sortie audio réseau
+field.2f6	Niveau de modulation USB (valeur brute)
+field.2f7	Niveau de modulation sans fil (valeur brute)
+field.2f8	Entrée de modulation hors mode DATA
+field.2f9	Entrée de modulation en mode DATA
+field.2fa	Affectation ACC SEND
+field.2fb	Affectation USB SEND
+field.2fc	Affectation de manipulation CW USB
+field.2fd	Affectation de manipulation RTTY USB
+field.2ff	Clavier externe pour les mémoires vocales
+field.300	Clavier externe pour les mémoires du manipulateur
+field.301	Clavier externe pour les mémoires RTTY
+field.307	Adresse CI-V
+field.308	Transceive CI-V
+field.30c	Écho USB
+field.30f	Fonction du second port série USB
+field.311	Sortie de données GPS
+field.315	Sortie 8 V de la prise microphone
+field.316	Réseau sans fil
+field.317	Type de connexion sans fil
+field.318	DHCP
+field.319	Adresse IPv4
+field.31a	Préfixe réseau IPv4
+field.31b	Adresse de passerelle IPv4
+field.31c	Serveur DNS principal
+field.31d	Serveur DNS secondaire
+field.320	Délai d'arrêt du point d'accès
+field.322	Commande par réseau
+field.323	Arrêt par le réseau
+field.324	Port de commande réseau
+field.325	Port série réseau
+field.326	Port audio réseau
+field.327	Ligne d'accès à Internet
+field.32a	Droits d'administrateur de l'utilisateur 1
+field.32d	Droits d'administrateur de l'utilisateur 2
+field.330	Forme du filtre HF étroit
+field.331	Forme du filtre HF large
+field.332	Forme du filtre VHF/UHF étroit
+field.333	Forme du filtre VHF/UHF large
+field.336	Commande automatique de gain
+field.339	Constante de temps AGC rapide
+field.33a	Constante de temps AGC moyenne
+field.33b	Constante de temps AGC lente
+field.33f	Pas d'accord
+field.341	Pas d'accord de la bande aéronautique
+field.344	Filtre passe-haut en réception
+field.345	Filtre passe-bas en réception
+field.346	Graves en réception
+field.347	Aigus en réception
+field.348	Graves en émission
+field.349	Aigus en émission
+field.34a	Bande passante large en émission
+field.34b	Bande passante moyenne en émission
+field.34c	Bande passante étroite en émission
+field.34d	Bande passante d'émission DATA
+field.355	Pas de fréquence du graphique ROS
+field.356	Nombre de barres du graphique ROS
+field.357	Atténuateur du spectre FFT audio
+field.358	Type de tracé FFT audio
+field.35a	Chute d'eau FFT audio
+field.35b	Niveau de l'oscilloscope audio
+field.35c	Durée de balayage de l'oscilloscope audio
+field.35f	Étendue du spectre
+field.361	Vitesse de balayage du spectre
+field.362	Niveau de référence du spectre
+field.363	Centre du spectre en émission
+field.364	Maintien du maximum du spectre
+field.365	Affichage du centre du spectre
+field.366	Position du marqueur du spectre
+field.367	Bande passante vidéo du spectre
+field.368	Moyennage du spectre
+field.369	Type de tracé du spectre
+field.36d	Chute d'eau du spectre
+field.36e	Vitesse de la chute d'eau
+field.36f	Taille de la chute d'eau
+field.370	Niveau de couleur de crête de la chute d'eau
+field.371	Masquage automatique des marqueurs de la chute d'eau
+message.agc_delay_100_millis	0,1 seconde
+message.agc_fast	Rapide
+message.cancelled	L'opération a été annulée.
+message.code	Code {value}
+message.disabled	Désactivé
+message.enabled	Activé
+message.no_symbol	Aucun symbole
+message.number	{value}
+message.out_of_range	Valeur hors de la plage prise en charge : {value}
+message.not_applicable	Sans objet
+message.not_published	Aucune sortie n'a été enregistrée.
+message.partial_not_published	L'opération s'est arrêtée après des modifications partielles. Aucune sortie n'a été enregistrée.
+message.partial_published	La sortie partielle a été enregistrée avec une autorisation explicite.
+message.read_file	Lire les réglages d'un fichier
+message.read_only	Cette valeur ne peut pas être modifiée.
+message.read_radio	Lire les réglages de l'émetteur-récepteur
+message.rows_processed.one	{count} ligne traitée.
+message.rows_processed.other	{count} lignes traitées.
+message.save_file	Enregistrer les réglages dans un fichier
+message.unknown_code	Code inconnu {value}
+message.write_acknowledged	L'émetteur-récepteur a confirmé le transfert. Cela ne vérifie pas le contenu de la mémoire flash.
+message.write_radio	Écrire les réglages dans l'émetteur-récepteur
+repeater.gateway_reference	Référence de passerelle du répéteur
+symbol.aprs	APRS {first}{second}
+value.agc_mid	Moyen
+value.agc_slow	Lent
+value.filter_shape_sharp	Raide
+value.filter_shape_soft	Doux
+value.repeater_duplex_minus	DUP- : émission sous la fréquence de réception
+value.repeater_duplex_off	Simplex
+value.repeater_duplex_plus	DUP+ : émission au-dessus de la fréquence de réception
+value.repeater_duplex_rps	RPS
+value.repeater_mode_dd	DD
+value.repeater_mode_dv	DV
+value.repeater_mode_fm	FM
+value.repeater_mode_fm_narrow	FM-N
+value.repeater_position_approximate	Position approximative
+value.repeater_position_exact	Position exacte
+value.repeater_position_none	Position non définie
+value.repeater_tone_off	Tonalité désactivée
+value.repeater_tone_tone	Tonalité d'émission
+value.repeater_tone_tone_squelch	Squelch à tonalité
