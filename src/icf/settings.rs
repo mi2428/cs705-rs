@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 
 use super::{Error, Icf};
 
+pub mod digital;
 pub mod extended;
 pub mod network;
 
