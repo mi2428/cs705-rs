@@ -6,5 +6,9 @@ rust-version = "1.99"
 description = "Evidence-based, native IC-705 configuration tools"
 publish = false
 
+[workspace]
+members = ["examples/cli"]
+resolver = "3"
+
 [dependencies]
 md5 = "=0.8.1"
