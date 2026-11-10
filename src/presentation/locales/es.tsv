@@ -461,9 +461,9 @@ message.no_symbol	Sin símbolo
 message.number	{value}
 message.out_of_range	Valor fuera del intervalo admitido: {value}
 message.not_applicable	No aplicable
-message.not_published	No se ha guardado ninguna salida.
-message.partial_not_published	La operación se detuvo tras realizar cambios parciales. No se ha guardado ninguna salida.
-message.partial_published	La salida parcial se ha guardado con autorización explícita.
+message.not_published	No se ha emitido ningún resultado.
+message.partial_not_published	La operación se detuvo tras realizar cambios parciales. No se ha emitido ningún resultado.
+message.partial_published	El resultado parcial se ha emitido con autorización explícita.
 message.read_file	Leer los ajustes de un archivo
 message.read_only	Este valor no se puede modificar.
 message.read_radio	Leer los ajustes del transceptor

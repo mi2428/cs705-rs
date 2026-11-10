@@ -461,9 +461,9 @@ message.no_symbol	Nessun simbolo
 message.number	{value}
 message.out_of_range	Valore esterno all'intervallo supportato: {value}
 message.not_applicable	Non applicabile
-message.not_published	Non è stato salvato alcun output.
-message.partial_not_published	L'operazione si è interrotta dopo modifiche parziali. Non è stato salvato alcun output.
-message.partial_published	L'output parziale è stato salvato con autorizzazione esplicita.
+message.not_published	Non è stato emesso alcun risultato.
+message.partial_not_published	L'operazione si è interrotta dopo modifiche parziali. Non è stato emesso alcun risultato.
+message.partial_published	Il risultato parziale è stato emesso con autorizzazione esplicita.
 message.read_file	Leggere le impostazioni da un file
 message.read_only	Questo valore non può essere modificato.
 message.read_radio	Leggere le impostazioni dal ricetrasmettitore

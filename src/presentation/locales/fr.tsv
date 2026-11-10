@@ -461,9 +461,9 @@ message.no_symbol	Aucun symbole
 message.number	{value}
 message.out_of_range	Valeur hors de la plage prise en charge : {value}
 message.not_applicable	Sans objet
-message.not_published	Aucune sortie n'a été enregistrée.
-message.partial_not_published	L'opération s'est arrêtée après des modifications partielles. Aucune sortie n'a été enregistrée.
-message.partial_published	La sortie partielle a été enregistrée avec une autorisation explicite.
+message.not_published	Aucun résultat n'a été fourni en sortie.
+message.partial_not_published	L'opération s'est arrêtée après des modifications partielles. Aucun résultat n'a été fourni en sortie.
+message.partial_published	Le résultat partiel a été fourni en sortie avec une autorisation explicite.
 message.read_file	Lire les réglages d'un fichier
 message.read_only	Cette valeur ne peut pas être modifiée.
 message.read_radio	Lire les réglages de l'émetteur-récepteur

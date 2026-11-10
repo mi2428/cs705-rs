@@ -461,9 +461,9 @@ message.no_symbol	シンボル未設定
 message.number	{value}
 message.out_of_range	対応範囲外の値：{value}
 message.not_applicable	対象外
-message.not_published	出力は保存されていません。
-message.partial_not_published	一部を変更した時点で処理を中止しました。出力は保存されていません。
-message.partial_published	明示的な承認に基づき、処理済みの部分を保存しました。
+message.not_published	処理結果は出力していません。
+message.partial_not_published	一部を変更した時点で処理を中止しました。処理結果は出力していません。
+message.partial_published	明示的な承認に基づき、処理済みの部分を出力しました。
 message.read_file	ファイルから設定を読み込む
 message.read_only	この値は変更できません。
 message.read_radio	無線機から設定を読み込む

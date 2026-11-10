@@ -461,9 +461,9 @@ message.no_symbol	Kein Symbol
 message.number	{value}
 message.out_of_range	Wert außerhalb des unterstützten Bereichs: {value}
 message.not_applicable	Nicht anwendbar
-message.not_published	Es wurde keine Ausgabe gespeichert.
-message.partial_not_published	Der Vorgang wurde nach teilweisen Änderungen angehalten. Es wurde keine Ausgabe gespeichert.
-message.partial_published	Die Teilausgabe wurde mit ausdrücklicher Zustimmung gespeichert.
+message.not_published	Es wurde kein Ergebnis ausgegeben.
+message.partial_not_published	Der Vorgang wurde nach teilweisen Änderungen angehalten. Es wurde kein Ergebnis ausgegeben.
+message.partial_published	Das Teilergebnis wurde mit ausdrücklicher Zustimmung ausgegeben.
 message.read_file	Einstellungen aus einer Datei lesen
 message.read_only	Dieser Wert kann nicht bearbeitet werden.
 message.read_radio	Einstellungen vom Funkgerät lesen
