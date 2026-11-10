@@ -58,7 +58,7 @@ enum Action {
         #[arg(long)]
         home_cache: Option<u8>,
     },
-    /// Open, then run slot10 correction and report its actual ordered requests.
+    /// Open, then run slot 10 correction and report its actual ordered requests.
     Reset {
         #[command(flatten)]
         file: FileArgs,
@@ -142,7 +142,7 @@ pub(crate) struct SessionArgs {
     /// Shared generation-Q/live-Q/SYSTEM LANGID JSON, not inferred from ICF.
     #[arg(long, required_unless_present = "cancel")]
     pub(crate) range_context: Option<String>,
-    /// Actual previous current expanded raw image, exactly0x4997a bytes.
+    /// Actual previous current expanded raw image, exactly 0x4997a bytes.
     #[arg(long, conflicts_with = "constructor_current")]
     pub(crate) current: Option<String>,
     /// Explicitly select the known initial zero-allocation current state.
@@ -163,13 +163,13 @@ pub(crate) struct SessionArgs {
     /// Repeat SELECTOR=PATH for pre24A20 source assets, never completed G.
     #[arg(long = "source-asset")]
     source_assets: Vec<String>,
-    /// Actual120-byte Japanese early mode-pair source; read only on that branch.
+    /// Actual 120-byte Japanese early mode-pair source; read only on that branch.
     #[arg(long)]
     pub(crate) japanese_mode_pairs: Option<String>,
-    /// Actual108-byte restricted band-stack source; read only on that branch.
+    /// Actual 108-byte restricted band-stack source; read only on that branch.
     #[arg(long)]
     pub(crate) restricted_band_stack: Option<String>,
-    /// Actual captured VA864614, not an inferred predicate result.
+    /// Actual captured VA 864614, not an inferred predicate result.
     #[arg(long, required_unless_present = "cancel")]
     previous_reload_guard: Option<u32>,
     /// Actual D+1AC/1AD as exactly two hexadecimal bytes.
@@ -575,7 +575,7 @@ fn file(args: FileArgs, operation: FileOperation) -> Result<u8> {
             show_both,
             home_cache,
         } => {
-            let legacy = legacy.map_or(0, Choice::native); // Target6 never requests this prompt.
+            let legacy = legacy.map_or(0, Choice::native); // Target 6 never requests this prompt.
             for setting in settings {
                 let (key, value) = setting
                     .split_once('=')

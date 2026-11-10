@@ -111,7 +111,7 @@ fn fixture() -> Vec<u8> {
         w.save(index as usize, &h).unwrap();
     }
     let mut image = w.to_icf().unwrap();
-    // Independent nonidentity saved order; group3 owns logical0, group9 logical1.
+    // Independent nonidentity saved order; group 3 owns logical 0, group 9 logical 1.
     image.patch_memory(&[(0x3ab82, &[1, 0, 0, 0])]).unwrap();
     String::from_utf8(image.to_bytes())
         .unwrap()

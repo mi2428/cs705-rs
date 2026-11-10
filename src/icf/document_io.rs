@@ -31,7 +31,7 @@ use crate::{
 };
 use std::{fmt, io::Write};
 
-/// The selected external source data consumed by24A20. prefix is the raw source
+/// The selected external source data consumed by 24A20. prefix is the raw source
 /// asset BEFORE range/map/typed normalization, not a completed/default image G.
 /// Only branch-reached patch fields are required. No missing byte becomes zero.
 pub struct DefaultSource<'a> {
@@ -181,7 +181,7 @@ impl Session {
     }
 }
 
-/// 4FB00 then4FB20: counts/maps are built before their own later field snapshots.
+/// 4FB00 then 4FB20: counts/maps are built before their own later field snapshots.
 pub(super) fn stage8(
     image: &mut [u8],
     context: &Context,
@@ -237,7 +237,7 @@ pub enum SaveStatus {
     RetrySaveAs,
 }
 
-/// One actual typed view descriptor, in50344 traversal order. first/last are
+/// One actual typed view descriptor, in 50344 traversal order. first/last are
 /// inclusive typed indices (normal/call are local sides); count is only the
 /// native entry gate. These are source coordinates, never supplied error flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,7 +254,7 @@ pub struct ValidationView {
 pub struct ValidationReport {
     pub errors: u32,
     pub warnings: u32,
-    /// Per-descriptor context5C bits. Bit8 has count precedence over bit4.
+    /// Per-descriptor context 5C bits. Bit 8 has count precedence over bit 4.
     pub flags: Vec<u8>,
 }
 #[derive(Debug, Clone, Copy)]
@@ -281,7 +281,7 @@ pub struct SaveReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResetEffects {
     pub correction: normalizer::ResetReport,
-    /// Native238C0 requests in order. They are NOT delivered GUI callbacks.
+    /// Native 238C0 requests in order. They are NOT delivered GUI callbacks.
     pub notifications: Vec<icf::special::Notification>,
 }
 
@@ -356,9 +356,9 @@ impl From<Error> for FileError {
 }
 
 impl Document {
-    /// Slot08 clears document flags before stage8 and stage9 read them. Open and
+    /// Slot 08 clears document flags before stage8 and stage9 read them. Open and
     /// post-writer legacy reload share this order; failures retain the cleared
-    /// flags and any image prefix. Native node/Sync25 delivery is a separate edge.
+    /// flags and any image prefix. Native node/Sync 25 delivery is a separate edge.
     pub(crate) fn reload_after_conversion(
         &mut self,
         session: &mut Session,
@@ -376,8 +376,8 @@ impl Document {
     pub fn extra_data(&self) -> u32 {
         self.extra_data
     }
-    /// Headless equivalent of50344's ordered typed descriptor pass. Actual data
-    /// and shared predicates compute context5C; no error/warning bool is accepted.
+    /// Headless equivalent of 50344's ordered typed descriptor pass. Actual data
+    /// and shared predicates compute context 5C; no error/warning bool is accepted.
     /// GUI resource parsing, painting and native tree-list delivery are not faked.
     pub fn validate_views(
         &self,
@@ -400,7 +400,7 @@ impl Document {
         }
         Ok(report)
     }
-    /// Actual operating-state correction root (slot10). W is this current, not
+    /// Actual operating-state correction root (slot 10). W is this current, not
     /// a private clone image. Requested GUI notifications are not delivered here.
     pub fn reset_operating_state(
         &mut self,
@@ -512,9 +512,9 @@ impl Document {
         self.compare_dirty();
         Ok(())
     }
-    /// Actual4CA88 headless file operation. Only native prompt result2 cancels;
-    /// None is file-dialog cancellation. On profile mismatch, choice6 adopts Q/G,
-    /// choice7 imports foreign content with empty path/dirty1,2 cancels. Other
+    /// Actual 4CA88 headless file operation. Only native prompt result 2 cancels;
+    /// None is file-dialog cancellation. On profile mismatch, choice 6 adopts Q/G,
+    /// choice 7 imports foreign content with empty path/dirty 1, 2 cancels. Other
     /// raw MessageBox results continue without adoption, as in the native switch.
     pub fn read(
         &mut self,
@@ -590,12 +590,12 @@ impl Document {
         }
         Ok(self.new_from_defaults(session.defaults()?, prompt_result))
     }
-    /// O005/006's actual headless Save body. With no native view tree,50344's
-    /// counts are genuinely0/0, so flags=(0,1); no unimplemented validation is
-    /// disguised as a successful callback. GUI-tree validation/optional slot10
+    /// O005/006's actual headless Save body. With no native view tree, 50344's
+    /// counts are genuinely 0/0, so flags=(0,1); no unimplemented validation is
+    /// disguised as a successful callback. GUI-tree validation/optional slot 10
     /// is a different entry and is not accepted by this headless API.
     /// Write errors retain normalized current and any output prefix; path/target/
-    /// baseline commit only after successful write and legacy roundtrip/slot08.
+    /// baseline commit only after successful write and legacy roundtrip/slot 08.
     pub fn save(
         &mut self,
         session: &mut Session,
@@ -621,7 +621,7 @@ impl Document {
     }
 
     /// Native Save count/choice branches over explicit actual view sources.
-    /// Validation errors STILL save without CD; warning Yes alone runs slot10.
+    /// Validation errors STILL save without CD; warning Yes alone runs slot 10.
     /// A missing reset state is an error only when that branch is reached.
     pub fn save_with_validation(
         &mut self,
@@ -843,7 +843,7 @@ mod tests {
                 let updated = image.memory().to_vec();
                 drop(image);
                 doc.patch_current(&[(0, &updated)])?;
-                // An actual post-row recipient may replace current before9514F.
+                // An actual post-row recipient may replace current before 9514F.
                 let mut live = doc.current().to_vec();
                 live[0x37158] = b'z';
                 live[0x3c9b0..0x3c9c0].fill(0xcc);
@@ -908,7 +908,7 @@ mod tests {
         use crate::clone::session_test_support::{Mock, response};
         let mut transport = Mock::new(6);
         let mut identity = response(6);
-        identity[9 + 0x13] = 8; // Independent E1 bits: Q.kind1, all other fields0.
+        identity[9 + 0x13] = 8; // Independent E1 bits: Q.kind 1, all other fields 0.
         transport.query_response = Some(identity);
         transport
     }
@@ -1223,7 +1223,7 @@ mod tests {
         assert_eq!(doc.extra_data(), 0x40001);
         doc.edit_setting("noise_blanker_depth", 0, &icf::settings::Value::Number(7))
             .unwrap();
-        assert_eq!(doc.current()[0x399a2], 6); // Native displayed depth7 is stored6.
+        assert_eq!(doc.current()[0x399a2], 6); // Native displayed depth 7 is stored 6.
         assert_eq!(doc.dirty(), 1);
         assert_eq!(doc.timer_ms(), Some(250));
         let mut output = Vec::new();
@@ -1408,8 +1408,8 @@ mod tests {
         assert_eq!(file.status, format::Status::Success);
         assert_eq!(file.reader.map_revision, 6); // Converter-local layout only.
         assert_eq!(&file.image[inactive..inactive + 8], b"INACTIVE");
-        assert_eq!(&doc.current()[inactive..inactive + 8], b"CALLSIGN"); // Post-write slot08 reached.
-        assert_eq!(doc.target_revision(), 255); // Raw target is not rewritten to6.
+        assert_eq!(&doc.current()[inactive..inactive + 8], b"CALLSIGN"); // Post-write slot 08 reached.
+        assert_eq!(doc.target_revision(), 255); // Raw target is not rewritten to 6.
         assert_eq!(session.document_flags, [0, 0]);
         assert_eq!(doc.path(), b"RAW255");
         assert_eq!(doc.baseline(), doc.current());
@@ -1791,7 +1791,7 @@ mod tests {
         let fields = source_fields();
         let (mut session, mut doc) = session_and_document(&fields);
         doc.new_file(&session, 7).unwrap();
-        session.context.decode_packed(0x40808); // LiveQ changes; B/G deliberately stay the old generation.
+        session.context.decode_packed(0x40808); // Live Q changes; B/G deliberately stay the old generation.
         doc.current[0x3fb40..0x3fb48].copy_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0]);
         doc.current[0x3fcd4..0x3fcd8].fill(0);
         doc.current[0x3662d] &= !1;

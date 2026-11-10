@@ -1004,8 +1004,8 @@ fn scan_native_frequency_uses_two_pass_ranges_and_original_warning_not_hard_reje
     let report: Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(report["effects"][1]["warning_bits"], 4);
     assert_eq!(report["frequency_context"]["selected"], 0);
-    // B was built from Q.kind0. A later live kind16 bypasses EB64 only; it
-    // does not rebuild source0 into a different locale's range generation.
+    // B was built from Q.kind 0. A later live kind 16 bypasses EB64 only; it
+    // does not rebuild source 0 into a different locale's range generation.
     for (live, warning) in [(0, 4), (16, 0)] {
         let context = files.write(
             &format!("live{live}.json"),

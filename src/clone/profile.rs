@@ -1,6 +1,6 @@
 use super::Error;
 
-/// Internal object length (DF694), not the on-disk MapRev6 length 3C9C0.
+/// Internal object length (DF694), not the on-disk MapRev 6 length 3C9C0.
 pub const IMAGE_CAPACITY: usize = 0x4997a;
 
 /// Explicit raw layout selector. It is not a firmware/region allowlist.

@@ -721,7 +721,7 @@ impl Controller {
             self.event("registry_value_read", self.dropdown.len() as i64);
             let value = value.as_ref().map_err(Clone::clone)?;
             // B0CF8's normal C/CW domain: filter then nine bytes implies abs<1e9.
-            // The existing scale0/step1 primitive's i32 bounds never clamp it.
+            // The existing scale 0/step 1 primitive's i32 bounds never clamp it.
             let number = crate::icf::settings::extended::numeric_text(
                 value,
                 source
@@ -904,7 +904,7 @@ impl Controller {
             .ok_or(Error::Invalid("current COM text source unavailable"))?;
         self.manual_commit(&text, busy_reads)
     }
-    /// Explicit captured getter entry. It may contain more than keyboard4 bytes.
+    /// Explicit captured getter entry. It may contain more than keyboard 4 bytes.
     pub fn manual_commit(&mut self, getter_text: &[u8], busy_reads: &[bool]) -> Result<(), Error> {
         self.commit_body(getter_text, busy_reads, None)
     }
@@ -1321,7 +1321,7 @@ impl Controller {
             key,
             span,
             // Finite resource descriptors have S cleared; constructor query
-            // state is unit+4C=0/unit+170 bit0=0. Other live queries may hold.
+            // state is unit+4C=0/unit+170 bit 0=0. Other live queries may hold.
             selectable: self.information_selection(0, 0, false),
             text,
         };

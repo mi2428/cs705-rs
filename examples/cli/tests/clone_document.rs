@@ -740,7 +740,7 @@ fn actual_second_third_probe_errors_preserve_private_and_wire_prefix_and_dirty_b
             assert_eq!(call(doc.current()), 123_000_000);
             assert_eq!(call(&op.preparation.image), 0);
             assert_eq!(call(&op.wire_image), 0);
-            // This kind3 correction copies F; no typed/list deletion sets AL.
+            // This kind 3 correction copies F; no typed/list deletion sets AL.
             assert_eq!(
                 op.preparation.correction.unwrap().lists,
                 icf::normalizer::ResetLists::default()

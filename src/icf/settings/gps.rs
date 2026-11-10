@@ -735,7 +735,7 @@ static NUMBERS: &[NumberField] = &[
 pub fn number_fields() -> &'static [NumberField] {
     NUMBERS
 }
-/// D5E9C/D5EC8's signed low32 wrappers, not the CSV altitude parser.
+/// D5E9C/D5EC8's signed low 32 wrappers, not the CSV altitude parser.
 fn altitude_unit(value: i32, to_meters: bool) -> i32 {
     let n = value.unsigned_abs();
     let (q, r) = (n / 10000, n % 10000);
@@ -771,7 +771,7 @@ fn altitude_local(old: i32, meter: bool) -> i32 {
     }
 }
 
-/// A089C normal paint shared with GPS-memory's signed32 holder. No saver runs.
+/// A089C normal paint shared with GPS-memory's signed 32 holder. No saver runs.
 pub fn paint_altitude_raw(old: i32, meter: bool) -> Vec<u8> {
     let mut text = if old == i32::MAX {
         b"------".to_vec()
@@ -794,7 +794,7 @@ fn speed_suffix(unit: u8) -> &'static [u8] {
     }
 }
 
-/// The same live396B5 unit source as normal paint, without a completed suffix.
+/// The same live 396B5 unit source as normal paint, without a completed suffix.
 pub fn edit_altitude_live(
     old: i32,
     image: &Icf<'_>,
@@ -972,7 +972,7 @@ impl NumberField {
         })
     }
 
-    /// Native numeric edit with live unit bytes and the shared48B28 producer.
+    /// Native numeric edit with live unit bytes and the shared 48B28 producer.
     /// Resolve the suffix after numeric conversion but before the case saver,
     /// including cancellation/display paths; missing degree input is not guessed.
     pub fn edit_live(
@@ -1100,7 +1100,7 @@ impl NumberField {
     }
 }
 
-/// The actual148-byte native lookup resource, not an approved storage packet.
+/// The actual 148-byte native lookup resource, not an approved storage packet.
 pub struct NativeSymbolPairs<'a> {
     pairs: &'a [[u8; 2]; 74],
 }
@@ -1425,7 +1425,7 @@ impl CoordinateField {
             gray: self.manual && image.memory()[0x399e3] != 2,
         })
     }
-    /// Dispatch only the shared mask/validator producer's real phase2 text.
+    /// Dispatch only the shared mask/validator producer's real phase 2 text.
     pub fn apply_dialog(
         &self,
         image: &mut Icf<'_>,
@@ -1597,8 +1597,8 @@ impl SentenceField {
         }
         selected
     }
-    /// C797C/C85F0 generates NMEA's fixed18 normal description; no64-row copy.
-    /// A4058 group6 reads the real GI_GpsLogSentence provider and appends LF.
+    /// C797C/C85F0 generates NMEA's fixed 18 normal description; no 64-row copy.
+    /// A4058 group 6 reads the real GI_GpsLogSentence provider and appends LF.
     /// The same raw projection as SentenceDialog ignores unknown storage bits.
     pub fn paint(
         self,

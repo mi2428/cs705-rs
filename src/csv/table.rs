@@ -1,11 +1,11 @@
 //! Ordered CSV alias tables (B5F30/B60B8), kept as caller-supplied resource data.
-//! A label->value map would destroy first-match collisions such as RPS3/RPS4.
+//! A label->value map would destroy first-match collisions such as RPS 3/RPS 4.
 //! Table bytes are not Unicode text and are never copied from factory payloads.
 
 use super::{Error, trim};
 
 /// Public IC-705 DTCS labels, represented as decimal digits, not octal numbers.
-/// The saved index selects this104-member set; arbitrary three-digit codes are
+/// The saved index selects this 104-member set; arbitrary three-digit codes are
 /// not accepted. This is a public radio symbol set, not a factory image.
 pub const DTCS_CODES: [u16; 104] = [
     23, 25, 26, 31, 32, 36, 43, 47, 51, 53, 54, 65, 71, 72, 73, 74, 114, 115, 116, 122, 125, 131,
@@ -68,7 +68,7 @@ pub fn mode_ascii(
     Some(value)
 }
 /// B7BD8 adds exactly one leading zero to trimmed strings of length <=2. It does
-/// not pad to width3 or accept arbitrary octal codes absent from the source table.
+/// not pad to width 3 or accept arbitrary octal codes absent from the source table.
 pub fn dtcs_ascii(source: &[u8], entries: &[Entry<'_>]) -> Option<u32> {
     let source = trim(source);
     if source.len() <= 2 {
@@ -238,7 +238,7 @@ fn rx_label(request: &super::payload::Request<'_>) -> Result<Vec<u8>, Error> {
 }
 
 /// Built-in ASCII enum import over the same semantics used by export. The
-/// numeric scan preserves the only duplicate label (DUP3/4 -> first3); explicit
+/// numeric scan preserves the only duplicate label (DUP 3/4 -> first 3); explicit
 /// D-STAR aliases are primary successes, never an invented correction event.
 pub fn builtin_import_ascii(
     kind: super::payload::Kind,
@@ -351,8 +351,8 @@ pub fn portable_import(
     }
 }
 
-/// Public normal50/MTON51 profiles. Alias51 is checked before candidate profile
-/// selection, and candidate order is r+10*c, including MTON's50 in its first row.
+/// Public normal 50/MTON 51 profiles. Alias 51 is checked before candidate profile
+/// selection, and candidate order is r+10*c, including MTON's 50 in its first row.
 pub fn tone_builtin_ascii(
     source: &[u8],
     mtone: bool,
@@ -496,10 +496,10 @@ pub struct ToneCandidate<'a> {
     pub label: &'a [u8],
 }
 
-/// B77E8: comma->dot, first alias (including index50), then suffix/range check.
+/// B77E8: comma->dot, first alias (including index 50), then suffix/range check.
 /// Nearest selection re-parses ORIGINAL numeric text with CRT, not D5560's
 /// already parsed double; strict smaller difference keeps the first tie.
-/// Wrapper ignores selector bool, retains initial index8, and corrects once.
+/// Wrapper ignores selector bool, retains initial index 8, and corrects once.
 pub fn tone_ascii(
     source: &[u8],
     aliases: &[Entry<'_>],

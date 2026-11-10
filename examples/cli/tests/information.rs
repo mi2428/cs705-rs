@@ -719,7 +719,7 @@ fn software_driver_runs_one_query_initial_adoption_information_and_real_close_re
     let f = Files::new();
     let asset = f.write("source.raw", &initial_asset());
     let mut response = bytes(&wire(b"ACTUAL QUERY", 6));
-    response[9 + 0x13] = 8; // The existing context decoder yields kind1.
+    response[9 + 0x13] = 8; // The existing context decoder yields kind 1.
     let response: String = response.iter().map(|b| format!("{b:02X}")).collect();
     let mock = f.json(
         "query.json",

@@ -15,7 +15,7 @@ pub use native::{NativeState, NativeView};
 pub const RECENT_LIMIT: usize = 10;
 pub const RECENT_VISIBLE: usize = 4;
 
-/// CompareStringA inputs are raw ANSI paths, locale0x400, flags1. Result0 is
+/// CompareStringA inputs are raw ANSI paths, locale 0x400, flags 1. Result 0 is
 /// API failure, NOT equality. Do not substitute host case folding or Unicode.
 pub trait PathComparison {
     fn compare(&mut self, left: &[u8], right: &[u8]) -> Result<i32, Error>;
@@ -90,7 +90,7 @@ impl RecentFiles {
     }
 }
 
-/// Native one-based dialog filters select descending targets6 through1.
+/// Native one-based dialog filters select descending targets 6 through 1.
 pub fn filter_target(index: u32) -> u32 {
     if (1..=6).contains(&index) {
         7 - index
@@ -273,7 +273,7 @@ pub struct UiState {
     /// Main-form-owned resource, not freed by document Close.
     pub image_list: Vec<u32>,
     pub application5b: u8,
-    /// VA8646AC, distinct from main-form visibility and query readiness.
+    /// VA 8646AC, distinct from main-form visibility and query readiness.
     pub profile_ready: u8,
     pub operation40: u32,
     pub fc: u8,
@@ -406,7 +406,7 @@ impl UiState {
         }
         Ok(())
     }
-    /// Document25 ownership/data pass. Typed view coordinates come from actual
+    /// Document 25 ownership/data pass. Typed view coordinates come from actual
     /// registered class sources; current/baseline/pending are never cloned/reset.
     pub fn sync25(&mut self, document: &mut Document, session: &mut Session) -> Result<(), Error> {
         self.instantiate_native(document)?;
@@ -501,10 +501,10 @@ impl UiState {
                     }),
                 )?
             }
-            // Document VMT slot24 is RVA4FB84: push ebp; mov ebp,esp;
+            // Document VMT slot 24 is RVA 4FB84: push ebp; mov ebp,esp;
             // pop ebp; ret. This concrete leaf has no effects or external input.
             InitialBoundary::Additional => {}
-            // Registered document listeners cover00..09 and25..38. This says
+            // Registered document listeners cover 00..09 and 25..38. This says
             // nothing about other bus owners; do not acknowledge their work.
             InitialBoundary::Sync(0x49) => {
                 return Err(invalid(

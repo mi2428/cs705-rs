@@ -12,7 +12,7 @@ pub struct Counts {
     pub c4: u32,
 }
 impl Counts {
-    /// 878C4 selected: code2 is capacity, not a discarded event.
+    /// 878C4 selected: code 2 is capacity, not a discarded event.
     pub fn selected_event(&mut self, code: u32, delta: u32) {
         match code {
             0 => {
@@ -24,7 +24,7 @@ impl Counts {
             _ => {}
         }
     }
-    /// 91320 whole: code2 discards; code3 sets S2 without a C4 marker.
+    /// 91320 whole: code 2 discards; code 3 sets S 2 without a C4 marker.
     pub fn whole_event(&mut self, code: u32, delta: u32) {
         match code {
             0 => self.selected_event(0, delta),
@@ -95,7 +95,7 @@ pub fn pair_correction(
     }
 }
 
-/// Native WriteFile result. Any nonzero BOOL succeeds even for short/count0.
+/// Native WriteFile result. Any nonzero BOOL succeeds even for short/count 0.
 #[derive(Debug, Clone, Copy)]
 pub struct WriteResult {
     pub bool_value: u32,
@@ -130,7 +130,7 @@ pub fn export_ranges(
 }
 
 /// 835D0's lazy row assembly. The classifier returns None for an invalid row,
-/// otherwise (side24, builder bytes). In pair mode side0 REPLACES the buffer
+/// otherwise (side 24, builder bytes). In pair mode side 0 REPLACES the buffer
 /// without writing; side!=0 appends and writes. Buffer survives range boundaries
 /// and false writes, and false stops only that range's remaining source reads.
 pub fn export_memory<S>(

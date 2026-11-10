@@ -1,4 +1,4 @@
-//! GPS 8451C/8409C image transfer. Physical34 -> decoded616 projection is field
+//! GPS 8451C/8409C image transfer. Physical 34 -> decoded 616 projection is field
 //! movement only; all ICF bit/enum codecs remain in core. Native date/time text
 //! is supplied per field/read, not silently replaced with ISO or host locale.
 //! Import consumes finalized decoded rows, after clearing the target dataset.

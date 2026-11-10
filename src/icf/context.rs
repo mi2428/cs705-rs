@@ -1,8 +1,8 @@
 //! Live Q context fields and their original adoption/packed-decoding boundaries.
 //!
-//! Q is24bytes, not a factory image or a generated range owner. Known constructor
+//! Q is 24 bytes, not a factory image or a generated range owner. Known constructor
 //! constants are generated here; registry/OS/header values remain explicit input.
-//! Source: A1 producer-contract and RVAs5435C/562E4/565A4/100F4/56CC8.
+//! Source: A1 producer-contract and RVAs 5435C/562E4/565A4/100F4/56CC8.
 
 use super::Error;
 use crate::clone::ContextFields;
@@ -33,7 +33,7 @@ impl Context {
         context
     }
 
-    /// The12 compared fields in the shared clone/header representation.
+    /// The 12 compared fields in the shared clone/header representation.
     pub fn fields(&self) -> ContextFields {
         ContextFields(std::array::from_fn(|i| {
             let at = OFFSETS[i];
@@ -45,8 +45,8 @@ impl Context {
         }))
     }
 
-    /// 562E4: clamp only unsigned kind outside0..16, copy the semantic fields,
-    /// and preserve padding6/7 and options14..17. Byte fields retain low8bits.
+    /// 562E4: clamp only unsigned kind outside 0..16, copy the semantic fields,
+    /// and preserve padding 6/7 and options 14..17. Byte fields retain low 8 bits.
     pub fn adopt(&mut self, fields: ContextFields) {
         for (i, mut value) in fields.0.into_iter().enumerate() {
             if i == 0 && value > 16 {
@@ -62,7 +62,7 @@ impl Context {
     }
 
     /// 565A4: clear Q first, decode all fields, THEN return checksum equality.
-    /// Even false has already replaced the context. Registry's later kind16
+    /// Even false has already replaced the context. Registry's later kind 16
     /// override is deliberately separate so other callers can observe this state.
     pub fn decode_packed(&mut self, packed: u32) -> bool {
         self.raw.fill(0);
@@ -87,8 +87,8 @@ impl Context {
     }
 
     /// 5641C's native metadata producer. Full DWORD/byte values are shifted and
-    /// ADDED with32bit wrap; unknown bytes are not bool-masked. Checksum uses
-    /// only kind's low5/C's low2 bits, but the full ten semantic byte values.
+    /// ADDED with 32 bit wrap; unknown bytes are not bool-masked. Checksum uses
+    /// only kind's low 5/C's low 2 bits, but the full ten semantic byte values.
     /// Padding and the three non-comparison option bytes are not serialized.
     pub fn encode_packed(&self) -> u32 {
         let kind = u32::from_le_bytes(self.raw[..4].try_into().unwrap());
@@ -115,7 +115,7 @@ impl Context {
         packed.wrapping_add((check & 1) | ((check & 2) << 2) | ((check & 4) << 4))
     }
 
-    /// Registry caller5565B's actual failure correction: only kind becomes16.
+    /// Registry caller 5565B's actual failure correction: only kind becomes 16.
     pub fn adopt_registry_packed(&mut self, packed: u32) -> bool {
         let valid = self.decode_packed(packed);
         if !valid {
@@ -124,8 +124,8 @@ impl Context {
         valid
     }
 
-    /// 56CFC/100F4 selector. The finite match is the original16kind schema,
-    /// not a copied factory array. Negative kind/override0 would read before the
+    /// 56CFC/100F4 selector. The finite match is the original 16 kind schema,
+    /// not a copied factory array. Negative kind/override 0 would read before the
     /// original table; this safe API reports that unavailable source explicitly.
     pub fn selector(&self) -> Result<u8, Error> {
         let kind = i32::from_le_bytes(self.raw[..4].try_into().unwrap());
@@ -158,7 +158,7 @@ impl Context {
         Ok(if langid & 0x3ff == 0x11 { 0 } else { 1 })
     }
 
-    /// 56DA4's raw byte result: F unless selector4 and A!=0, otherwise0.
+    /// 56DA4's raw byte result: F unless selector 4 and A!=0, otherwise 0.
     pub fn effective_f(&self) -> Result<u8, Error> {
         Ok(if self.selector()? == 4 && self.raw[4] != 0 {
             0
@@ -175,7 +175,7 @@ impl Context {
             self.raw[14]
         })
     }
-    /// Actual58BDC/58C5C/58C78 predicates used by stage9's central copies.
+    /// Actual 58BDC/58C5C/58C78 predicates used by stage9's central copies.
     pub fn condition_58bdc(&self) -> Result<bool, Error> {
         Ok(self.effective_f()? == 0)
     }

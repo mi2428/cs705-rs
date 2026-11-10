@@ -331,7 +331,7 @@ pub enum RowAction {
         /// Required when an occupied tail row would be released.
         #[arg(long)]
         yes: bool,
-        /// Explicit decoded type20 template clipboard for GPS insertion.
+        /// Explicit decoded type 20 template clipboard for GPS insertion.
         #[arg(long)]
         seed: Option<String>,
         #[command(flatten)]

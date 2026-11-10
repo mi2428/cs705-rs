@@ -17,7 +17,7 @@ pub struct Args {
     /// Captured native helper state and reached Win32 API outputs; never run PE.
     #[arg(long, requires = "asset")]
     capture: Option<String>,
-    /// Actual GUI C+0 DWORD. Exactly1 selects Japanese; system locale is unused.
+    /// Actual GUI C+0 DWORD. Exactly 1 selects Japanese; system locale is unused.
     #[arg(long, allow_hyphen_values = true, requires = "asset")]
     gui_language: Option<String>,
     /// Actual native application-directory bytes, including its trailing slash.

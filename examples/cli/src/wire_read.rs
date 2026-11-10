@@ -30,7 +30,7 @@ pub(crate) struct Args {
     no_tree: bool,
     #[arg(long)]
     validation_views: Option<String>,
-    /// Approve a different identity at event2A. This saves D28/D40 only; live
+    /// Approve a different identity at event 2A. This saves D28/D40 only; live
     /// Q/B/G adoption still occurs in the successful borrowed-result callback.
     #[arg(long)]
     accept_context: bool,

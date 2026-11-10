@@ -5682,7 +5682,7 @@ fn native_memory_editor_uses_captured_cache_and_pending_registration_state() {
         assert!(h.valid());
         assert_eq!(h.channel_field(ChannelField::FrequencyHz), 146_000_000);
         assert_eq!(h.name(), b"PENDING         ");
-        // F1DC index2 passes class1 to F20C; it never calls EFCC.
+        // F1DC index 2 passes class 1 to F20C; it never calls EFCC.
         assert_eq!(h.offset_hz(), 600_000);
         assert_eq!(h.tx_tone(), 29);
     }

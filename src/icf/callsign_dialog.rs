@@ -823,7 +823,7 @@ mod tests {
         let mut d = Dialog::open(&sources, &mut h, &reads).unwrap();
         let after_open = h.clone();
         assert_eq!(d.mode, 4);
-        // Source mode4 starts with no route, then all/group0..49.
+        // Source mode 4 starts with no route, then all/group 0..49.
         let source_selection = ListSelection {
             category: 51,
             name: 1,
@@ -880,13 +880,13 @@ mod tests {
         .unwrap();
         assert!(d.holder == preview);
         assert!(d.checkbox);
-        // Only outer result1 adopts the clone. Metadata written by open remains.
+        // Only outer result 1 adopts the clone. Metadata written by open remains.
         let outcome = d.finish(&mut h, 2);
         assert!(!outcome.accepted && outcome.save);
         assert!(h == after_open);
         assert_eq!(&h.as_bytes()[..12], header);
 
-        // A NUL at source call+8 makes native AnsiString index9 unavailable.
+        // A NUL at source call+8 makes native AnsiString index 9 unavailable.
         // Scalar source fields have already changed; all calls remain untouched.
         let mut remote = record::reset_holder(0x0c, 0, 0);
         working::load_into(&image, 0, &mut remote).unwrap();

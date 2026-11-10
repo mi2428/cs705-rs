@@ -2,8 +2,8 @@
 
 use super::{Error, frequency_text};
 
-/// A522C trim0 profiles currently used by native callers: scale=digits=0/1/3/6.
-/// IDIV truncates toward zero; the two native32 abs operations wrap at MIN.
+/// A522C trim 0 profiles currently used by native callers: scale=digits=0/1/3/6.
+/// IDIV truncates toward zero; the two native 32 abs operations wrap at MIN.
 /// An optional sign prefix precedes the integer field, outside its space width.
 /// force_plus enables both signs, but zero has neither sign. signed_bounds
 /// enables only the negative prefix. No locale, unit, gate or clamp is applied.
@@ -48,25 +48,25 @@ fn normal(hz: u32, width: usize, signed_bounds: bool) -> Vec<u8> {
     scalar(hz as i32, 6, 6, width, signed_bounds, false).expect("fixed native Hz scalar profile")
 }
 
-/// A5134/A5184 -> A522C: scale6, fractional digits6, integer width4, trim0.
+/// A5134/A5184 -> A522C: scale 6, fractional digits 6, integer width 4, trim 0.
 /// Normal/call frequency+offset, compact frequency, scan/user and Rpt frequency.
 /// Padding spaces and all six fractional digits remain logical output bytes.
 pub fn channel(hz: u32) -> Vec<u8> {
     normal(hz, 4, false)
 }
 
-/// Compact type4/5 offset's FD60 MAX/MAX bounds scale back to signed -1.
+/// Compact type 4/5 offset's FD60 MAX/MAX bounds scale back to signed -1.
 /// Unlike normal/call offset bounds, this enables A522C's negative sign prefix.
 pub fn compact_offset(hz: u32) -> Vec<u8> {
     normal(hz, 4, true)
 }
 
-/// Rpt offset alone uses integer width3, still fractional digits6 and trim0.
+/// Rpt offset alone uses integer width 3, still fractional digits 6 and trim 0.
 pub fn repeater_offset(hz: u32) -> Vec<u8> {
     normal(hz, 3, false)
 }
 
-/// FromDV/FM frequency+offset and Rx15C: unsigned u32, fixed6, no width/trim.
+/// FromDV/FM frequency+offset and Rx 15C: unsigned u32, fixed 6, no width/trim.
 /// The normal-CW finite proof recovers exact div/rem after native scaling/RTL.
 /// live_decimal is F4140's one RTL read; zero emits no separator, not a NUL.
 /// D571C rereads the copied decimal's first byte at EACH logical output byte.

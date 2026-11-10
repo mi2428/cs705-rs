@@ -1,4 +1,4 @@
-//! 84A58..84DB8 in native field order. The completed live type22/default profile
+//! 84A58..84DB8 in native field order. The completed live type 22/default profile
 //! is explicit source data; it is not synthesized from a saved factory image.
 
 use super::{
@@ -42,7 +42,7 @@ pub fn utc_minutes(value: u32, default: u32) -> u32 {
     }
 }
 
-/// Acquire the current type22 source immediately before calling this finalizer,
+/// Acquire the current type 22 source immediately before calling this finalizer,
 /// after the CSV value phase. Fatal does not mean an untouched holder: its late
 /// DD/blank-call branch runs shared 5F64, then still runs C7340 after accounting.
 pub fn finalize(

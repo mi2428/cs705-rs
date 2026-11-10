@@ -201,7 +201,7 @@ pub fn delete_ur_into(
 /// B5170's bounded descriptor walk and working-map expansion. This is the native
 /// storage boundary, unlike NormalMemory::from_icf's strict topology view. It
 /// does not reject repeated descriptors, contradictory flags or p>=500. Address
-/// arithmetic stays32-bit; only unavailable actual image windows fail safely.
+/// arithmetic stays 32-bit; only unavailable actual image windows fail safely.
 pub fn expand_map(image: &mut [u8]) -> Result<(), Error> {
     let mut order = [u32::MAX; 100];
     let mut next = raw::<1>(image, 0x36628)?[0];
@@ -244,7 +244,7 @@ pub fn expand_map(image: &mut [u8]) -> Result<(), Error> {
 }
 
 /// B5334 takes its own later snapshot. Only reached descriptor names are copied;
-/// unvisited names are not silently padded, and cycles stop after100 iterations.
+/// unvisited names are not silently padded, and cycles stop after 100 iterations.
 pub fn expand_names(image: &mut [u8]) -> Result<(), Error> {
     let snapshot = image.to_vec();
     let mut next = raw::<1>(&snapshot, 0x36628)?[0];
@@ -345,7 +345,7 @@ pub fn rebuild_metadata(image: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// 610C type23: common reset plus the native eight-byte code literal59064A.
+/// 610C type 23: common reset plus the native eight-byte code literal 59064A.
 /// This is an instruction/string recipe, not an externally supplied holder/G.
 pub fn ur_default(index: u32, binding: u32) -> super::record::DecodedRecord {
     let mut holder = super::record::reset_holder(0x23, index, binding);
@@ -353,7 +353,7 @@ pub fn ur_default(index: u32, binding: u32) -> super::record::DecodedRecord {
     holder
 }
 
-/// C61B4: prefix count stops only atFFFF, not at an out-of-table physical index.
+/// C61B4: prefix count stops only at FFFF, not at an out-of-table physical index.
 pub fn expand_ur_count(image: &mut [u8]) -> Result<(), Error> {
     let mut count = 0_u16;
     for row in 0..300 {
@@ -365,8 +365,8 @@ pub fn expand_ur_count(image: &mut [u8]) -> Result<(), Error> {
     put(image, 0x49978, &count.to_le_bytes())
 }
 
-/// C61F0's separate post-count snapshot and all300 typed load/body/save/reloads.
-/// An invalid order entry generates type23, never an empty/zero record fallback.
+/// C61F0's separate post-count snapshot and all 300 typed load/body/save/reloads.
+/// An invalid order entry generates type 23, never an empty/zero record fallback.
 pub fn expand_ur_data(image: &mut [u8]) -> Result<(), Error> {
     let snapshot = image.to_vec();
     for index in 0..300_u32 {
@@ -384,7 +384,7 @@ pub fn expand_ur_data(image: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// C637C: identity order below the live cached count,FFFF thereafter.
+/// C637C: identity order below the live cached count, FFFF thereafter.
 pub fn rebuild_ur_metadata(image: &mut [u8]) -> Result<(), Error> {
     let count = u16::from_le_bytes(raw(image, 0x49978)?);
     for index in 0..300_u16 {
@@ -476,8 +476,8 @@ impl WorkingUr {
     ) -> Result<bool, Error> {
         self.insert_one(u32::from(self.count()), defaults)
     }
-    /// D1CB4 shifts the entire capacity tail, not only active rows. Count0 still
-    /// wraps toFFFF if explicitly called, as in the native low-level helper.
+    /// D1CB4 shifts the entire capacity tail, not only active rows. Count 0 still
+    /// wraps to FFFF if explicitly called, as in the native low-level helper.
     pub fn delete_one(
         &mut self,
         index: u32,
@@ -561,7 +561,7 @@ impl NormalMemory {
     /// Save an already decoded holder to a logical typed side, preserving this
     /// model's original file/comment/EtcData. Uses the one shared ordered codec.
     /// No allocation, side initialization, map release or reload is implied.
-    /// A valid0 raw save can mark the physical slot empty; its caller must perform
+    /// A valid 0 raw save can mark the physical slot empty; its caller must perform
     /// the original map/release operation separately before storage reconstruction.
     pub fn store_channel(
         &mut self,
@@ -631,7 +631,7 @@ impl NormalMemory {
 
     /// B4AC0: read G's group word at the actual reset point. A matching current
     /// Home group receives that SAME word, not G's global Home row. Only the
-    /// matching branch writes the external VA864930 byte to1.
+    /// matching branch writes the external VA 864930 byte to 1.
     pub fn reset_home(
         &mut self,
         group: usize,
@@ -765,9 +765,9 @@ impl NormalMemory {
         Ok(true)
     }
 
-    /// Native step2 move: rotate maps first, then reset Home even for all holes.
+    /// Native step 2 move: rotate maps first, then reset Home even for all holes.
     /// A boundary/no-selection result does not read G or change the cache byte.
-    /// This is not the step1 decoded-clipboard or actionD5 reference runner.
+    /// This is not the step 1 decoded-clipboard or action D5 reference runner.
     pub fn carry_with_home(
         &mut self,
         group: usize,

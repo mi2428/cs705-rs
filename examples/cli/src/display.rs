@@ -98,8 +98,8 @@ fn read_value(path: &str) -> Result<Value> {
         .map_err(|_| AppError::invalid("invalid native display JSON source"))
 }
 
-/// Resource parser asks whether rows are enabled; native58Bxx returns SKIP.
-/// Q is reborrowed per request. Only selector16/JPN reads SYSTEM LANGID.
+/// Resource parser asks whether rows are enabled; native 58Bxx returns SKIP.
+/// Q is reborrowed per request. Only selector 16/JPN reads SYSTEM LANGID.
 fn resource_condition(
     name: &[u8],
     q: &cs705::icf::context::Context,

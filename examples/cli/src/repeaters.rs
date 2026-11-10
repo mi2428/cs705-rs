@@ -28,7 +28,7 @@ pub struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// The17 native grid fields; Index is read-only, Type's menu is0..3.
+    /// The 17 native grid fields; Index is read-only, Type's menu is 0..3.
     Fields,
     /// Read one absolute working row through saved order and indirect gateways.
     Read {
@@ -72,7 +72,7 @@ enum Command {
         /// Optional ordered captured LCMap/CharUpper outputs, never holder data.
         #[arg(long)]
         nls_source: Option<String>,
-        /// Actual864634 option for last-word callsign placement.
+        /// Actual 864634 option for last-word callsign placement.
         #[arg(long)]
         align_callsign: bool,
         #[arg(long, requires = "yes")]

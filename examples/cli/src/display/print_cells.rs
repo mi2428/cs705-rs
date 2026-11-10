@@ -86,7 +86,7 @@ fn unsupported(node: &CellNode) -> AppError {
     ))
 }
 
-// Key -> selector source schema at64D66, not copied selector captions or codes.
+// Key -> selector source schema at 64D66, not copied selector captions or codes.
 fn selector(key: u32) -> Option<&'static str> {
     Some(match key {
         0x336..=0x338 => "Agc",

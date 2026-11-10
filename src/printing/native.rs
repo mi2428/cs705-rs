@@ -108,7 +108,7 @@ pub fn read_source(mut reader: impl io::Read + io::Seek) -> io::Result<Vec<u8>> 
             }
         }
     }
-    // CSV uses locale0; native paint can select locale1. Capture both targets.
+    // CSV uses locale 0; native paint can select locale 1. Capture both targets.
     // Capture those exact targets, not an unobserved zero-filled PE tail.
     let slots = (0..96)
         .flat_map(|i| {
@@ -333,7 +333,7 @@ pub struct InlineFrame {
 }
 
 impl InlineFrame {
-    /// 32394 supplies code0D; 302A8 replaces action with0 for non-NULL text.
+    /// 32394 supplies code 0D; 302A8 replaces action with 0 for non-NULL text.
     pub fn commit(grid: &Grid, column: usize, row: usize, text: &[u8]) -> io::Result<Self> {
         let nodes = grid
             .nodes
@@ -361,7 +361,7 @@ impl InlineFrame {
             factory,
             input_code: 0x0d,
             layout: grid.show_split,
-            // 14388 clears paint bits0..3 and70; 300F4/5D2E8 then marks
+            // 14388 clears paint bits 0..3 and 70; 300F4/5D2E8 then marks
             // this selected software cell, with no printer attached to input.
             warning_bits: 1,
             focus: 0,
@@ -369,8 +369,8 @@ impl InlineFrame {
             command: 0,
             phase: 1,
             notify: 1,
-            // 63734 starts with1. This phase1 producer has no phase2 event
-            // pointer, so it does not add the selection-event bit8.
+            // 63734 starts with 1. This phase 1 producer has no phase 2 event
+            // pointer, so it does not add the selection-event bit 8.
             initial_flags: 1,
             grid4: true,
             grid8: true,
@@ -382,7 +382,7 @@ impl InlineFrame {
 
 /// The selected software cell is a gesture, not a completed context packet.
 /// Guard clear, frame construction, actual dispatch and normal hide keep the
-/// original failure prefix. A second1B sees a hidden editor and cannot recommit.
+/// original failure prefix. A second 1B sees a hidden editor and cannot recommit.
 pub fn sync_editor<E: From<io::Error>>(
     editor: &mut super::Editor,
     grid: &Grid,
@@ -503,7 +503,7 @@ impl<'a> Resources<'a> {
     }
 
     /// 226E0 binds the complete resource graph, including inherited models.
-    /// system_japanese is48B0C's primary-LANGID predicate, not C00 or live Q.
+    /// system_japanese is 48B0C's primary-LANGID predicate, not C00 or live Q.
     /// Without a binding, consumers require equal results from all three sources.
     pub fn with_language(mut self, gui_language: u32, system_japanese: bool) -> Self {
         self.source = Some(Self::language_source(gui_language, system_japanese));
@@ -531,7 +531,7 @@ impl<'a> Resources<'a> {
         self.pe
     }
 
-    /// B03C8/B05D4's raw captions, before the separate47CF0 renderer.
+    /// B03C8/B05D4's raw captions, before the separate 47CF0 renderer.
     pub fn metadata_empty_caption(
         &self,
         field: crate::icf::settings::extended::MetadataField,
@@ -573,7 +573,7 @@ impl<'a> Resources<'a> {
 
     // 226E0: missing inputs leave a finite set of possible registered sources.
     // Returning without those inputs requires equal actual results from ALL of
-    // them, including the selected source's models. No source1 fallback exists.
+    // them, including the selected source's models. No source 1 fallback exists.
     fn selected<T: PartialEq>(
         &self,
         gui: Option<u32>,
@@ -682,7 +682,7 @@ impl<'a> Resources<'a> {
     }
 
     /// 19D78's caller-selected class result, not CSV text or the raw row literal.
-    /// Mode uses key7; the other connected selectors use key1. Explicit
+    /// Mode uses key 7; the other connected selectors use key 1. Explicit
     /// colon aliases (including empty) take precedence. Full-width value lookup
     /// must match a real Flex0 index; unknown values do not become captions.
     pub fn selector_caption(
@@ -1876,7 +1876,7 @@ mod tests {
             (Some(1), Some(0x409)),
             (Some(0), None),
         ];
-        // Independent expected bytes from10FD4/11DFF, not selector self-comparison.
+        // Independent expected bytes from 10FD4/11DFF, not selector self-comparison.
         for (cell, expected) in [
             (
                 b"row{S(%Flex0[7]:left(right\\)/end)B}".as_slice(),

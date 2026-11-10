@@ -22,8 +22,8 @@ fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 0, reason }
 }
 
-/// A real Flex0 selector entry. Group uses the alarm wire ordinal1..27, not
-/// the row-group ordinal0..26. Captions come from GI_Sheet_Sel_GPS_Alarm.
+/// A real Flex0 selector entry. Group uses the alarm wire ordinal 1..27, not
+/// the row-group ordinal 0..26. Captions come from GI_Sheet_Sel_GPS_Alarm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowAlarmChoice {
     Off,
@@ -73,7 +73,7 @@ pub struct AlarmView {
 pub struct RowAlarmEffect {
     pub choice: ChoiceEffect,
     pub marked: bool,
-    /// Original synchronous39 request; delivery remains the caller's boundary.
+    /// Original synchronous 39 request; delivery remains the caller's boundary.
     pub notify_39: bool,
 }
 
@@ -86,10 +86,10 @@ fn alarm_index(raw: &[u8]) -> u8 {
     }
 }
 
-/// 6BC5B/C8508/C855C: actual31-entry producer and original accepted-event
-/// consumer. The lower writer projects arbitrary accepted candidates to low8,
+/// 6BC5B/C8508/C855C: actual 31-entry producer and original accepted-event
+/// consumer. The lower writer projects arbitrary accepted candidates to low 8,
 /// as the original does; it does not clamp them to the normal producer domain.
-/// Off/Receive/Group save only the global tuple, never the row's raw34 bytes.
+/// Off/Receive/Group save only the global tuple, never the row's raw 34 bytes.
 pub fn row_alarm(
     image: &mut Icf<'_>,
     view: AlarmView,
@@ -139,7 +139,7 @@ pub fn row_alarm(
     })
 }
 
-/// Load an actual occupied logical row through the shared raw34 decoder. This
+/// Load an actual occupied logical row through the shared raw 34 decoder. This
 /// is a source producer, not an input path for a client-completed holder.
 pub fn load(image: &Icf<'_>, absolute: usize, binding: u32) -> Result<DecodedRecord, Error> {
     let groups = image.gps_groups()?;
@@ -161,7 +161,7 @@ pub fn load(image: &Icf<'_>, absolute: usize, binding: u32) -> Result<DecodedRec
 }
 
 /// Re-resolve the LIVE target order. The holder may predate an order change.
-/// Valid0 returns before address lookup. The one codec emits all six fields in
+/// Valid 0 returns before address lookup. The one codec emits all six fields in
 /// original save order, not a field-only patch or a decoded-value normalization.
 pub fn save(image: &mut Icf<'_>, absolute: usize, holder: &DecodedRecord) -> Result<bool, Error> {
     if !holder.valid() {
@@ -210,14 +210,14 @@ pub struct GroupNameEffect {
     pub stored: bool,
     pub state_out: u32,
     pub display: Vec<u8>,
-    /// Copied queued3E label (node ID, bytes), before conditional synchronous39.
+    /// Copied queued 3E label (node ID, bytes), before conditional synchronous 39.
     pub label: Option<(u32, Vec<u8>)>,
     pub refresh_if_binding_matches: bool,
     /// Sanitized shared input, including bytes after an original embedded NUL.
     pub shared_input: Vec<u8>,
 }
 
-/// 6BE5A mode1 name grammar. Public row group1..26 maps to native name index0..25.
+/// 6BE5A mode 1 name grammar. Public row group 1..26 maps to native name index 0..25.
 /// Empty groups and empty accepted names are legal; no row or metadata is added.
 pub fn group_name(
     image: &mut Icf<'_>,

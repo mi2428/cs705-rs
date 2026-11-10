@@ -19,7 +19,7 @@ pub struct InitialRequest {
     pub additional: u32,
 }
 impl InitialRequest {
-    /// 51680/event2A: normal comparison is0/2; scalar1 is canonicalized before
+    /// 51680/event 2A: normal comparison is 0/2; scalar1 is canonicalized before
     /// 23758. The old raw-kind predicate is owned by the receiver, not a packet.
     pub fn information(
         session: &Session,
@@ -135,7 +135,7 @@ impl Document {
                     }
                 }
                 if request.additional as u8 != 0 {
-                    // The actual derived slot24=4FB84 is an empty body.
+                    // The actual derived slot 24=4FB84 is an empty body.
                     boundary(InitialBoundary::Additional, self, session)?;
                 }
             }

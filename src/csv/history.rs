@@ -1,4 +1,4 @@
-//! Rx92AFC's individual compact1/extra0 formatter requests, not whole CSV rows.
+//! Rx 92AFC's individual compact 1/extra 0 formatter requests, not whole CSV rows.
 //! Offset is captured by the caller before holder validity checks. Resource
 //! labels share table::portable_label; Gregorian/BCD/time logic stays in datetime.
 //! Symbol display is intentionally independent of original captions: raw APRS
@@ -45,7 +45,7 @@ pub fn format_with_date(
                 return Ok(Vec::new());
             }
             let (date, time) = datetime::shift_minutes(date, time, offset)?;
-            // Compact1 uses ddddd hh:nn:ss, not the GUI's CsvDateFormat order.
+            // Compact 1 uses ddddd hh:nn:ss, not the GUI's CsvDateFormat order.
             let mut out = datetime::format_date(date, b"ddddd", context, native)?;
             out.push(b' ');
             out.extend(datetime::fixed_time(time, context.time_separator));
@@ -68,8 +68,8 @@ pub fn format_with_date(
             } else {
                 43
             };
-            // 47E14 C-prefix -> TrimRight -> 479EC('_'). Extra0 skips478C8;
-            // half-width kana survive. The compact1 B62E8 pass happens last.
+            // 47E14 C-prefix -> TrimRight -> 479EC('_'). Extra 0 skips 478C8;
+            // half-width kana survive. The compact 1 B62E8 pass happens last.
             let text = message(request.source, width, false)?;
             Ok(super::export_text(&text, width))
         }
@@ -78,7 +78,7 @@ pub fn format_with_date(
 }
 
 // 479EC is byte-wise, unlike nls::sanitize's valid-DBCS-pair grammar. Keep this
-// existing Rx primitive shared;478C8 is a separate, later half-width-kana pass.
+// existing Rx primitive shared; 478C8 is a separate, later half-width-kana pass.
 fn message(source: &[u8], width: usize, extra: bool) -> Result<Vec<u8>, Error> {
     if source.len() != width {
         return Err(Error::Invalid("Rx message requires exact raw20/raw43"));
@@ -114,8 +114,8 @@ fn dword(source: &[u8], at: usize) -> Result<u32, Error> {
     Ok(u32::from_le_bytes(span(source, at, 4)?.try_into().unwrap()))
 }
 
-// CS-705's PE32/x86/ImageBase schema only. Each lookup is bounded to at most96
-// section headers and the actual file-backed tail; virtual/BSS bytes are not0.
+// CS-705's PE32/x86/ImageBase schema only. Each lookup is bounded to at most 96
+// section headers and the actual file-backed tail; virtual/BSS bytes are not 0.
 pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
     if span(source, 0, 2)? != b"MZ" {
         return Err(Error::Invalid("symbol source is not PE"));
@@ -209,7 +209,7 @@ pub fn symbol_from_source(
         return Ok(direct());
     }
     let special = [first, second] == *b"IY";
-    // C88B8 forces locale0 for compact1. Native paint uses48B44's canonical bit.
+    // C88B8 forces locale 0 for compact 1. Native paint uses 48B44's canonical bit.
     let slot = if special {
         0x419518
     } else {
@@ -343,7 +343,7 @@ mod tests {
         put32(&mut pe, 0x18c, 0x200);
         for i in 0..=192 {
             put32(&mut pe, 0x200 + 8 * i, 0x819618);
-            put32(&mut pe, 0x204 + 8 * i, u32::MAX); // Locale1 is not a compact source.
+            put32(&mut pe, 0x204 + 8 * i, u32::MAX); // Locale 1 is not a compact source.
         }
         let mut at = 0x701;
         for (slot, text) in [

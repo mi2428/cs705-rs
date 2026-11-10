@@ -53,7 +53,7 @@ pub struct Args {
     yes: bool,
     #[arg(long, value_enum, default_value = "none")]
     preview: Preview,
-    /// Virtual 50ms callbacks; cancellation drains remaining sheet names.
+    /// Virtual 50 ms callbacks; cancellation drains remaining sheet names.
     #[arg(long)]
     cancel_after_sheets: Option<usize>,
     /// Portable semantic KEY=VALUE input dispatched before printing, not a

@@ -1,4 +1,4 @@
-//! Actual4D3D8 driver. W/F/C/T bindings are explicit and remain live aliases.
+//! Actual 4D3D8 driver. W/F/C/T bindings are explicit and remain live aliases.
 //! The terminal marker belongs ONLY to the end of this driver, after all work.
 
 use super::{
@@ -208,7 +208,7 @@ fn central(
     Ok(reset_scan)
 }
 
-/// R_pre at4E5D3..4EACC. Early true returns mirror the native jumps; controls
+/// R_pre at 4E5D3..4EACC. Early true returns mirror the native jumps; controls
 /// D1AC/1AD and the C/T sources are never replaced with W or arbitrary booleans.
 fn r_pre(
     image: &mut [u8],
@@ -287,7 +287,7 @@ fn r_pre(
             return Ok((true, false));
         }
         let hz = dword(image, 0x3a783)?;
-        // Native EE90==1 iff the shared EFCC class is2 (F014 indices13..15).
+        // Native EE90==1 iff the shared EFCC class is 2 (F014 indices 13..15).
         let class = r.ranges.efcc(hz);
         if frequency_bad(image, 0x1a, 1, r)? {
             return Ok((true, false));

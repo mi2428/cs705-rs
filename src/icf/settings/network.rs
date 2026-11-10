@@ -1,4 +1,4 @@
-//! U11 IPv4/prefix linked edits (keys319..31D), not network/device operations.
+//! U11 IPv4/prefix linked edits (keys 319..31D), not network/device operations.
 //!
 //! This intentionally preserves nonstandard byte parsing and bounded correction
 //! loops. Unknown prefix bytes are not pre-clamped; x86 masks the shift count.
@@ -38,7 +38,7 @@ pub struct Configuration {
     pub secondary_dns: Ipv4Addr,
 }
 
-/// Native case-body effects, not the common grid's initial flag1 or dirty state.
+/// Native case-body effects, not the common grid's initial flag 1 or dirty state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Effect {
     pub stored: bool,
@@ -46,10 +46,10 @@ pub struct Effect {
     pub gray: bool,
 }
 
-/// 9C8B4: discard non-digit/non-dot bytes, then inspect at most15 bytes.
+/// 9C8B4: discard non-digit/non-dot bytes, then inspect at most 15 bytes.
 /// Empty/missing fields are zero; fifth and later fields are ignored. Each value
-/// wraps to low16 before unsigned255 clamp. None means length rejection, not an
-/// invalid RFC address. Empty IP input becomes0.0.0.1; empty GW/DNS remains zero.
+/// wraps to low 16 before unsigned 255 clamp. None means length rejection, not an
+/// invalid RFC address. Empty IP input becomes 0.0.0.1; empty GW/DNS remains zero.
 pub fn parse_typed(source: &[u8], allow_zero: bool) -> Option<Ipv4Addr> {
     let source = source.split(|&b| b == 0).next().unwrap();
     let filtered: Vec<_> = source
@@ -70,7 +70,7 @@ pub fn parse_typed(source: &[u8], allow_zero: bool) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::from(bytes))
 }
 
-/// 96E78 mask: prefix0 is special; other bytes use the x86 low-five shift bits.
+/// 96E78 mask: prefix 0 is special; other bytes use the x86 low-five shift bits.
 pub fn prefix_mask(prefix: u8) -> u32 {
     if prefix == 0 {
         0
@@ -91,7 +91,7 @@ fn address_bad(address: u32, mask: u32) -> u8 {
     }
 }
 
-/// 9CC88 mode0. Returns the corrected value; it does not promise a valid host.
+/// 9CC88 mode 0. Returns the corrected value; it does not promise a valid host.
 pub fn correct_address(address: Ipv4Addr, prefix: u8) -> Ipv4Addr {
     let mut address = u32::from(address);
     let mask = prefix_mask(prefix);
@@ -124,8 +124,8 @@ fn gateway_bad(address: u32, gateway: u32, mask: u32) -> u8 {
     }
 }
 
-/// 9CD08: preserve gateway0, clamp subnet bytes, combine host bits, then run the
-/// original255-iteration bad-host loop. /0,/32 and unknown prefix bytes can still
+/// 9CD08: preserve gateway 0, clamp subnet bytes, combine host bits, then run the
+/// original 255-iteration bad-host loop. /0, /32 and unknown prefix bytes can still
 /// end invalid; no fallback gateway or additional validation is invented.
 pub fn correct_gateway(address: Ipv4Addr, gateway: Ipv4Addr, prefix: u8) -> Ipv4Addr {
     if gateway.is_unspecified() {
@@ -167,7 +167,7 @@ impl Icf<'_> {
         }
     }
 
-    /// Apply a typed address entry. None is helper cancellation/display; over15
+    /// Apply a typed address entry. None is helper cancellation/display; over 15
     /// filtered bytes also skips the raw copy. Other accepted text, even empty,
     /// uses the original parser and ordered field-specific linked corrections.
     pub fn edit_network_address(&mut self, field: Field, input: Option<&[u8]>) -> Effect {
@@ -209,9 +209,9 @@ impl Icf<'_> {
         }
     }
 
-    /// Prefix helper's selected key is2, not its outer key31A or Flex0=1.
+    /// Prefix helper's selected key is 2, not its outer key 31A or Flex0=1.
     /// Store the candidate's low byte before address/gateway corrections. Prefix
-    /// itself is never clamped. Correction of either linked field adds flag20.
+    /// itself is never clamped. Correction of either linked field adds flag 20.
     pub fn select_network_prefix(
         &mut self,
         key: u16,

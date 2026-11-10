@@ -112,7 +112,7 @@ fn image(memory: bool) -> Vec<u8> {
     m[0x3bf0a..0x3bf6e].fill(255);
     m[0x3ab82..0x3bf0a].fill(255);
     m[0xa60b..0xa60f].fill(255);
-    // Ten invalid memopad slots; the reserved slot0 remains distinct.
+    // Ten invalid memopad slots; the reserved slot 0 remains distinct.
     for row in 1..11 {
         let at = cs705::icf::special::CompactKind::Memopad
             .offset(row)

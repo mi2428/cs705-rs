@@ -253,7 +253,7 @@ impl Setting {
     /// Key mismatch, phase other than 2 or helper cancellation executes no store.
     /// Otherwise the low byte is written, even outside the displayed choices,
     /// with only that case's additional notification bits. No current-value
-    /// guard or rollback is added; the common initial flag1 is not returned.
+    /// guard or rollback is added; the common initial flag 1 is not returned.
     pub fn select(
         &self,
         image: &mut Icf<'_>,

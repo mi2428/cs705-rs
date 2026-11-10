@@ -169,7 +169,7 @@ enum ScanAction {
     Clear(RowReset),
     Delete(RowReset),
     Insert(RowReset),
-    /// Accept a typed eligible scan row, without the frequency editor's count1 gate.
+    /// Accept a typed eligible scan row, without the frequency editor's count 1 gate.
     Select {
         index: usize,
         #[arg(long)]

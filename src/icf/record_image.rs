@@ -51,10 +51,10 @@ pub struct ChannelAddress {
     pub flag_offset: Option<usize>,
 }
 
-/// Resolve a typed side index. Normal FFFF means no address; call group is100.
+/// Resolve a typed side index. Normal FFFF means no address; call group is 100.
 /// No order table, physical empty bit or split flag is substituted for the map.
 /// Like the original address helper, this does not clamp a non-FFFF map value
-/// to0..499. The actual bounded windows are checked before load/store instead.
+/// to 0..499. The actual bounded windows are checked before load/store instead.
 pub fn channel_address(
     image: &[u8],
     kind: ChannelKind,
@@ -97,7 +97,7 @@ pub fn channel_address(
 
 /// Load source fields and typed address metadata into caller-owned scratch.
 /// Binding and all non-loader fields survive. Call the shared outer holder reset
-/// separately when implementing610C; do not seed unknown fields with zeros here.
+/// separately when implementing 610C; do not seed unknown fields with zeros here.
 /// None/FFFF clears valid but leaves non-address body fields untouched.
 pub fn load_channel_into(
     image: &[u8],
@@ -121,7 +121,7 @@ pub fn load_channel_into(
     holder.set_group(group);
     holder.as_mut_bytes()[0x24] = side as u8;
     // 8230 descriptor+28, NOT its +18 physical slot or +24 logical row.
-    // Normal keeps the initialized FFFFFFFF; call assigns range12/13.
+    // Normal keeps the initialized FFFFFFFF; call assigns range 12/13.
     let range_kind: u32 = match kind {
         ChannelKind::Normal => u32::MAX,
         ChannelKind::Call => 12 + index / 4,
@@ -147,8 +147,8 @@ pub fn store_channel_into(
     mut before_store: impl FnMut(&ChannelWrite<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let Some(address) = channel_address(image, kind, index)? else {
-        // 7857 skips the absent physical flag;78A3 returns for valid0 before
-        // any name/body pointer use. Slot10 has already released this map.
+        // 7857 skips the absent physical flag; 78A3 returns for valid 0 before
+        // any name/body pointer use. Slot 10 has already released this map.
         if !holder.valid() {
             return Ok(());
         }
@@ -203,7 +203,7 @@ fn range_address(kind: u32, index: u32) -> Result<(usize, usize), Error> {
     Ok((base + index as usize * length, length))
 }
 
-/// Load kind15/16 raw8 or kind18 raw10 through the single shared codec.
+/// Load kind 15/16 raw8 or kind 18 raw10 through the single shared codec.
 /// Header/address ownership stays here; untouched decoded fields stay unchanged.
 pub fn load_range_into(
     image: &[u8],
@@ -223,7 +223,7 @@ pub fn load_range_into(
 }
 
 /// Ordered pair saver. The callback is a pre-store cutpoint, not a transaction;
-/// kind18 byte1 and every other image window survive untouched.
+/// kind 18 byte 1 and every other image window survive untouched.
 pub fn store_range_into(
     image: &mut [u8],
     kind: u32,
@@ -258,8 +258,8 @@ fn compact_kind(kind: u32) -> Result<super::special::CompactKind, Error> {
     }
 }
 
-/// Load kind04/05/19/1A/1B through special's one raw36 decoder/projection.
-/// Memopad slot0 is addressable, though stage9 visits only1..10. No outer reset
+/// Load kind 04/05/19/1A/1B through special's one raw36 decoder/projection.
+/// Memopad slot 0 is addressable, though stage9 visits only 1..10. No outer reset
 /// is implied; invalid rows write the sentinel, not the remaining body fields.
 pub fn load_compact_into(
     image: &[u8],
@@ -287,10 +287,10 @@ pub fn load_compact_into(
 }
 
 /// Save compact kinds at an explicit destination via special's raw36 saver.
-/// Frequency commits even when invalid; its remaining32bytes then stay intact.
+/// Frequency commits even when invalid; its remaining 32 bytes then stay intact.
 /// Saver-side callsign correction survives a later callback error in the holder.
-/// Shared19..1B instead skip valid0 and store the external flag first. Callback
-/// offsets for these shared kinds are absolute; kind04/05 retain raw-relative.
+/// Shared 19..1B instead skip valid 0 and store the external flag first. Callback
+/// offsets for these shared kinds are absolute; kind 04/05 retain raw-relative.
 pub fn store_compact_into(
     image: &mut [u8],
     kind: u32,
@@ -312,7 +312,7 @@ pub fn store_compact_into(
     result
 }
 
-/// Load kind08's raw27 and existence bitmap without resetting unrelated fields.
+/// Load kind 08's raw27 and existence bitmap without resetting unrelated fields.
 pub fn load_scan_into(image: &[u8], index: u32, holder: &mut DecodedRecord) -> Result<bool, Error> {
     let source = super::special::ScanEdge::read(image, index as usize)?;
     holder.set_header(8, index, holder.binding());
@@ -320,7 +320,7 @@ pub fn load_scan_into(image: &[u8], index: u32, holder: &mut DecodedRecord) -> R
     Ok(holder.valid())
 }
 
-/// Save kind08 through the shared bitmap-before-body saver. The callback uses
+/// Save kind 08 through the shared bitmap-before-body saver. The callback uses
 /// absolute image offsets. Invalid clearing occurs only after the bitmap commits
 /// and remains visible in the holder even if the following raw27 store fails.
 pub fn store_scan_into(
@@ -343,9 +343,9 @@ pub fn store_scan_into(
     holder.as_mut_bytes()[0x26..0x36].copy_from_slice(&values.name);
     result
 }
-/// Type0D's direct logical name/call arrays and live working count. The saved
+/// Type 0D's direct logical name/call arrays and live working count. The saved
 /// order table is NOT a physical mapping here. Even inactive tail slots decode
-/// both fields; the outer reset remains caller-owned. No extra300-row clamp is
+/// both fields; the outer reset remains caller-owned. No extra 300-row clamp is
 /// inserted before the original address computation; actual slices are bounded.
 pub fn load_callsign_into(
     image: &[u8],
@@ -369,7 +369,7 @@ pub fn load_callsign_into(
     Ok(holder.valid())
 }
 
-/// The type0D saver has no validity/count guard: name16 then call8, each through
+/// The type 0D saver has no validity/count guard: name16 then call8, each through
 /// the shared record codec. Address checks occur at the individual store.
 pub fn store_callsign_into(
     image: &mut [u8],
@@ -416,7 +416,7 @@ fn paired_valid(image: &[u8], kind: u32, index: u32) -> Result<bool, Error> {
     })
 }
 /// 6550/8230's paired shared compact datasets. External validity is independent
-/// of frequencyMAX; an invalid row never reads its body or split flag source.
+/// of frequency MAX; an invalid row never reads its body or split flag source.
 pub fn load_paired_into(
     image: &[u8],
     kind: u32,
@@ -443,7 +443,7 @@ pub fn load_paired_into(
     record::decode_compact_into(holder, &values, split);
     Ok(valid)
 }
-/// Shared-kind save skips everything for valid0. Otherwise the external split
+/// Shared-kind save skips everything for valid 0. Otherwise the external split
 /// bit commits before the raw36 frequency/body and holder callsign correction.
 pub fn store_paired_into(
     image: &mut [u8],
@@ -470,7 +470,7 @@ pub fn store_paired_into(
     result
 }
 
-/// Outer610C dispatch for all11 stage9 runtime kinds plus the UR list/default.
+/// Outer 610C dispatch for all 11 stage9 runtime kinds plus the UR list/default.
 /// Reset occurs before dispatch, not in lower field-only adapters.
 pub fn load_into(
     image: &[u8],
@@ -515,7 +515,7 @@ pub fn load_into(
         _ => Err(invalid("typed image load kind not implemented")),
     }
 }
-/// Outer77B0 save boundary. The explicit destination selects kind/index; it is
+/// Outer 77B0 save boundary. The explicit destination selects kind/index; it is
 /// not inferred from a copied source header. Each codec commits its own stages.
 pub fn store_into(
     image: &mut [u8],
@@ -543,7 +543,7 @@ pub fn store_into(
     }
 }
 
-/// C6190 cached UR count, or C63B8's first EXACT8space allowed-call prefix.
+/// C6190 cached UR count, or C63B8's first EXACT 8 space allowed-call prefix.
 pub fn callsign_count(image: &[u8], kind: u32) -> Result<u32, Error> {
     match kind {
         0x0d => Ok(u32::from(u16::from_le_bytes(
@@ -561,10 +561,10 @@ pub fn callsign_count(image: &[u8], kind: u32) -> Result<u32, Error> {
     }
 }
 
-/// Native print dataset leaves:9969C/common, C6530, C6190, C63B8 and C8100.
-/// Working49914/49978 must actually exist when reached. No source is padded,
+/// Native print dataset leaves: 9969C/common, C6530, C6190, C63B8 and C8100.
+/// Working 49914/49978 must actually exist when reached. No source is padded,
 /// no count is clamped/recounted, and no whole-image topology pass runs first.
-/// The final false arm is ONLY9969C's explicit other-type branch, not a generic
+/// The final false arm is ONLY 9969C's explicit other-type branch, not a generic
 /// factory/base predicate. Settings/history classes select their own base path.
 pub fn print_dataset_count(image: &[u8], kind: u32, group: i32) -> Result<u32, Error> {
     match kind {
@@ -617,7 +617,7 @@ pub fn print_dataset_count(image: &[u8], kind: u32, group: i32) -> Result<u32, E
     }
 }
 
-/// B40B8/B425C metadata needed by the print view's query42 row conversion.
+/// B40B8/B425C metadata needed by the print view's query 42 row conversion.
 /// None is an absent map; Some carries ONLY the actual raw83 header split bit.
 pub fn print_channel_row(
     image: &[u8],
@@ -638,7 +638,7 @@ pub fn print_channel_row(
 }
 
 /// C9678/C98E0: blank maps to the capacity sentinel; otherwise compare the
-/// first exact8byte match in the CURRENT list/prefix with the holder's index.
+/// first exact 8 byte match in the CURRENT list/prefix with the holder's index.
 pub fn callsign_bad(image: &[u8], holder: &DecodedRecord) -> Result<bool, Error> {
     let sentinel = match holder.kind() {
         0x0d => 300,
@@ -663,7 +663,7 @@ fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 0, reason }
 }
 
-/// Native16-byte view used by61F20; count is the entry gate, not a new loop cap.
+/// Native 16-byte view used by 61F20; count is the entry gate, not a new loop cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelView {
     pub group: u32,
@@ -678,9 +678,9 @@ pub struct ChannelFilter {
     pub count_all: bool,
     pub show_both: u32,
 }
-/// 61F20 for Home MR/call. Side1 is skipped BEFORE load using the PREVIOUS
+/// 61F20 for Home MR/call. Side 1 is skipped BEFORE load using the PREVIOUS
 /// loaded holder's split byte, not the current row's raw header. Returns bad
-/// count, or0/1 at the first bad row when count_all isfalse. View count<=0 reads
+/// count, or 0/1 at the first bad row when count_all is false. View count<=0 reads
 /// no image/holder. B/Q remain the shared frequency engine's actual sources.
 pub fn channel_bad_count(
     image: &[u8],
@@ -942,7 +942,7 @@ mod tests {
         image[0x3c84f..0x3c853].fill(0xff);
         image[0x3c853] = 0x70;
         assert!(load_paired_into(&image, 0x19, 0, &mut holder).unwrap());
-        assert_eq!(holder.mode(), 13); // Native lookup raw7 -> decoded13.
+        assert_eq!(holder.mode(), 13); // Native lookup raw 7 -> decoded 13.
         assert_eq!(&holder.as_bytes()[0x3c..0x40], &u32::MAX.to_le_bytes());
         assert_eq!(holder.as_bytes()[0x25], 1);
         holder.as_mut_bytes()[0x25] = 0;
@@ -975,7 +975,7 @@ mod tests {
         image[0x3a8ca] = 0;
         image[0x3a815] = 1;
         assert!(load_paired_into(&image, 0x1a, 0, &mut holder).unwrap());
-        assert!(!load_paired_into(&image, 0x1a, 2, &mut holder).unwrap()); // Nonzero is not lowbit1.
+        assert!(!load_paired_into(&image, 0x1a, 2, &mut holder).unwrap()); // Nonzero is not lowbit 1.
         assert!(load_paired_into(&image, 0x1b, 1, &mut holder).unwrap());
         assert_eq!(holder.as_bytes()[0x24], 1);
         assert!(load_paired_into(&image, 0x1a, 6, &mut holder).is_err());
@@ -1037,7 +1037,7 @@ mod tests {
             .unwrap(),
             1
         );
-        image[249] = 2; // Odd singleton still sees reset split0 BEFORE its own header load.
+        image[249] = 2; // Odd singleton still sees reset split 0 BEFORE its own header load.
         assert_eq!(
             channel_bad_count(
                 &image,

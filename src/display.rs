@@ -77,11 +77,11 @@ fn column_bit(key: u32) -> Option<u32> {
 }
 
 impl Settings {
-    /// SYSTEM input is48B0C's0/1 predicate, not a raw LANGID or GUI language.
+    /// SYSTEM input is 48B0C's 0/1 predicate, not a raw LANGID or GUI language.
     pub fn system_japanese(&self) -> bool {
         self.system_language == 1
     }
-    /// Shared event0 menu query. Only Checked bit7/submenu disabled bit0 change.
+    /// Shared event 0 menu query. Only Checked bit 7/submenu disabled bit 0 change.
     /// No view, font metric, queue, source image or mutation is required.
     pub fn query_menu(
         &self,
@@ -152,8 +152,8 @@ fn data_error(error: crate::icf::Error) -> Error {
     Error::new(ErrorKind::InvalidData, error)
 }
 
-/// B0164: the live query3F head supplies the descriptor, not node-2.
-/// Counts are NOT loop guards: a zero descriptor still loads row0 once.
+/// B0164: the live query 3F head supplies the descriptor, not node-2.
+/// Counts are NOT loop guards: a zero descriptor still loads row 0 once.
 pub fn sql_mask(
     current: &[u8],
     node: u32,
@@ -313,7 +313,7 @@ impl Toolbar {
         notify: impl FnOnce(&Self) -> io::Result<()>,
     ) -> io::Result<()> {
         if self.visible != visible {
-            // 14FF98 writes57 before B00B/virtual5C, including their failure.
+            // 14FF98 writes 57 before B00B/virtual 5C, including their failure.
             self.visible = visible;
             self.visible_changes += 1;
             notify(self)?;
@@ -339,7 +339,7 @@ pub struct State {
     saved: Option<(ViewKind, i32, i32, usize)>,
 }
 impl State {
-    /// Borrow the resource generation currently adopted by event26. Before its
+    /// Borrow the resource generation currently adopted by event 26. Before its
     /// drain, an accepted C00 change still leaves the previous generation live.
     pub fn resources<'a>(
         &self,
@@ -571,7 +571,7 @@ impl State {
                             q,
                         )?;
                         if grid.sql_mask != mask {
-                            //59B24 stores cache before59354 may fail/rebuild.
+                            // 59B24 stores cache before 59354 may fail/rebuild.
                             grid.sql_mask = mask;
                             let mut rebuilt = Grid::build(
                                 current,

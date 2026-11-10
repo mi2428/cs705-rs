@@ -1,5 +1,5 @@
 //! Windows standard NLS producers; no application DLL or captured-output path.
-//! LCMapStringA uses LCID0411/flags600000 and distinct explicit2n buffers.
+//! LCMapStringA uses LCID 0411/flags 600000 and distinct explicit 2n buffers.
 //! CharUpperBuffA uses the separate n-byte copy, including bytes after NUL.
 
 #![cfg(windows)]
@@ -46,7 +46,7 @@ pub(super) fn map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
 
 pub(super) fn uppercase(bytes: &mut [u8]) -> Result<u32, Error> {
     let count = native_uppercase_count(bytes.len())?;
-    // Supply a live pointer even for count0, still returning the actual API
+    // Supply a live pointer even for count 0, still returning the actual API
     // result rather than inventing a zero/success return for an empty copy.
     let mut empty = 0_u8;
     let buffer: *mut u8 = if bytes.is_empty() {

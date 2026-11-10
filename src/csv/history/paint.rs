@@ -1,4 +1,4 @@
-//! Native Rx compact0 paint and shared47CF0, not the compact1/extra0 CSV profile.
+//! Native Rx compact 0 paint and shared 47CF0, not the compact 1/extra 0 CSV profile.
 //! Raw source widths and decoded holder offsets belong to the record caller.
 //! Symbol alone uses the independent raw-byte display contract in history.
 
@@ -21,7 +21,7 @@ impl Context {
             .ok_or(Error::SourceUnavailable("native Rx GUI language C00"))
     }
     fn extra(self) -> Result<bool, Error> {
-        // 48B54 ->48B28: Japanese GUI skips the SYSTEM LANGID read entirely.
+        // 48B54 -> 48B28: Japanese GUI skips the SYSTEM LANGID read entirely.
         if self.language()? {
             return Ok(false);
         }
@@ -38,7 +38,7 @@ impl Context {
 }
 
 /// 47CF0 pure display over the ENTIRE logical byte string, including NUL and
-/// trailing spaces. Caller-owned47E14 C-prefix/width handling stays outside.
+/// trailing spaces. Caller-owned 47E14 C-prefix/width handling stays outside.
 /// U0 uses its fixed lead range, not nls::sanitize/CSV's wider DBCS definition.
 pub fn display_text(logical: &[u8], context: &Context) -> Result<Vec<u8>, Error> {
     let mut out = logical.to_vec();
@@ -165,7 +165,7 @@ pub fn format(
             } else {
                 43
             };
-            // Compact0 preserves comma/semicolon; no B62E8 export pass follows.
+            // Compact 0 preserves comma/semicolon; no B62E8 export pass follows.
             super::message(request.source, width, extra)
         }
         _ => Err(Error::Invalid("request is not a native Rx paint formatter")),
@@ -226,7 +226,7 @@ fn table_text(pe: Option<&[u8]>, base: u32, index: u8, count: u8) -> Result<Vec<
 /// Remaining native Rx normal finite fields. Source bytes come from the record
 /// caller, never a second holder codec. `resource` borrows the actual named
 /// resource provider (not a client caption map); only Status reaches it.
-/// Units are read from current at this call. Native decimal points are fixed'.'.
+/// Units are read from current at this call. Native decimal points are fixed '.'.
 pub fn format_field(
     key: u32,
     source: &[u8],
@@ -269,7 +269,7 @@ pub fn format_field(
             } else {
                 value
             };
-            // Native signed32 ADD5/IDIV10, including -0 and the double-minus.
+            // Native signed 32 ADD 5/IDIV 10, including -0 and the double-minus.
             Ok(suffix(
                 format!(
                     "{}{}",
@@ -345,7 +345,7 @@ pub fn format_field(
                 return Ok(b"---".to_vec());
             }
             let locale = context.language()?;
-            let glyph = degree(context)?; // Original reads G even when value0.
+            let glyph = degree(context)?; // Original reads G even when value 0.
             let mut text = table_text(source_pe, 0x407858 + u32::from(locale) * 36, value, 9)?;
             if value != 0 {
                 text.extend_from_slice(&[glyph, b' ']);
@@ -408,7 +408,7 @@ pub fn format_field(
                 match u {
                     0 => payload::wind(value, b'.'),
                     1 => {
-                        // BA04 normal CW1332: FILD/FMUL(binary64 1609.344)/FISTP
+                        // BA04 normal CW 1332: FILD/FMUL(binary64 1609.344)/FISTP
                         // equals this integer quotient for every nonmissing u16.
                         let t = (201168_u64 * u64::from(value) / 125) as u32;
                         payload::one_decimal(u32::from(((t + 50) / 100) as u16), b'.', false)

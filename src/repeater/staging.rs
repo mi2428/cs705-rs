@@ -2,7 +2,7 @@
 //!
 //! Holder identity is an arena index, separate from V/Q container positions.
 //! This retains the whole-import outer-erase/inner-apply alias bug without raw
-//! pointers or unsafe code. Header12 is preserved on replacement; body604 is
+//! pointers or unsafe code. Header 12 is preserved on replacement; body 604 is
 //! copied, then old group/USE/reference mark is restored in the original order.
 //! Classification is re-evaluated from holder fields by C72D0's exact rules.
 //! The supplied frequency class is F094 output; no band inference is inserted.
@@ -66,8 +66,8 @@ pub fn same(a: &Record, b: &Record) -> bool {
     }
 }
 
-/// C72D0: full DWORD kind, strict binary8 call and full DWORD DUP. Invalid and
-/// unknown-kind holders classify0; this is not a type/mode repair operation.
+/// C72D0: full DWORD kind, strict binary 8 call and full DWORD DUP. Invalid and
+/// unknown-kind holders classify 0; this is not a type/mode repair operation.
 pub fn classify(row: &Record) -> u32 {
     classify_bytes(&row.bytes)
 }
@@ -183,7 +183,7 @@ impl Staging {
         self.arena[id].bytes[0x135] = mark;
     }
 
-    /// Selected code0/1/2 differs from whole code0/1/2/3. Input stage is set even
+    /// Selected code 0/1/2 differs from whole code 0/1/2/3. Input stage is set even
     /// on rejection. New holder header is the caller's live binding, not H.header.
     pub fn selected_row(
         &mut self,
@@ -239,7 +239,7 @@ impl Staging {
         Ok(code)
     }
 
-    // 85D88 returns0 replaced/1 unmatched/2 stage-blocked; no group match gate.
+    // 85D88 returns 0 replaced/1 unmatched/2 stage-blocked; no group match gate.
     fn whole_match(&mut self, input: &mut Record, name: [u8; 16]) -> u32 {
         input.bytes[0x134] = 1;
         for position in 0..self.order.len() {
@@ -287,7 +287,7 @@ impl Staging {
             }
         }
     }
-    /// Whole reader phase; pending queue has a separate safe bound of100000, not
+    /// Whole reader phase; pending queue has a separate safe bound of 100000, not
     /// a fabricated contribution to the original V.size<2500 capacity test.
     pub fn whole_row(
         &mut self,
@@ -415,7 +415,7 @@ impl Staging {
 
     /// Execute selected's typed delete/insert/name/ref phases. Callback errors
     /// return immediately: already performed raw/count/ref/name changes remain.
-    /// The callback must call core's typed codec, never memmove52.
+    /// The callback must call core's typed codec, never memmove 52.
     pub fn flush_selected<E: From<Error>>(
         &self,
         group: usize,
@@ -571,7 +571,7 @@ pub fn restore_use(
     Ok(())
 }
 /// Both preserve modes restore the first new matching old reference. Caller
-/// supplies the actual old-reference holder even for out-of-oldrange refs.
+/// supplies the actual old-reference holder even for out-of-old range refs.
 pub fn restored_reference(rows: &[Record], new_absolute_start: u32, old_reference: &Record) -> u16 {
     rows.iter()
         .position(|row| same(row, old_reference))

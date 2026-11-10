@@ -39,20 +39,20 @@ enum Command {
         #[command(flatten)]
         publication: Publication,
     },
-    /// Shared native phase1/2 text input, not a raw byte setter.
+    /// Shared native phase 1/2 text input, not a raw byte setter.
     Edit {
         #[command(flatten)]
         read: Read,
         field: String,
         #[command(flatten)]
         value: InputValue,
-        /// Actual VA864634 DWORD, required for phase1 main/allowed callsigns.
+        /// Actual VA 864634 DWORD, required for phase 1 main/allowed callsigns.
         #[arg(long)]
         alignment: Option<u32>,
         /// Actual native input code; required only for allowed-call.
         #[arg(long, allow_hyphen_values = true)]
         input_code: Option<i32>,
-        /// Actual LCMap2n and optional Uppern API outputs, not a field candidate.
+        /// Actual LCMap 2n and optional Upper n API outputs, not a field candidate.
         #[arg(long)]
         nls_context: Option<String>,
         #[command(flatten)]

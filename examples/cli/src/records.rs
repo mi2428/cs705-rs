@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 /// router. Default means sources ABSENT, never a synthesized native Q or G.
 #[derive(clap::Args, Clone, Default)]
 pub struct Options {
-    /// Exact24-byte captured Q context; not an ICF or factory image.
+    /// Exact 24-byte captured Q context; not an ICF or factory image.
     #[arg(long)]
     pub record_context: Option<String>,
     /// Actual SYSTEM LANGID; required only when Q selects the host branch.
@@ -37,7 +37,7 @@ pub struct Options {
     /// Inclusive selection end in the same coordinate system as INDEX.
     #[arg(long)]
     pub end_index: Option<usize>,
-    /// Use side-view selection; memory indices become typed sides0..199.
+    /// Use side-view selection; memory indices become typed sides 0..199.
     #[arg(long)]
     pub side_view: bool,
     /// Explicit captured show-both state used by native copy/paste/carry.
@@ -94,7 +94,7 @@ impl Runtime {
         let mut runtime = cs705::csv::date_input::Runtime {
             locale: context.datetime()?,
             time_format: context.native_time_format()?,
-            // Mode3 does not read date_order; it must not require that source.
+            // Mode 3 does not read date_order; it must not require that source.
             date_order: if mode < 3 {
                 context.native_date_order()?
             } else {
@@ -480,7 +480,7 @@ const NATIVE_CHANNEL_FIELDS: [&str; 19] = [
     "selection",
 ];
 
-/// Commit a generated phase1 grid frame through the same canonical collectors.
+/// Commit a generated phase 1 grid frame through the same canonical collectors.
 /// A pending editor does not turn a selection-only cell into an accepted value.
 pub fn native_inline_edit(
     image: &mut Icf<'_>,
@@ -3011,7 +3011,7 @@ pub fn normal_row(input: &str, sheet: Sheet, action: RowAction, options: &Option
     }
 }
 
-/// Call indices retain their typed-side0..7 boundary; side-view disables merge.
+/// Call indices retain their typed-side 0..7 boundary; side-view disables merge.
 pub fn call_row(input: &str, action: RowAction, options: &Options) -> Result<u8> {
     use cs705::icf::rows::native::{Clipboard, Effects, call};
     let runtime = options.load(std::iter::once(input).chain(action_extra(&action)))?;

@@ -28,7 +28,7 @@ enum Command {
     AutoRepeater {
         #[command(flatten)]
         read: Read,
-        /// Literal native row0..11, unchanged by resource Only_* visibility.
+        /// Literal native row 0..11, unchanged by resource Only_* visibility.
         row: usize,
         #[arg(value_enum)]
         field: AutoRepeaterField,
@@ -37,7 +37,7 @@ enum Command {
         /// Actual generated B and live Q; required for low/high only, never G.
         #[arg(long)]
         range_context: Option<String>,
-        /// Fresh native invocation code0; nonzero retains the parent request.
+        /// Fresh native invocation code 0; nonzero retains the parent request.
         #[arg(long, default_value_t = 0)]
         native_code: u32,
         #[arg(long, default_value_t = 0)]
@@ -68,7 +68,7 @@ enum Command {
         field: Conditional,
         #[arg(long)]
         range_context: String,
-        /// Actual VA8645FC DWORD; needed only for coordinates/temperature.
+        /// Actual VA 8645FC DWORD; needed only for coordinates/temperature.
         #[arg(long)]
         language_descriptor: Option<u32>,
         #[arg(long, allow_hyphen_values = true)]
@@ -86,7 +86,7 @@ enum Command {
         #[arg(long)]
         resource_context: Option<String>,
     },
-    /// DR filter/SQL/code setting and real kind1B dependent record save/reload.
+    /// DR filter/SQL/code setting and real kind 1B dependent record save/reload.
     Dr {
         #[command(flatten)]
         read: Read,
@@ -107,7 +107,7 @@ enum Command {
         current_working: String,
         #[arg(long)]
         range_context: String,
-        /// Actual VA864614 DWORD; no implicit show-both preference.
+        /// Actual VA 864614 DWORD; no implicit show-both preference.
         #[arg(long)]
         show_both: u32,
         #[arg(long, default_value_t = 0)]
@@ -163,7 +163,7 @@ enum Command {
         #[arg(value_enum)]
         side: PbtSide,
     },
-    /// Native FIX low/high operation for one of the68 physical rows.
+    /// Native FIX low/high operation for one of the 68 physical rows.
     Fix {
         #[command(flatten)]
         args: NumberArgs,
@@ -180,7 +180,7 @@ enum Command {
         value: String,
         #[arg(long)]
         range_context: String,
-        /// A fresh invocation starts at0; continuing callers supply prior bits.
+        /// A fresh invocation starts at 0; continuing callers supply prior bits.
         #[arg(long, default_value_t = 0)]
         warning_bits: u32,
         #[command(flatten)]
@@ -198,7 +198,7 @@ enum Command {
             conflicts_with = "initial_catalog"
         )]
         catalog: Option<String>,
-        /// Explicit normal PE initial catalog: empty255, call100.
+        /// Explicit normal PE initial catalog: empty 255, call 100.
         #[arg(long)]
         initial_catalog: bool,
         #[arg(long, allow_hyphen_values = true)]
@@ -337,14 +337,14 @@ struct TextArgs {
     read: Read,
     #[arg(value_enum)]
     field: TextField,
-    /// Native row: Keyer0..7, other fixed fields0 only.
+    /// Native row: Keyer 0..7, other fixed fields 0 only.
     index: usize,
     #[command(flatten)]
     value: InputValue,
-    /// Actual VA864634 DWORD; required only for phase1 callsign/recipient text.
+    /// Actual VA 864634 DWORD; required only for phase 1 callsign/recipient text.
     #[arg(long)]
     alignment: Option<u32>,
-    /// Captured LCMapStringA2n and optional CharUpperBuffAn outputs/return values.
+    /// Captured LCMapStringA 2n and optional CharUpperBuffA n outputs/return values.
     #[arg(long)]
     nls_context: Option<String>,
     #[command(flatten)]
@@ -620,7 +620,7 @@ fn auto_repeater_json(effect: &lib::AutoRepeaterEffect) -> Value {
 struct Publication {
     #[command(flatten)]
     write: Write,
-    /// Publish a real changed prefix after an operation error, returning exit5.
+    /// Publish a real changed prefix after an operation error, returning exit 5.
     #[arg(long, requires = "yes")]
     accept_partial: bool,
     #[arg(long, requires = "accept_partial")]
@@ -1025,7 +1025,7 @@ pub fn run(args: Args) -> Result<u8> {
             let source = working(&args.source_working)?;
             let context = native::read(&args.range_context)?;
             let result = number_action(&args.value, |input, point| {
-                //The group operation reads only source; the current role is unused.
+                // The group operation reads only source; the current role is unused.
                 let runtime = lib::HomeDrRuntime {
                     frequency: lib::FrequencyRuntime {
                         ranges: &context.ranges,
@@ -1155,7 +1155,7 @@ pub fn run(args: Args) -> Result<u8> {
                         lib::ProgramScanInput::Text(&mut source_text)
                     }
                 };
-                //Absent G is not a generated default: the required late read fails.
+                // Absent G is not a generated default: the required late read fails.
                 let effect = lib::edit_program_scan(
                     &mut image,
                     current,
@@ -1231,7 +1231,7 @@ pub fn run(args: Args) -> Result<u8> {
                 EdgeSide::High => lib::EdgeSide::High,
             };
             let result = number_action(&args.value, |input, point| {
-                //Binding1 denotes this CLI-owned input object, never a host pointer.
+                // Binding 1 denotes this CLI-owned input object, never a host pointer.
                 let runtime = lib::FrequencyRuntime {
                     ranges: &context.ranges,
                     live_q: &context.live_q,

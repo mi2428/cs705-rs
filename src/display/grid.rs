@@ -32,7 +32,7 @@ impl FontMetrics {
                 .checked_abs()
                 .ok_or_else(|| invalid("display font height overflow"))?
         } else {
-            // 2F575 uses signed32 multiply and truncating division, not clamp.
+            // 2F575 uses signed 32 multiply and truncating division, not clamp.
             (16_i32.wrapping_mul(percent as i32)) / 100
         };
         let height = i64::from(points) * i64::from(self.dpi) / 96;
@@ -191,7 +191,7 @@ pub fn channel_value_paint(
     label(source, if key == 0x108 { 7 } else { 1 }, value)
 }
 
-/// Phase0 normal/call/compact choice/tone/code text only, not an input gate or
+/// Phase 0 normal/call/compact choice/tone/code text only, not an input gate or
 /// a whole channel renderer. No gray flag prevents a native text lookup.
 pub fn channel_paint(
     holder: &record::DecodedRecord,
@@ -361,7 +361,7 @@ impl Grid {
         let mut holder = record::reset_holder(kind, 0, 0);
         for row in range {
             if kind == 4 {
-                // Only_50M_Enable3 excludes explicit27..29, never renumbers.
+                // Only_50M_Enable3 excludes explicit 27..29, never renumbers.
                 if (27..30).contains(&row)
                     && q.ok_or_else(|| invalid("bandstack Only needs live Q"))?
                         .effective_f()
@@ -476,8 +476,8 @@ impl Grid {
                 .checked_add(column.width)
                 .ok_or_else(|| invalid("display grid width overflow"))?;
         }
-        // The portable schema has two structural cells before Name.31AF4
-        // expands the fixed area until the first bit10 boundary, not all cells.
+        // The portable schema has two structural cells before Name. 31AF4
+        // expands the fixed area until the first bit 10 boundary, not all cells.
         self.fixed_origin = if settings.fixed_name != 0 && !self.rx {
             2
         } else {
@@ -498,8 +498,8 @@ impl Grid {
         // 36986 aligns to fixed_columns-extra while preserving the live row.
         self.selected_column = self.frozen_columns.saturating_sub(self.fixed_origin);
     }
-    /// Scrolling applies only after the frozen area; hidden columns occupy0.
-    /// Widen before subtracting so every signed32 scroll remains representable.
+    /// Scrolling applies only after the frozen area; hidden columns occupy 0.
+    /// Widen before subtracting so every signed 32 scroll remains representable.
     pub fn column_positions(&self, horizontal_scroll: i32) -> Vec<i64> {
         self.columns
             .iter()

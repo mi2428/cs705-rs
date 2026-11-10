@@ -1,4 +1,4 @@
-//! Native type3 row operations over the fixed four raw83 call pairs.
+//! Native type 3 row operations over the fixed four raw83 call pairs.
 //! Selection coordinates are post-B5D28 typed sides, never visible node indices.
 //! K/N/M, A124/A77C and the raw codec are shared with normal memory. No map
 //! allocation, permission-bit override or alternate clipboard format is used.
@@ -88,8 +88,8 @@ pub fn copy(
     Ok(())
 }
 
-/// CAB08 -> A300 -> D4 -> B4BF8. Call rows are always allocated/valid; a mode2
-/// single-side paste preserves target name/split/SEL. K2/mode1/limit1 still calls
+/// CAB08 -> A300 -> D4 -> B4BF8. Call rows are always allocated/valid; a mode 2
+/// single-side paste preserves target name/split/SEL. K2/mode 1/limit 1 still calls
 /// the writer twice, while the DR loop uses the returned native counter/2.
 pub fn paste(
     image: &mut [u8],
@@ -169,7 +169,7 @@ fn move_range(image: &[u8], s: Selection, direction: i32) -> Result<(usize, usiz
     Ok((first, last, step))
 }
 
-/// CB63C uses two decoded snapshots even for step2; call has no normal-map
+/// CB63C uses two decoded snapshots even for step 2; call has no normal-map
 /// rotation shortcut. D5 runs after both transfers, then direction-side DR pairs.
 pub fn carry(
     image: &mut [u8],
@@ -232,7 +232,7 @@ pub fn carry(
     })
 }
 
-/// O044: DA -> CEEC8 -> CBE44(flag0), not clear/delete/insert. Confirmation1
+/// O044: DA -> CEEC8 -> CBE44(flag 0), not clear/delete/insert. Confirmation 1
 /// precedes pair expansion and every G read. All G holders are captured before
 /// any write, including W=G alias. No D4/D5 or B4BF8 tail belongs to this reset.
 pub fn reset_pair(
@@ -582,7 +582,7 @@ mod tests {
                 assert_eq!((out.written, out.native_count), (1, 1));
                 assert_eq!(events, [1]);
                 assert_eq!(effects.selection, Some((1, 1)));
-                assert_eq!(effects.home_invalidated, 0); // Counter1 never reads DR.
+                assert_eq!(effects.home_invalidated, 0); // Counter 1 never reads DR.
                 assert_eq!(effects.dr_invalidated, 0);
                 assert_eq!(holder(&image, 1).unwrap().name(), b"TARGET NAME     ");
                 assert_eq!(holder(&image, 1).unwrap().split(), 1);

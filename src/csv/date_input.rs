@@ -1,4 +1,4 @@
-//! Native A02AC modes0..3. Mask input is NOT CSV import_raw grammar.
+//! Native A02AC modes 0..3. Mask input is NOT CSV import_raw grammar.
 //! F61C8/F6230 token primitives are shared only under the native forced locale.
 
 use super::{
@@ -44,7 +44,7 @@ impl Clock {
 pub struct Runtime<'a> {
     pub locale: Context<'a>,
     pub time_format: &'a [u8],
-    /// Live VA8648E0, separate from the dialog's captured mode.
+    /// Live VA 8648E0, separate from the dialog's captured mode.
     pub date_order: u32,
     /// Required only by an invalid raw edit seed, not by valid display/parse.
     pub clock: Option<Clock>,
@@ -192,8 +192,8 @@ fn store_fields(raw: &mut [u8; 6], date: Option<Date>, time: Time) {
     raw[5] = datetime::encode_bcd(time.second);
 }
 
-/// Native9E88C computes offset before validity gates. Invalid Time skips all
-/// writes; invalid Date with VALID Time uses2006/04/10 and writes only Time.
+/// Native 9E88C computes offset before validity gates. Invalid Time skips all
+/// writes; invalid Date with VALID Time uses 2006/04/10 and writes only Time.
 fn subtract_offset(raw: &mut [u8; 6], offset: i16) -> Result<(), Error> {
     let (date, time) = datetime::decode_raw(*raw);
     let offset = datetime::effective_offset(offset)?;
@@ -283,7 +283,7 @@ impl DateDialog {
         dialog.enabled = dialog.valid(runtime)?;
         Ok(dialog)
     }
-    /// Normal full TMaskEdit text. Numeric literal20 stays fixed; this is not a
+    /// Normal full TMaskEdit text. Numeric literal 20 stays fixed; this is not a
     /// generic CSV date or a ready canonical phase2 packet supplied by a client.
     pub fn replace_masked(
         &mut self,
@@ -433,7 +433,7 @@ pub fn input(
 }
 
 /// A raw inline text gesture traverses the actual mask/validator/Accept producer
-/// before phase2. The original raw6 stays borrowed through all partial writes.
+/// before phase2. The original raw 6 stays borrowed through all partial writes.
 pub fn edit_masked(
     raw: &mut [u8; 6],
     mode_value: u8,

@@ -801,8 +801,8 @@ fn canonical_home_ntp_and_payload_comment_preserve_raw_metadata_and_neighbors() 
     expected[0x396be..0x396fe].fill(0xff);
     expected[0x35591..0x355a1].fill(0xff);
     // Independent Python struct/hashlib, not product setters or serializer:
-    // pattern (73*i+19)%256, internal6/signature, Home0 and raw FF text.
-    // Final splices are LE470000000, b'time.Example-0.test'.ljust(64,b' '),
+    // pattern (73*i+19)%256, internal 6/signature, Home 0 and raw FF text.
+    // Final splices are LE 470000000, b'time.Example-0.test'.ljust(64,b' '),
     // b'CQ / test! 01'.ljust(16,b' '); header raw comment remains 82 A0.
     let source = fixture_with_memory(&expected, "A2B67E1FF0A95BEC262171A1B6238964");
     assert_eq!(
@@ -971,7 +971,7 @@ fn repeater_map_fixture() -> (Vec<u8>, Vec<u8>) {
     memory[0x3bf6e..0x3bf6e + 313].fill(0xa0);
     memory[0x3bf6e + 312] = 0xf8;
     // Independent Python struct/hashlib: pattern (73*i+19)%256, signature,
-    // internal6, order [2,0,1], group0 start0/group49 start2, USE A0/F8.
+    // internal 6, order [2,0,1], group 0 start 0/group 49 start 2, USE A0/F8.
     let source = fixture_with_memory(&memory, "EBD5DA6CD00A0F9AA10336569DFB79E9");
     (source, memory)
 }
@@ -1046,7 +1046,7 @@ fn repeater_raw_map_names_records_and_use_preserve_all_opaque_bytes() {
     image.memory[0x3bf0a..0x3bf6e].fill(255);
     expected[0x3bf0a..0x3bf6e].fill(255);
     for (g, bytes) in [(1, [0, 0]), (49, [0xc3, 9])] {
-        // LE2499
+        // LE 2499
         image.memory[0x3bf0a + 2 * g..0x3bf0c + 2 * g].copy_from_slice(&bytes);
         expected[0x3bf0a + 2 * g..0x3bf0c + 2 * g].copy_from_slice(&bytes);
     }
@@ -1079,7 +1079,7 @@ fn repeater_raw_map_names_records_and_use_preserve_all_opaque_bytes() {
             assert_eq!(image.physical_repeater_use(p).unwrap(), Some(value));
         }
     }
-    assert_eq!(image.memory()[0x3bf6e + 312], 0xf5); // p2499 is bit3; opaque upper nibble stays F.
+    assert_eq!(image.memory()[0x3bf6e + 312], 0xf5); // p2499 is bit 3; opaque upper nibble stays F.
     let output = image.to_bytes();
     assert_eq!(output.len(), 589_699);
     assert!(output.ends_with(b"#CD=FA3C6E27C39F0548F2D35015D02953E6\r\n"));
@@ -1128,7 +1128,7 @@ fn repeater_order_start_and_parameter_errors_are_strict_and_state_preserving() {
     }
     for (at, bytes, error_at) in [
         (0x3ab82, [0xfe, 0xff], 0x3ab82),
-        (0x3ab82, [0xc4, 9], 0x3ab82), // LE2500
+        (0x3ab82, [0xc4, 9], 0x3ab82), // LE 2500
         (0x3ab84, [2, 0], 0x3ab84),
         (0x3ab84, [255, 255], 0x3ab86), // A hole before a later live row.
         (0x3ab82 + 40, [3, 0], 0x3ab82 + 40),
@@ -1181,7 +1181,7 @@ fn repeater_order_start_and_parameter_errors_are_strict_and_state_preserving() {
     scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())); // N>0, no start zero.
     image.memory[0x3ab82..0x3bf0a].fill(255);
     image.memory[0x3bf0a..0x3bf0c].fill(0);
-    scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())); // N0 requires all FFFF.
+    scalar_error(&mut image, false, |i| i.repeater_groups().map(|_| ())); // N 0 requires all FFFF.
     image.memory[0x3bf0a..0x3bf6e].fill(255);
     let mut expected = image.memory().to_vec();
     let groups = image.repeater_groups().unwrap();
@@ -4785,7 +4785,7 @@ fn canonical_memory_layout_rejects_inconsistent_maps_flags_and_free_lists_atomic
         (g2 + 1, vec![243, 1]), // duplicate occupied p499
         (0x3662d + 499, vec![initial[0x3662d + 499] | 1]),
         (first + 1, vec![255, 255]), // head ends before a required row
-        (0x35d2c + 2 * 3, vec![255, 255]), // late required row99 missing
+        (0x35d2c + 2 * 3, vec![255, 255]), // late required row 99 missing
         (
             0x36114 + 13 * 99 + 12,
             vec![initial[0x36114 + 13 * 99 + 12] & !8],
@@ -4796,9 +4796,9 @@ fn canonical_memory_layout_rejects_inconsistent_maps_flags_and_free_lists_atomic
         (0x36629, vec![255, 255]),
         (0x3662b, vec![255, 255]),
         (0x36629, vec![243, 1]),           // used head
-        (0x36629, vec![241, 1]),           // missing free498
+        (0x36629, vec![241, 1]),           // missing free 498
         (0x3662b, vec![2, 0]),             // wrong actual tail
-        (0x35d2c + 2 * 498, vec![240, 1]), // missing free497
+        (0x35d2c + 2 * 498, vec![240, 1]), // missing free 497
         (0x35d2c + 2, vec![244, 1]),       // invalid free next after full traversal
         (0x35d2c + 2, vec![1, 0]),         // late free cycle
     ];

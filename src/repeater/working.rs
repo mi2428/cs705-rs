@@ -2,8 +2,8 @@
 //! from_icf expands order/gateway from an immutable saved snapshot; from_working
 //! accepts an already-expanded 0x4997a-byte image with its live count table.
 //! Row shifts re-encode every physical slot, even beyond the active prefix.
-//! Reset callbacks read the live global source's word0/1 at the actual commit
-//! point. Unaffected words do not read it; failure on word1 keeps word0 stored.
+//! Reset callbacks read the live global source's word 0/1 at the actual commit
+//! point. Unaffected words do not read it; failure on word 1 keeps word 0 stored.
 
 use super::groups::{
     COUNTS, Groups, NAMES, ORDER, REFS, STARTS, group_of_counts, working_counts,
@@ -120,7 +120,7 @@ fn save_row_with(
     })
 }
 
-/// C6A4C raw phase. Prefix length stops only at FFFF. All50 counts are first
+/// C6A4C raw phase. Prefix length stops only at FFFF. All 50 counts are first
 /// zeroed in reverse order; valid starts then write low16(boundary-start).
 /// No ICF signature, order uniqueness or monotonic-start policy belongs here.
 pub fn expand_counts(image: &mut [u8]) -> Result<(), Error> {
@@ -280,7 +280,7 @@ fn delete_metadata(
     )
 }
 
-/// Borrowed D1AD0. Generate the actual type22 at the default callback's read
+/// Borrowed D1AD0. Generate the actual type 22 at the default callback's read
 /// point, after all tail shifts. Each reset callback reads live F separately;
 /// a second-word failure keeps the shifted rows, count and first reset word.
 pub fn delete_into(
@@ -316,17 +316,17 @@ pub struct UseRange {
     pub last: i32,
 }
 
-/// Actual type22 inputs from569FC and10420. These are runtime Q/host results,
-/// not a generated default image or an arbitrary616-byte row supplied by a CLI.
+/// Actual type 22 inputs from 569FC and 10420. These are runtime Q/host results,
+/// not a generated default image or an arbitrary 616-byte row supplied by a CLI.
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultContext {
     pub five_mhz: bool,
     pub hemispheres: [u8; 2],
 }
 impl DefaultContext {
-    /// 569FC and10420 consume Q's selector/source-selector, not effective F/U.
-    /// Core owns that decoding; only selector16 needs the explicit SYSTEM LANGID.
-    /// Source0 has5MHz/NE, source1 has0/NW, and sources2..4 have0/NE.
+    /// 569FC and 10420 consume Q's selector/source-selector, not effective F/U.
+    /// Core owns that decoding; only selector 16 needs the explicit SYSTEM LANGID.
+    /// Source 0 has 5 MHz/NE, source 1 has 0/NW, and sources 2..4 have 0/NE.
     pub fn from_context(
         context: &crate::icf::context::Context,
         system_langid: Option<u16>,
@@ -366,8 +366,8 @@ impl Working {
         })
     }
     /// C6AEC: immutable snapshot, `order[j]` physical source, typed save into j,
-    /// then indirect gateway `aux[k]` into same-row working `aux[j]`. All2500 rows
-    /// are processed; invalid order entries use the actual type22 initializer.
+    /// then indirect gateway `aux[k]` into same-row working `aux[j]`. All 2500 rows
+    /// are processed; invalid order entries use the actual type 22 initializer.
     pub fn from_icf(image: &crate::icf::Icf<'_>, context: DefaultContext) -> Result<Self, Error> {
         let mut memory = image.memory().to_vec();
         memory.resize(super::groups::WORKING_BYTES, 0);
@@ -388,9 +388,9 @@ impl Working {
         Groups::from_working(&self.memory)
     }
 
-    /// 630EC -> 7FFA4 range from the first query3F reply's group. A missing or
+    /// 630EC -> 7FFA4 range from the first query 3F reply's group. A missing or
     /// out-of-axis reply produces the native zero descriptor, not an empty range.
-    /// In particular, an empty leading group can still visit valid physical0.
+    /// In particular, an empty leading group can still visit valid physical 0.
     pub fn bulk_use_range(&self, group: Option<usize>) -> Result<UseRange, Error> {
         let groups = self.groups()?;
         let Some(group) = group.filter(|g| *g < 50) else {
@@ -406,7 +406,7 @@ impl Working {
     /// B/Q pair; no refresh or synthetic successful predicate is substituted.
     /// Accepted rows always use the full typed saver, even for an equal USE.
     /// There is no save/reload, confirmation or rollback. Normal completion queues
-    /// 11(0,0) then13(0,14F), including reversed and all-skipped ranges.
+    /// 11(0,0) then 13(0,14F), including reversed and all-skipped ranges.
     pub fn bulk_use<'a>(
         &mut self,
         range: UseRange,
@@ -568,7 +568,7 @@ impl Working {
         Ok(source.len())
     }
     /// Conditional low-level D7, not a claim that a Clear menu is registered.
-    /// The one type22 load occurs before the first typed save, including valid0.
+    /// The one type 22 load occurs before the first typed save, including valid 0.
     pub fn clear(
         &mut self,
         group: usize,
@@ -633,8 +633,8 @@ impl Working {
         )?;
         Ok(true)
     }
-    /// D1AD0's single delete: shift through physical2498, then load type22 for
-    /// physical2499. The default callback may fail AFTER all prior shifts.
+    /// D1AD0's single delete: shift through physical 2498, then load type 22 for
+    /// physical 2499. The default callback may fail AFTER all prior shifts.
     pub fn delete_one(
         &mut self,
         group: usize,
@@ -685,7 +685,7 @@ impl Working {
         self.reset_references(0, usize::from(u16::MAX), reset)?;
         Ok(true)
     }
-    /// Mode1-normalized accepted bytes, independent of row decode. Labels and
+    /// Mode 1-normalized accepted bytes, independent of row decode. Labels and
     /// document notifications remain with the caller's operation tail.
     pub fn rename_group_raw(&mut self, group: usize, name: [u8; 16]) -> Result<(), Error> {
         if group >= 50 {
@@ -838,7 +838,7 @@ mod tests {
             },
         )
         .unwrap();
-        // Includes five rows already0, zero frequency and both rejected bands.
+        // Includes five rows already 0, zero frequency and both rejected bands.
         assert_eq!(starts, (0..12).collect::<Vec<_>>());
         assert_eq!((w.memory[USE], w.memory[USE + 1]), (0, 0));
         let mut writes = 0;
@@ -935,7 +935,7 @@ mod tests {
         missing.adopt(fields);
         let mut w = bulk_fixture();
         let mut reads = 0;
-        // 150MHz is excluded by Japan EB64, but the SECOND live Q permits it.
+        // 150 MHz is excluded by Japan EB64, but the SECOND live Q permits it.
         w.bulk_use(
             UseRange {
                 first: 10,
@@ -1165,7 +1165,7 @@ mod tests {
         assert_eq!(counts[49], 1);
         assert!(counts[1..49].iter().all(|n| *n == 0));
         // A preceding phase changes this source AFTER count expansion. Later
-        // target0 overwrites physical0: target1 must still read this snapshot.
+        // target 0 overwrites physical 0: target 1 must still read this snapshot.
         image[BODY..BODY + 4].copy_from_slice(&433_000_007_u32.to_le_bytes());
         image[AUX + 35..AUX + 42].copy_from_slice(&[0xa9, 0x16, 0x9d, 0x46, 0x0c, 0x50, 0x42]);
         expand_rows(&mut image, phase_context()).unwrap();
@@ -1219,7 +1219,7 @@ mod tests {
         expand_counts(&mut image).unwrap();
         assert_eq!(working_counts(&image).unwrap()[49], 65535);
         assert_eq!(working_counts(&image).unwrap()[0], 4);
-        // rows visits all2500 order slots, including after the first FFFF.
+        // rows visits all 2500 order slots, including after the first FFFF.
         image[ORDER..STARTS].fill(255);
         image[ORDER + 8..ORDER + 10].copy_from_slice(&0_u16.to_le_bytes());
         expand_rows(&mut image, phase_context()).unwrap();
@@ -1314,7 +1314,7 @@ mod tests {
             .is_err()
         );
         // Every initial self-link already committed; the failed duplicate store
-        // must not leave row2 linked to row1 before that row's final index stage.
+        // must not leave row 2 linked to row 1 before that row's final index stage.
         assert_eq!(read::<2>(&image, BODY + 104 + 8).unwrap(), [2, 0]);
         assert_eq!(&image[AUX + 7..AUX + 14], &image[AUX + 14..AUX + 21]);
     }

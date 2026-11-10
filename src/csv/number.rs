@@ -1,4 +1,4 @@
-//! Separate RTL decimal, signed32/hex, coordinate and altitude boundaries.
+//! Separate RTL decimal, signed 32/hex, coordinate and altitude boundaries.
 //! Finite binary64 operations are explicit; arbitrary x87/RTL digit ties are not
 //! claimed identical to Rust's formatter. No host locale or C atof is used.
 
@@ -107,8 +107,8 @@ pub fn int32(source: &[u8]) -> Result<i32, Error> {
     } as i32)
 }
 
-/// A4E2C's byte editor: C-prefix, first two retained hex digits, then2..DF.
-/// Empty and wholly filtered input are accepted as2, not an integer parse error.
+/// A4E2C's byte editor: C-prefix, first two retained hex digits, then 2..DF.
+/// Empty and wholly filtered input are accepted as 2, not an integer parse error.
 pub fn civ_address(source: &[u8]) -> u8 {
     let digits: Vec<_> = source
         .iter()
@@ -174,9 +174,9 @@ fn native_seconds(seconds: &[u8]) -> Result<u32, Error> {
     })
 }
 
-/// Native9E714 phase2, NOT B8A18/B8D48 CSV decimal-coordinate grammar.
-/// Fixed byte Substrings use188948/StrToIntDef0; separators are not validated.
-/// Degree is stored BEFORE reading live current396B4, so source/read failures
+/// Native 9E714 phase2, NOT B8A18/B8D48 CSV decimal-coordinate grammar.
+/// Fixed byte Substrings use 188948/StrToIntDef 0; separators are not validated.
+/// Degree is stored BEFORE reading live current 396B4, so source/read failures
 /// retain that prefix. U1 seconds use byte wrapping, not a floating parser.
 pub fn coordinate_native_phase2(
     destination: &mut [u8; 4],
@@ -221,7 +221,7 @@ pub fn area_native_mode(current: &[u8]) -> Result<u8, Error> {
     })
 }
 
-/// Native9E760 for the actual producer's modes11..13. Unlike9E714, all
+/// Native 9E760 for the actual producer's modes 11..13. Unlike 9E714, all
 /// calculations (including the seconds index check) precede EVERY raw store.
 pub fn area_native_phase2(destination: &mut [u8; 4], source: &[u8], mode: u8) -> Result<(), Error> {
     let substring = |start, len| native_substring(source, start, len);
@@ -262,7 +262,7 @@ fn native_decimal_fraction(q: u32) -> u32 {
     ((q * 10 / 6 + 5) / 10).min(9999)
 }
 
-/// The nine short coordinate/area mask literals decoded by3AA9C.
+/// The nine short coordinate/area mask literals decoded by 3AA9C.
 /// These are code literals, not a supplied completed cell or resource packet.
 const COORDINATE_MASKS: [&[u8]; 9] = [
     b"! 99\xb099'99\">l;1;_",
@@ -285,7 +285,7 @@ pub enum CoordinateEvent {
     Close,
 }
 
-/// cuciFTextGps's bounded ASCII keyboard/control producer for modes5..13.
+/// cuciFTextGps's bounded ASCII keyboard/control producer for modes 5..13.
 /// Captured mode/seed remain distinct from phase2's later live current/U read.
 /// Paste/IME is not silently treated as the normal OnKeyPress byte path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,7 +303,7 @@ pub struct CoordinateDialog {
 }
 
 impl CoordinateDialog {
-    /// A02AC edit-flag1 uses the fixed B0 literal even when48B28's degree
+    /// A02AC edit-flag 1 uses the fixed B0 literal even when 48B28's degree
     /// glyph selector differs. No host ACP or GUI language is guessed here.
     pub fn new(
         raw: [u8; 4],
@@ -350,7 +350,7 @@ impl CoordinateDialog {
         }
         Ok(Self::from_seed(mode, seed, first))
     }
-    /// A0D5C/9F70C edit seed, including mode13's display-only scratch minimum.
+    /// A0D5C/9F70C edit seed, including mode 13's display-only scratch minimum.
     pub fn area(raw: [u8; 4], current: &[u8], first: Option<u8>) -> Result<Self, Error> {
         let mode = area_native_mode(current)?;
         let q = u32::from(u16::from_be_bytes([raw[1], raw[2]]));
@@ -380,7 +380,7 @@ impl CoordinateDialog {
         let mask = COORDINATE_MASKS[usize::from(mode - 5)];
         Self::from_mask(mode, mask, seed, first)
     }
-    /// Shared3AA9C mask/control constructor. Each field owns its validator;
+    /// Shared 3AA9C mask/control constructor. Each field owns its validator;
     /// this routine only supplies literal slots, initial caret and key filtering.
     pub(crate) fn from_mask(
         mode: u8,
@@ -422,8 +422,8 @@ impl CoordinateDialog {
         }
         dialog
     }
-    /// Select-all replacement followed by the actual3D558 ASCII key filter and
-    /// the decoded9/uppercase-l mask slots. Literal keys never become raw digits.
+    /// Select-all replacement followed by the actual 3D558 ASCII key filter and
+    /// the decoded 9/uppercase-l mask slots. Literal keys never become raw digits.
     pub fn replace(&mut self, text: &[u8]) {
         for (byte, &slot) in self.control.iter_mut().zip(&self.slots) {
             if matches!(slot, b'9' | b'l') {
@@ -481,7 +481,7 @@ impl CoordinateDialog {
             self.caret += 1;
         }
     }
-    /// TMaskEdit's saved literals and underscore-to-space getter, then3C3E4.
+    /// TMaskEdit's saved literals and underscore-to-space getter, then 3C3E4.
     pub fn candidate(&self) -> Vec<u8> {
         self.control
             .iter()
@@ -538,7 +538,7 @@ impl CoordinateDialog {
             int32(sub(4, 4)).unwrap_or(10000) < 10000
         }
     }
-    /// A disabled normal button does not Click. OnDeactivate still calls3B8C8,
+    /// A disabled normal button does not Click. OnDeactivate still calls 3B8C8,
     /// whose false-validator branch dispatches the ORIGINAL seed, not a default.
     /// Caller must run phase2/save, then call dispatched() only on normal return.
     pub fn event(&mut self, event: CoordinateEvent) -> Option<Vec<u8>> {
@@ -648,7 +648,7 @@ pub(crate) fn altitude_metres_tenths(value: i32) -> i32 {
     if value < 0 { -n } else { n }
 }
 
-/// B917C: all signed32 magnitudes including INT_MIN; only 7FFFFFFF is empty.
+/// B917C: all signed 32 magnitudes including INT_MIN; only 7FFFFFFF is empty.
 pub fn altitude_text(value: i32, point: u8) -> Vec<u8> {
     if value == i32::MAX {
         return Vec::new();
@@ -676,8 +676,8 @@ pub fn frequency_text(hz: u32, point: u8) -> Vec<u8> {
     out
 }
 
-/// B65AC: parse failure is0; scale/spill outside the unsigned DWORD range is0
-/// BEFORE adding0.5. The following record-level band check is separate.
+/// B65AC: parse failure is 0; scale/spill outside the unsigned DWORD range is 0
+/// BEFORE adding 0.5. The following record-level band check is separate.
 pub fn frequency_hz(source: &[u8], point: u8) -> Result<u32, Error> {
     mhz_hz(source, point, 0)
 }

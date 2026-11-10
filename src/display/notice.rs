@@ -32,7 +32,7 @@ fn c_string(pe: &[u8], rva: u32) -> io::Result<&[u8]> {
     Ok(&tail[..end])
 }
 
-/// Actual common-group25, literal parent indices. A caller cannot turn an
+/// Actual common-group 25, literal parent indices. A caller cannot turn an
 /// arbitrary editable field into FIX merely by supplying one of these topics.
 /// The PE is needed ONLY for reached compiled Filter BW/PBW captions.
 pub fn notice_cell(

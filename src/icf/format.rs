@@ -191,7 +191,7 @@ fn read_bound_fragments(
     Ok(result)
 }
 
-/// Shared23690 image gate. Internal revision and layout metadata are distinct.
+/// Shared 23690 image gate. Internal revision and layout metadata are distinct.
 /// This neither normalizes bytes nor checks wire/file coverage or checksums.
 pub fn validate_image(image: &[u8], layout: Layout) -> Result<bool, Error> {
     let revision = image.get(layout.revision_offset()).ok_or(Error::Invalid {
@@ -224,7 +224,7 @@ pub fn write_storage(
     write_storage_with_checksum(image, layout, comment, extra_data, true)
 }
 
-/// Native13394/1370D writer option. The canonical writer above retains its
+/// Native 13394/1370D writer option. The canonical writer above retains its
 /// original CD behavior; only an explicit native Save decision can omit CD.
 /// This does not alter any reader coverage/revision/signature gate.
 pub fn write_storage_with_checksum(

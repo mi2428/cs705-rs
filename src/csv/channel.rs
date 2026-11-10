@@ -100,8 +100,8 @@ const MEMORY_SIDE_LABELS: [&[u8]; 16] = [
     b"RPT2 Call Sign",
 ];
 
-/// 8A3E8's cache and80F80's whole/selected preparation. Plain No is cached but
-/// does not replace CH No at864954. This reader does not accept finalized rows.
+/// 8A3E8's cache and 80F80's whole/selected preparation. Plain No is cached but
+/// does not replace CH No at 864954. This reader does not accept finalized rows.
 pub struct MemoryRows<'a> {
     reader: Reader<'a>,
     binding: Binding,
@@ -197,7 +197,7 @@ fn memory_group(source: &[u8]) -> Result<u32, Error> {
 }
 
 /// 805B0's actual default source, not an externally completed holder. Normal
-/// uses the captured B class/type1D; Call reads G at its parser-local No index.
+/// uses the captured B class/type 1D; Call reads G at its parser-local No index.
 /// A lower Call has no proven No assignment, so that source stays unavailable.
 pub fn memory_default(
     kind: Kind,
@@ -353,8 +353,8 @@ impl MemoryRows<'_> {
             }
             row.holder.set_mode(u32::from(mode));
         }
-        // 10194 calls the real C94B8 predicate.10144 itself is constant false;
-        // only valid1/full mode24 is unsuitable, with no UI current-value bypass.
+        // 10194 calls the real C94B8 predicate. 10144 itself is constant false;
+        // only valid 1/full mode 24 is unsuitable, with no UI current-value bypass.
         if row.holder.valid() && row.holder.mode() == 24 {
             row.holder.set_mode(
                 default
@@ -1072,7 +1072,7 @@ impl<'a> UserEdgeRows<'a> {
     }
 }
 
-/// 8C4D4's value/finalizer phase. The caller supplies the actual shared type1F
+/// 8C4D4's value/finalizer phase. The caller supplies the actual shared type 1F
 /// code initializer, not a CSV row packet or an inferred G image.
 pub struct ScanRows<'a> {
     reader: Reader<'a>,
@@ -1150,8 +1150,8 @@ impl<'a> ScanRows<'a> {
                 discard: 0,
                 corrections: 0,
             };
-            // 83D39 clears validity BEFORE calling8C4D4. Unlike UserEdge, an
-            // early signed-No return therefore cannot retain reset's valid1.
+            // 83D39 clears validity BEFORE calling 8C4D4. Unlike UserEdge, an
+            // early signed-No return therefore cannot retain reset's valid 1.
             row.holder.set_valid(false);
             let low = self
                 .selection
@@ -1239,7 +1239,7 @@ fn finalize_scan(row: &mut EdgeRow, default: &DecodedRecord) {
         row.holder.set_data(default.data());
         local = local.wrapping_add(1);
     }
-    // C9640/10150: in blocked modes EVERY value exceptFF is unsuitable.
+    // C9640/10150: in blocked modes EVERY value except FF is unsuitable.
     // The UI current-value bypass is not called by this CSV finalizer.
     if row.holder.filter() == 0xffff
         || (row.holder.valid()
@@ -1254,7 +1254,7 @@ fn finalize_scan(row: &mut EdgeRow, default: &DecodedRecord) {
 }
 
 fn scan_default() -> DecodedRecord {
-    // 610C type1F ->681F: code constants, not an absent G filled with zeros.
+    // 610C type 1F -> 681F: code constants, not an absent G filled with zeros.
     // No existing library entry constructs this complete decoded initializer.
     let mut holder = record::reset_holder(0x1f, 0, 0);
     holder.set_channel_field(ChannelField::FrequencyHz, 30_000);
@@ -1280,7 +1280,7 @@ fn post_scan(
     selection: Selection,
     defaults: Option<&Icf<'_>>,
 ) -> Result<(), icf::Error> {
-    // D1E88(D7) ->D276F ->CF3F8: its sole source is the current selected scan.
+    // D1E88(D7) -> D276F -> CF3F8: its sole source is the current selected scan.
     // The range-membership test is mandatory even when a suitable row exists.
     let selected = u32::from((image.memory()[0x37802] >> 2) & 31);
     let rows = icf::special::scan_suitable_rows(
@@ -1295,7 +1295,7 @@ fn post_scan(
     {
         return Ok(());
     }
-    // 99B9C retains the native range's first index0 when no suitable row exists.
+    // 99B9C retains the native range's first index 0 when no suitable row exists.
     let candidate = rows.first().copied().unwrap_or(0);
     let reset = icf::special::scan_reset_enabled(image.memory(), 0)?;
     // An absent source stays absent: select_scan writes its selection/flag
@@ -1307,7 +1307,7 @@ fn post_scan(
     icf::special::select_scan(image, g, candidate, reset)
 }
 
-/// 83C60: header -> valid-row clear ->8C4D4 -> typed save -> counters ->D7.
+/// 83C60: header -> valid-row clear -> 8C4D4 -> typed save -> counters -> D7.
 /// Only a conditional post-selection reset reads the explicit G generation.
 pub fn import_scan(
     image: &mut Icf<'_>,
@@ -1358,7 +1358,7 @@ pub fn import_scan(
                 out.applied += 1;
                 reader.applied();
             }
-            // Actual83D7D saves BEFORE83D8E/96 add C2/C3. Do not reuse the
+            // Actual 83D7D saves BEFORE 83D8E/96 add C2/C3. Do not reuse the
             // differently ordered control::scan_row helper at this boundary.
             out.counts.c2 = out.counts.c2.wrapping_add(row.discard);
             out.counts.c3 = out.counts.c3.wrapping_add(row.corrections);
@@ -1386,7 +1386,7 @@ fn save_user_edge(
     index: u32,
     holder: &mut DecodedRecord,
 ) -> Result<(), Failure> {
-    // Range callbacks are raw8-relative, unlike Scan's absolute callbacks.
+    // Range callbacks are raw 8-relative, unlike Scan's absolute callbacks.
     // Let the sole adapter write first, then expose its actual prefix even on
     // failure. Never reinterpret its callback offset as an image address.
     let saved = record_image::store_range_into(working, 0x15, index, holder, |_, _| Ok(()));
@@ -1394,9 +1394,9 @@ fn save_user_edge(
     saved.map_err(Failure::Image)
 }
 
-/// 88B34's real clear -> byte parser -> typed saver path. The normal80984
+/// 88B34's real clear -> byte parser -> typed saver path. The normal 80984
 /// config has +9=1: only currently valid target rows are cleared, through the
-/// one shared kind15 saver. No generated G/default predicate is needed here.
+/// one shared kind 15 saver. No generated G/default predicate is needed here.
 pub fn import_user_edge(
     image: &mut Icf<'_>,
     source: &[u8],
@@ -1444,7 +1444,7 @@ pub fn import_user_edge(
                 out.applied += 1;
                 reader.applied();
             }
-            // Unlike83C60, UserEdge's typed save precedes the local-count adds.
+            // Unlike 83C60, UserEdge's typed save precedes the local-count adds.
             out.counts.c2 = out.counts.c2.wrapping_add(row.discard);
             out.counts.c3 = out.counts.c3.wrapping_add(row.corrections);
             out.counts.c4 = out.counts.c4.wrapping_add(u32::from(row.holder.valid()));
@@ -1596,7 +1596,7 @@ pub fn export_memory(
 }
 
 fn memory_header(normal: bool, separator: u8) -> Result<Vec<u8>, Error> {
-    // 89840's normal built-in Mch captions;8A27C adds the group prefix.
+    // 89840's normal built-in Mch captions; 8A27C adds the group prefix.
     let mut cells = Vec::new();
     if normal {
         cells.extend([b"Group No".to_vec(), b"Group Name".to_vec()]);
@@ -1905,8 +1905,8 @@ fn receive_row(
 }
 
 /// 847B8 selected/whole root. Selection controls how many initial rows are
-/// deleted, but its original D1CB4 argument is always0, not selection.first.
-/// Accepted rows insert at ordinal0,1,...; invalid rows do not advance it.
+/// deleted, but its original D1CB4 argument is always 0, not selection.first.
+/// Accepted rows insert at ordinal 0,1,...; invalid rows do not advance it.
 pub fn import_callsign(
     image: &mut Icf<'_>,
     source: &[u8],
@@ -2054,7 +2054,7 @@ impl<'a> CallsignRows<'a> {
     pub fn binding(&self) -> &Binding {
         &self.binding
     }
-    /// The default is the actual type23 body; a raw CSV packet is not a seed.
+    /// The default is the actual type 23 body; a raw CSV packet is not a seed.
     /// Each row reinitializes the body before advancing through its fields.
     pub fn next_with(
         &mut self,
@@ -2256,7 +2256,7 @@ mod tests {
         let ranges1 =
             icf::frequency::Ranges::generate(&icf::context::Context::from_bytes(captured), None)
                 .unwrap();
-        // F1DC maps index2->class1 and index3->class2, not EFCC(default Hz).
+        // F1DC maps index 2 -> class 1 and index 3 -> class 2, not EFCC(default Hz).
         for (candidate, frequency, offset) in [
             (145_000_000, 146_520_000, 600_000),
             (433_000_000, 446_000_000, 5_000_000),
@@ -4048,7 +4048,7 @@ mod tests {
             true,
             Locale::copied(b'.', b','),
         );
-        // Native945A4 returns below-range before clearing5F64's valid1. The
+        // Native 945A4 returns below-range before clearing 5F64's valid 1. The
         // downstream unsigned index would address before the pair table. The
         // shared safe image adapter rejects that invalid index visibly instead
         // of silently skipping it or touching an unrelated image window.

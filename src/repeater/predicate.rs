@@ -1,4 +1,4 @@
-//! C96A8/C9744/C9898 and 625F8's type0C all-group path. True means bad,
+//! C96A8/C9744/C9898 and 625F8's type 0C all-group path. True means bad,
 //! not a suitable/used row. B generation and live Q are separate explicit inputs.
 
 use super::{groups::Groups, staging::classify_bytes, working};
@@ -11,7 +11,7 @@ use crate::icf::{
 
 /// C96A8: current row participates in the first-match search; only an exact
 /// first-index match is good. DV/DD allow final space/A aliases, FM does not.
-/// The native end argument truncates index+1 to16bits, not a count clamp.
+/// The native end argument truncates index+1 to 16 bits, not a count clamp.
 pub fn callsign_bad(image: &[u8], holder: &DecodedRecord, ranges: &Ranges) -> Result<bool, Error> {
     let call = holder.repeater_text(T::Call);
     if *call == [b' '; 8] {
@@ -84,7 +84,7 @@ pub fn numeric_frequency_bad(holder: &DecodedRecord) -> bool {
     let hz = holder.channel_field(C::FrequencyHz);
     holder.valid() && hz != 0 && !(30_000..=1_399_999_999).contains(&hz)
 }
-/// 61DC0: arg0 short-circuits callsign -> frequency -> DUP; arg1 only C9800.
+/// 61DC0: arg 0 short-circuits callsign -> frequency -> DUP; arg 1 only C9800.
 pub fn row_bad(
     image: &[u8],
     holder: &DecodedRecord,
@@ -99,7 +99,7 @@ pub fn row_bad(
         || frequency_bad(holder, ranges, q)
         || duplex_bad(holder))
 }
-/// 630EC/625F8 countMode0: a full absolute group view, not the selected row.
+/// 630EC/625F8 countMode 0: a full absolute group view, not the selected row.
 pub fn group_bad(
     image: &[u8],
     group: usize,
@@ -119,7 +119,7 @@ pub fn group_bad(
     }
     Ok(false)
 }
-/// R_pre 4E858..4E8AC: each of all50 group views runs arg0, then arg1 only
+/// R_pre 4E858..4E8AC: each of all 50 group views runs arg 0, then arg 1 only
 /// on false. This is a read-only predicate, not the later normalization pass.
 pub fn all_groups_bad(
     image: &[u8],
@@ -185,7 +185,7 @@ pub fn home_usable_count(
     Ok(usable)
 }
 
-/// C705C: only count0 skips the load. C6760 adds the signed relative DWORD
+/// C705C: only count 0 skips the load. C6760 adds the signed relative DWORD
 /// with wrap; do not introduce relative<count, or correct the caller's separate
 /// typed/list numeric-filter coordinate choice here.
 pub fn home_row_usable(

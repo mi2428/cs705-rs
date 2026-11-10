@@ -65,7 +65,7 @@ pub enum CloneStep {
     /// A synchronous native request, not proof of listener/OS delivery.
     Sync(u32),
     Query(clone::Session),
-    /// Only native integer response1 approves; file Yes6 does not.
+    /// Only native integer response 1 approves; file Yes 6 does not.
     Confirm {
         warning: bool,
         selector: u8,

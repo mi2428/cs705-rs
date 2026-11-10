@@ -173,7 +173,7 @@ pub fn build(
     match kind {
         Kind::Memory => {
             // 8B5F8 normalizes only this local low-byte missing-value gate.
-            // Mode's provider below must still receive the original fullDWORD.
+            // Mode's provider below must still receive the original full DWORD.
             let gate_mode = match h.b(0x58) {
                 9 => 8,
                 14 => 13,
@@ -323,8 +323,8 @@ pub fn build(
                 cells.resize(17, Vec::new());
             } else {
                 let g = c.group.wrapping_add(1);
-                // S erratum: static sites8/14/15 are empty alternatives to
-                // Frequency/Tone/RepeaterTone. Every path has exactly17 cells.
+                // S erratum: static sites 8/14/15 are empty alternatives to
+                // Frequency/Tone/RepeaterTone. Every path has exactly 17 cells.
                 cells.extend([
                     if g <= 50 {
                         g.to_string().into_bytes()
@@ -474,7 +474,7 @@ pub fn build_portable(
     })
 }
 
-/// 8E37C reads live name/call arrays directly for the same row. Shared type0D
+/// 8E37C reads live name/call arrays directly for the same row. Shared type 0D
 /// projection is only a bridge to the builder; header/validity is not a gate.
 pub fn callsign_row(
     image: &crate::icf::Icf<'_>,
@@ -504,7 +504,7 @@ pub fn callsign_row(
     )
 }
 
-/// B9990's signed-minute formatter, including the 7FFF literal and hour low8.
+/// B9990's signed-minute formatter, including the 7FFF literal and hour low 8.
 /// Other raw values are not clamped to canonical setter bounds.
 pub fn utc_text(minutes: i32) -> Result<Vec<u8>, Error> {
     if minutes == 0x7fff {

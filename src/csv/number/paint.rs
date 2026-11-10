@@ -1,8 +1,8 @@
-//! A02AC normal paint (edit flag0), not the fixed-B0 dialog seed or CSV text.
+//! A02AC normal paint (edit flag 0), not the fixed-B0 dialog seed or CSV text.
 
 use super::{Error, native_decimal_fraction, native_dms};
 
-/// Shared48B28 degree byte. Only the non-Japanese-GUI branch reads SYSTEM LANGID.
+/// Shared 48B28 degree byte. Only the non-Japanese-GUI branch reads SYSTEM LANGID.
 pub fn degree(gui_language: Option<u32>, system_langid: Option<u16>) -> Result<u8, Error> {
     let japanese = gui_language.ok_or(Error::SourceUnavailable(
         "native coordinate GUI language C00",
@@ -20,11 +20,11 @@ pub fn degree(gui_language: Option<u32>, system_langid: Option<u16>) -> Result<u
     )
 }
 
-/// Modes5..10 choose latitude/longitude by parity but reread live396B4 for U.
-/// Modes11..13 carry the actual area mode and do not read current/U again.
-/// C00==1 skips SYSTEM LANGID; otherwise48B28 needs its actual low10 bits.
+/// Modes 5..10 choose latitude/longitude by parity but reread live 396B4 for U.
+/// Modes 11..13 carry the actual area mode and do not read current/U again.
+/// C00==1 skips SYSTEM LANGID; otherwise 48B28 needs its actual low 10 bits.
 /// The unused caller argument is omitted. Logical NUL/high hemisphere bytes
-/// remain bytes; a later47CF0/C-prefix sink belongs to the display caller.
+/// remain bytes; a later 47CF0/C-prefix sink belongs to the display caller.
 pub fn format(
     raw: [u8; 4],
     mode: u8,

@@ -1,5 +1,5 @@
 //! 94AAC/4011F0 dispatch and header-cache binding. Runtime context type is not
-//! a stored record type. Unknown contexts select initial slot0 in the original;
+//! a stored record type. Unknown contexts select initial slot 0 in the original;
 //! this explicit rule does not prove that every context has a registered UI.
 //!
 //! rebind: lower label/header -> write one slot -> next lookup -> predicate
@@ -119,7 +119,7 @@ impl Binding {
         binding.rebind(header, labels, required, &mut lower)?;
         Ok(binding)
     }
-    /// Update existing cache slots as each original894E0 call returns. A later
+    /// Update existing cache slots as each original 894E0 call returns. A later
     /// native failure retains earlier slot writes and the previous predicate.
     pub fn rebind(
         &mut self,

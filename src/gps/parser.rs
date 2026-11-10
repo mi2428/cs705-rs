@@ -1,6 +1,6 @@
-//! GPS8D288/8D534 byte-to-value phase. Draft is deliberately NOT an accepted
-//! Parsed row:83FDC/BAA10/BAED0/BAF74 finalization must run before typed apply.
-//! Missing columns and present empty cells stay distinct. The supplied type21
+//! GPS 8D288/8D534 byte-to-value phase. Draft is deliberately NOT an accepted
+//! Parsed row: 83FDC/BAA10/BAED0/BAF74 finalization must run before typed apply.
+//! Missing columns and present empty cells stay distinct. The supplied type 21
 //! direction/group-name seeds are explicit caller state, not host/default data.
 
 use super::{operations::Record, transfer::Parsed};

@@ -30,7 +30,7 @@ pub struct NumberEffect {
     pub candidate: i64,
     /// Raw DWORD before width projection, using the shared descriptor decoder.
     pub raw_candidate: i32,
-    /// State2 requests inline input and does not itself commit a value.
+    /// State 2 requests inline input and does not itself commit a value.
     pub state_out: u32,
     pub notify_flags: u32,
     /// Old-raw suffix value; percentage/WPM are not the accepted input units.
@@ -646,7 +646,7 @@ fn number_suffix(key: u16, old: i64) -> Vec<u8> {
 }
 
 /// Existing native UTC display with low-byte hours and projected-zero sign.
-/// 9DC08's raw7FFF display branch is independent of the optional input flag.
+/// 9DC08's raw 7FFF display branch is independent of the optional input flag.
 pub fn utc_offset_text(minutes: i16) -> Vec<u8> {
     if minutes == 0x7fff {
         return b"--:--".to_vec();
@@ -664,7 +664,7 @@ pub fn utc_offset_text(minutes: i16) -> Vec<u8> {
     format!("{sign}{hour}:{minute:02}").into_bytes()
 }
 
-/// 73035 -> 9D968 with optional-sentinel flag0. This is not decimal minutes
+/// 73035 -> 9D968 with optional-sentinel flag 0. This is not decimal minutes
 /// entry: sign filtering, two colon fields, u8 projection and five-minute
 /// rounding happen before the signed LE16 storage codec is called.
 pub fn edit_utc_offset(image: &mut Icf<'_>, input: NumberInput<'_>) -> Result<NumberEffect, Error> {
@@ -987,7 +987,7 @@ pub fn edit_pbt(
 pub struct BandwidthEffect {
     pub number: NumberEffect,
     pub popup_requested: bool,
-    /// A4A8C replaces phase1 context48 with the FIRST integer before the grid
+    /// A4A8C replaces phase 1 context 48 with the FIRST integer before the grid
     /// evaluation. It does not re-parse the original text as Home VFO does.
     pub rewritten_text: Option<Vec<u8>>,
 }
@@ -1002,8 +1002,8 @@ fn bandwidth_step(class: u32, width: i64, previous: bool) -> Result<i64, Error> 
 }
 
 /// AFD74/A4A8C typed/keyboard path over the SINGLE shared BW codec. Limits are
-/// editor metadata from407CA0, not a second raw-code lookup. Native selected
-/// key1/phase2 returns Hz directly, without imposing the typed bounds/grid.
+/// editor metadata from 407CA0, not a second raw-code lookup. Native selected
+/// key 1/phase 2 returns Hz directly, without imposing the typed bounds/grid.
 pub fn edit_bandwidth(
     image: &mut Icf<'_>,
     index: usize,
@@ -1612,8 +1612,8 @@ impl ConditionalField {
     pub fn key(self) -> u16 {
         self.descriptor().key()
     }
-    /// Capture the actual resource branch. AutoRepeater JPN has codes0/2, not
-    /// contiguous0/1/2; all three PE language resources share this exact schema.
+    /// Capture the actual resource branch. AutoRepeater JPN has codes 0/2, not
+    /// contiguous 0/1/2; all three PE language resources share this exact schema.
     pub fn catalog(self, runtime: SelectorRuntime<'_>) -> Result<ConditionalCatalog, Error> {
         self.catalog_sources(
             Some(runtime.descriptor_8645fc),
@@ -1797,7 +1797,7 @@ impl PackedField {
         })
     }
     /// Only the scan-span label resource depends on system LANGID; its code
-    /// domain0..6 is equal in all three checked language resource generations.
+    /// domain 0..6 is equal in all three checked language resource generations.
     pub fn selector(self, system_langid: u16) -> Option<&'static str> {
         (self == Self::DeltaFSpan).then_some(if system_langid & 0x3ff == 0x11 {
             "GI_Sheet_Sel_Common_dFSpanJpn"
@@ -1879,7 +1879,7 @@ impl AmplifierField {
         }
     }
     /// Resource visibility is rf_row_visible(PreampAttenuator); gray PAMP still
-    /// reaches its helper. ATT13..16 is fixed and reads no raw setting value.
+    /// reaches its helper. ATT 13..16 is fixed and reads no raw setting value.
     pub fn edit(
         self,
         image: &mut Icf<'_>,
@@ -2151,8 +2151,8 @@ fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 0, reason }
 }
 
-/// Mode0 text invocations retain the shared source buffer's observable prefix
-/// on native failure. Cancellation is not a phase1/2 text acceptance.
+/// Mode 0 text invocations retain the shared source buffer's observable prefix
+/// on native failure. Cancellation is not a phase 1/2 text acceptance.
 pub enum FixedTextInput<'a> {
     Display,
     Cancel,
@@ -2273,7 +2273,7 @@ impl FixedTextField {
     }
     fn profile(self) -> crate::csv::nls::Profile<'static> {
         const ALL: &[u8] = b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
-        // Network Name exception RVA408FF3, length23, SHA2567d3c5cd5...83b2b4.
+        // Network Name exception RVA 408FF3, length 23, SHA256 7d3c5cd5...83b2b4.
         let punctuation = match self {
             Self::GatewayAddress | Self::NtpAddress => b"-.".as_slice(),
             Self::GatewayCallsign | Self::PictureRecipient => b"",
@@ -2336,8 +2336,8 @@ pub fn edit_fixed_text(
     )
 }
 
-/// Raw VA864634 controls phase1 callsign alignment. NLS callbacks are the exact
-/// LCMapStringA2n/CharUpperBuffAn boundaries consumed by csv::nls::whole_text.
+/// Raw VA 864634 controls phase 1 callsign alignment. NLS callbacks are the exact
+/// LCMapStringA 2n/CharUpperBuffA n boundaries consumed by csv::nls::whole_text.
 /// A native Err leaves prior shared sanitation/map writes visible, but no image
 /// store occurs. Native zero is not an acceptance or output-length gate.
 pub fn edit_fixed_text_with_nls(
@@ -2399,8 +2399,8 @@ pub fn edit_fixed_text_with_nls(
             }
         }
     }
-    //9B80C runs after a false base helper too, except an ESC that creates no
-    //invocation. Only the current row is repaired; unknown sibling tails survive.
+    // 9B80C runs after a false base helper too, except an ESC that creates no
+    // invocation. Only the current row is repaired; unknown sibling tails survive.
     if field == FixedTextField::Keyer && !cancelled {
         let other = (0..8).filter(|&i| i != index).any(|i| {
             image
@@ -2543,7 +2543,7 @@ impl MetadataField {
             Self::ConnectionIpList => 0x399c1,
         }
     }
-    /// B03C8/B05D4 bounded28/NUL metadata, before common47CF0 language rendering.
+    /// B03C8/B05D4 bounded 28/NUL metadata, before common 47CF0 language rendering.
     /// ExtractFileExt searches the last '.', backslash or colon; Pos then removes
     /// the FIRST occurrence of that extension, rather than simply truncating at
     /// its last dot. The empty label itself is a caller/resource presentation.
@@ -2605,9 +2605,9 @@ pub struct HomeVfoEffect {
     pub outside_marker: bool,
 }
 
-/// Home37D performs the actual two range queries and re-parses the SAME source.
+/// Home 37D performs the actual two range queries and re-parses the SAME source.
 /// B is an already-generated owner, Q is the separate live warning context.
-/// Empty phase1 text is A5184's explicit zero, not a missing source fallback.
+/// Empty phase 1 text is A5184's explicit zero, not a missing source fallback.
 pub fn edit_home_vfo(
     image: &mut Icf<'_>,
     ranges: &crate::icf::frequency::Ranges,
@@ -2644,7 +2644,7 @@ pub fn edit_home_vfo(
             )?;
             if accepted && value != 0 {
                 let second = ranges.f760(2, ranges.edf0(2, value as u32), 0);
-                //The second bool is deliberately not a save gate.
+                // The second bool is deliberately not a save gate.
                 value = numeric_text(
                     text,
                     crt_point,
@@ -2795,7 +2795,7 @@ fn fixed_edge_warnings(
     Ok([low_bad, high_bad])
 }
 
-/// Kind16 C9BC8, or the broad closed-bound check for both endpoints.
+/// Kind 16 C9BC8, or the broad closed-bound check for both endpoints.
 /// The decoded holder is borrowed directly; no storage signature gate is added.
 pub fn fixed_edge_bad(
     holder: &crate::icf::record::DecodedRecord,
@@ -2818,7 +2818,7 @@ pub fn edit_fixed_edge(
     edit_fixed_edge_with_store(image, runtime, index, side, input, |_, _| Ok(()))
 }
 
-/// Kind16h's real load/save/reload adapter; no raw8 codec is reimplemented.
+/// Kind 16h's real load/save/reload adapter; no raw 8 codec is reimplemented.
 /// before_store is an ordered failure cutpoint, never an approval predicate.
 pub fn edit_fixed_edge_with_store(
     image: &mut Icf<'_>,
@@ -2854,7 +2854,7 @@ pub fn edit_fixed_edge_with_store(
     };
     let (raw, candidate, helper_accepted) = if let NumberInput::Text(text) = input {
         let (raw, accepted) = numeric_value(text, runtime.crt_point, 6, 1)?;
-        //Low comparison precedes high comparison; do not panic on reversed B.
+        // Low comparison precedes high comparison; do not panic on reversed B.
         let candidate = if raw < i64::from(min) {
             min
         } else if raw > i64::from(max) {
@@ -2911,7 +2911,7 @@ pub fn edit_fixed_edge_with_store(
     })
 }
 
-/// Native group23 input context. Fresh invocations use code/argument/warnings0.
+/// Native group 23 input context. Fresh invocations use code/argument/warnings 0.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AutoRepeaterInvocation {
     pub code: u32,
@@ -3007,7 +3007,7 @@ pub fn edit_auto_repeater_edge(
     })
 }
 
-/// 7B65D: actual A5134 grammar/bounds, then kind18's ordered save/reload.
+/// 7B65D: actual A5134 grammar/bounds, then kind 18's ordered save/reload.
 /// A cutpoint can fail a store; it never supplies an approved candidate/packet.
 pub fn edit_auto_repeater_edge_with_store(
     image: &mut Icf<'_>,
@@ -3108,7 +3108,7 @@ pub fn edit_auto_repeater_dup(
 }
 
 /// 7B8C4: invalid rows request the parent's low field, never enable via DUP.
-/// No B, G, live Q, OS locale or additional flag20 is read by this case.
+/// No B, G, live Q, OS locale or additional flag 20 is read by this case.
 pub fn edit_auto_repeater_dup_with_store(
     image: &mut Icf<'_>,
     index: usize,
@@ -3231,7 +3231,7 @@ pub fn edit_dr(
     )
 }
 
-/// First raw setting commits BEFORE the conditional kind1B/slot0 save/reload.
+/// First raw setting commits BEFORE the conditional kind 1B/slot 0 save/reload.
 /// The shared compact adapter supplies the real kind, never a band-stack
 /// disguise. A later adapter/store failure retains that first setting store.
 pub fn edit_dr_with_store(
@@ -3394,7 +3394,7 @@ pub struct HomeGroupEffect {
     pub notify_flags: u32,
 }
 
-/// A72C8 flags0 and the real stored-count/map getters. The source NormalMemory
+/// A72C8 flags 0 and the real stored-count/map getters. The source NormalMemory
 /// is explicit, not reconstructed from ICF for each candidate or silently
 /// substituted for a different live generation. Native group-byte store
 /// precedes row search; no matching row retains the old CH and still notifies.
@@ -3532,7 +3532,7 @@ pub struct HomeChannelRuntime<'a> {
     pub frequency: FrequencyRuntime<'a>,
     /// Actual global current working image, distinct from the edited I argument.
     pub current: &'a [u8],
-    /// Raw VA864614 read by61F20 before loading each odd side.
+    /// Raw VA 864614 read by 61F20 before loading each odd side.
     pub show_both_864614: u32,
 }
 
@@ -3612,9 +3612,9 @@ pub struct HomeChannelEffect {
     pub warning_bits: u32,
 }
 
-/// Normal stable GI_CchNo has the SAME four generated labels in all3 PE language
+/// Normal stable GI_CchNo has the SAME four generated labels in all 3 PE language
 /// resources. Both exact and dash-deleted probes are resolved anew before the
-/// digits/minus fallback. That fallback has no9byte cap and uses shared int32.
+/// digits/minus fallback. That fallback has no 9 byte cap and uses shared int32.
 pub fn edit_home_channel(
     image: &mut Icf<'_>,
     runtime: HomeChannelRuntime<'_>,
@@ -3751,7 +3751,7 @@ fn dr_reference(image: &Icf<'_>) -> u16 {
     u16::from_le_bytes(image.memory()[0x392fd..0x392ff].try_into().unwrap())
 }
 fn dr_prefix(groups: &crate::repeater::groups::Groups, group: usize) -> Result<u32, Error> {
-    //C664C's real high49 constructor makes group50 prefix0, not total.
+    // C664C's real high 49 constructor makes group 50 prefix 0, not total.
     if group == 50 {
         Ok(0)
     } else {
@@ -3903,7 +3903,7 @@ pub enum HomeDrMemoryInput<'a> {
     Popup,
     Next,
     Previous,
-    /// ACCC4 replaces context48 with Trim/digits-minus BEFORE later rejection.
+    /// ACCC4 replaces context 48 with Trim/digits-minus BEFORE later rejection.
     Text(&'a mut Vec<u8>),
     Selected(super::Selection),
 }
@@ -3985,7 +3985,7 @@ pub fn edit_home_dr_memory(
                 (relative, false)
             } else {
                 let value = numeric_value(source, runtime.frequency.crt_point, 0, 1)?.0 as i32;
-                //Typed625F8 uses relative q AS absolute, unlike list's start+q.
+                // Typed 625F8 uses relative q AS absolute, unlike list's start+q.
                 if value >= 0
                     && value <= high
                     && predicate::home_row_usable(
@@ -4097,7 +4097,7 @@ pub struct ProgramScanEffect {
     pub popup_requested: bool,
 }
 
-/// AA658's actual0/0/0/0/1 caller always checks broad bounds, not B/Q warnings.
+/// AA658's actual 0/0/0/0/1 caller always checks broad bounds, not B/Q warnings.
 fn program_scan_bounds_ok(current: &[u8], row: usize) -> Result<bool, Error> {
     Ok(
         crate::icf::special::ScanEdge::read(current, row)?.suitable(true, true, false, |_| {
@@ -4139,7 +4139,7 @@ pub fn edit_program_scan(
             }
             source.make_ascii_uppercase();
             *source = crate::csv::trim(source).to_vec();
-            //AA79F precedes the optional25 aliases, disabled in this caller.
+            // AA79F precedes the optional 25 aliases, disabled in this caller.
             let _first = crate::csv::number::int32(source).unwrap_or(i32::MAX);
             *source = source
                 .split(|&b| b == 0)
@@ -4149,7 +4149,7 @@ pub fn edit_program_scan(
                 .copied()
                 .filter(|b| b.is_ascii_digit() || *b == b'-')
                 .collect();
-            //AA955 skips the second parse when the C-prefix filter is empty.
+            // AA955 skips the second parse when the C-prefix filter is empty.
             if !source.is_empty()
                 && let Ok(candidate) = crate::csv::number::int32(source)
             {
@@ -4196,7 +4196,7 @@ pub fn edit_program_scan(
         _ => (i32::from(old), false),
     };
     if accepted {
-        //The reset guard reads no selected-index bits; G remains a later read.
+        // The reset guard reads no selected-index bits; G remains a later read.
         let reset = special::scan_reset_enabled(image.memory(), 0)?;
         special::select_scan_raw(image, g, candidate, reset)?;
     }
@@ -5231,7 +5231,7 @@ mod tests {
             0x20
         );
         assert_eq!(image.memory(), before);
-        //79FE0 and7A0DD test only the edited endpoint, not the combined pair.
+        // 79FE0 and 7A0DD test only the edited endpoint, not the combined pair.
         image
             .patch_memory(&[
                 (0x392da, &[0]),
@@ -5400,7 +5400,7 @@ mod tests {
 
     #[test]
     fn fixed_text_wlan_user_profiles_enforce_literal_windows_and_password_boundaries() {
-        // A4 BA02: 328/329/32B/32C, width16, empty allowed; passwords min8.
+        // A4 BA02: 328/329/32B/32C, width 16, empty allowed; passwords min 8.
         for (field, key, at, password) in [
             (FixedTextField::User1Id, 0x328, 0x39383, false),
             (FixedTextField::User1Password, 0x329, 0x39393, true),
@@ -6369,7 +6369,7 @@ mod tests {
             catalog.edit(&mut image, ChoiceInput::Next).unwrap().value,
             0
         );
-        //A selected1 remains a raw native bypass, not a checked catalog write.
+        // A selected 1 remains a raw native bypass, not a checked catalog write.
         assert_eq!(catalog.edit(&mut image, chosen(1)).unwrap().value, 1);
         for field in [ConditionalField::Coordinates, ConditionalField::Temperature] {
             assert!(

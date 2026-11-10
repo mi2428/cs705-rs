@@ -173,7 +173,7 @@ pub fn add(list: &mut Vec<FrequencyRange>, mut pending: FrequencyRange) -> Resul
     Ok(append)
 }
 
-/// E724: split appends both flag0 fragments BEFORE deleting the original node;
+/// E724: split appends both flag 0 fragments BEFORE deleting the original node;
 /// appended fragments remain in the same walk. Result is the last erase-step,
 /// not whether any mutation occurred. Original flags survive trim/retention.
 pub fn cut(list: &mut Vec<FrequencyRange>, input: FrequencyRange) -> Result<bool, Error> {
@@ -207,7 +207,7 @@ pub fn cut(list: &mut Vec<FrequencyRange>, input: FrequencyRange) -> Result<bool
 }
 
 /// E738: first argument is R in the ten-way classifier; preserve the selected
-/// operand's flag for containment, use flag0 only for partial intersections.
+/// operand's flag for containment, use flag 0 only for partial intersections.
 pub fn intersection(a: FrequencyRange, b: FrequencyRange) -> FrequencyRange {
     match relationship(a, b) {
         1 | 2 => b,
@@ -250,7 +250,7 @@ fn batch(
 }
 /// E6B0 optional-source protocol. Missing is an error; a known MAX marker skips
 /// insertion but still sorts. Its source has only two DWORDs: E6B4 constructs
-/// flag0, rather than reading a third supplied field. Generic add is different.
+/// flag 0, rather than reading a third supplied field. Generic add is different.
 pub fn optional(
     list: &mut Vec<FrequencyRange>,
     input: Option<FrequencyRange>,
@@ -264,7 +264,7 @@ pub fn optional(
 }
 
 /// One B owner, independently retained across later live-Q changes. The initial
-/// constructor's selected5/empty9 state is explicit native DB98/D988 behavior,
+/// constructor's selected 5/empty 9 state is explicit native DB98/D988 behavior,
 /// not a successful population or a missing-source fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ranges {
@@ -296,7 +296,7 @@ impl Ranges {
         self.source_q.as_ref()
     }
     /// Resolve the captured B selector, never a later live Q. An unpopulated
-    /// Rust owner has no captured source and cannot imply the native source0.
+    /// Rust owner has no captured source and cannot imply the native source 0.
     pub fn default_source_selector(&self, system_langid: Option<u16>) -> Result<usize, Error> {
         if self.source_q.is_none() {
             return Err(invalid("B source selector has not been captured"));
@@ -481,7 +481,7 @@ impl Ranges {
     pub fn f32c(&self, live_q: &Context, frequency: u32) -> bool {
         q_kind(live_q) < 16 && !hit(self.list(Container::LD0), frequency)
     }
-    /// ED10/ED3C's special200MHz point is NOT ordinary L30 membership. This
+    /// ED10/ED3C's special 200 MHz point is NOT ordinary L30 membership. This
     /// predicate belongs to the class-range warning, not user F32C.
     pub fn ed3c(&self, live_q: &Context, frequency: u32) -> bool {
         q_kind(live_q) < 16
@@ -567,7 +567,7 @@ impl Ranges {
         }
     }
     /// Strict integer-Hz collection for scan/user's SAME-input two-pass path.
-    /// Initial index is literal-1, second query frequency is literal0. The second
+    /// Initial index is literal -1, second query frequency is literal 0. The second
     /// value clamps ORIGINAL candidate, never the first clamped value.
     pub fn frequency_input(
         &self,
@@ -585,8 +585,8 @@ impl Ranges {
         })
     }
 
-    /// Native scan/user phase1 MHz text. Both parses consume the original bytes;
-    /// unlike normal-memory input, the second range query uses literal frequency0.
+    /// Native scan/user phase 1 MHz text. Both parses consume the original bytes;
+    /// unlike normal-memory input, the second range query uses literal frequency 0.
     pub fn frequency_text_input(
         &self,
         kind: u32,
@@ -635,16 +635,16 @@ fn q_kind(q: &Context) -> i32 {
     i32::from_le_bytes(q.as_bytes()[..4].try_into().expect("Q kind"))
 }
 
-/// F20C reads the explicit B object's captured selector through56CC8. Completed
-/// B selectors0..4 never re-read a later live Q or host locale. Values are Hz.
+/// F20C reads the explicit B object's captured selector through 56CC8. Completed
+/// B selectors 0..4 never re-read a later live Q or host locale. Values are Hz.
 /// A class outside the four-entry source row would read adjacent native data;
-/// this bounded API reports that missing source instead of inventing offset0.
+/// this bounded API reports that missing source instead of inventing offset 0.
 pub fn f20c(ranges: &Ranges, system_langid: Option<u16>, class: i32) -> Result<u32, Error> {
     let selected = ranges.default_source_selector(system_langid)?;
     offset_for_source(selected as u8, class)
 }
 
-/// Shared finite source schema. Callers such as type1D already captured their
+/// Shared finite source schema. Callers such as type 1D already captured their
 /// actual source selector; F20C obtains it from the explicit B owner.
 pub fn offset_for_source(selected: u8, class: i32) -> Result<u32, Error> {
     if selected > 4 {
@@ -731,7 +731,7 @@ fn common_bands() -> [FrequencyRange; 3] {
     ]
 }
 fn class_bands() -> Vec<FrequencyRange> {
-    // RVA191C60: sixteen consecutive classes followed by a separate UHF class.
+    // RVA 191C60: sixteen consecutive classes followed by a separate UHF class.
     let edges = [
         30_000,
         1_600_000,
@@ -782,7 +782,7 @@ fn profile_receive(s: usize) -> Vec<FrequencyRange> {
     }
 }
 fn profile_transmit(s: usize) -> Vec<FrequencyRange> {
-    // RVA191600 base with the finite per-source differences at191708/77C/7F0/864.
+    // RVA 191600 base with the finite per-source differences at 191708/77C/7F0/864.
     let mut v = vec![
         range(1_800_000, 1_999_999),
         range(3_500_000, 3_999_999),
@@ -829,7 +829,7 @@ fn profile_transmit(s: usize) -> Vec<FrequencyRange> {
     v
 }
 fn japanese_transmit() -> Vec<FrequencyRange> {
-    // RVA191674: nine Japanese HF pieces, common upper-HF/50M, then VHF/UHF.
+    // RVA 191674: nine Japanese HF pieces, common upper-HF/50M, then VHF/UHF.
     let mut v = vec![
         range(1_800_000, 1_875_000),
         range(1_907_500, 1_912_500),
@@ -847,7 +847,7 @@ fn japanese_transmit() -> Vec<FrequencyRange> {
     v
 }
 fn auxiliary_bands() -> Vec<FrequencyRange> {
-    // RVA191960: call/BSR auxiliary bands; index12/13 are NOT logical row ids.
+    // RVA 191960: call/BSR auxiliary bands; index 12/13 are NOT logical row ids.
     vec![
         range(1_800_000, 1_999_999),
         range(3_400_000, 4_099_999),
@@ -914,7 +914,7 @@ fn holder_frequency(holder: &DecodedRecord) -> u32 {
     )
 }
 
-// C9360 has no kind gate on EB64. Only its extra F760 query is kind3/4.
+// C9360 has no kind gate on EB64. Only its extra F760 query is kind 3/4.
 // The callback lets the normal/call borrowed boundary share the same ordered
 // predicate without inventing its missing L148 source or copying the logic.
 fn channel_frequency_bad_with(
@@ -941,11 +941,11 @@ fn channel_frequency_bad_with(
     Ok(bad)
 }
 
-/// C9360 for normal/call, compact04/05 and externally valid19/1A/1B holders.
-/// Valid0 does not query B or Q. Valid1 always binds EB64; kind3/4 MUST query
+/// C9360 for normal/call, compact 04/05 and externally valid 19/1A/1B holders.
+/// Valid 0 does not query B or Q. Valid 1 always binds EB64; kind 3/4 MUST query
 /// F760(kind,H38,freq), even after shared bad=true or live kind>=16. H38 is
-/// auxiliary12/13 for calls, not their row. Other kinds do not read H38.
-/// This predicate intentionally does not include the mode24 test.
+/// auxiliary 12/13 for calls, not their row. Other kinds do not read H38.
+/// This predicate intentionally does not include the mode 24 test.
 pub fn channel_frequency_bad(
     holder: &DecodedRecord,
     ranges: &Ranges,
@@ -961,7 +961,7 @@ pub fn channel_frequency_bad(
     )
 }
 
-/// 61CE0: arg0 is C9360 then full-DWORD mode24; arg1 is C9420's broad
+/// 61CE0: arg 0 is C9360 then full-DWORD mode 24; arg 1 is C9420's broad
 /// 30000..470000000 closed-bound check only. Invalid holders bypass both.
 /// Broad never reads B/Q, and does not include mode or machine permission.
 pub fn channel_bad(
@@ -976,7 +976,7 @@ pub fn channel_bad(
     Ok(channel_frequency_bad(holder, ranges, live_q)? || (holder.valid() && holder.mode() == 24))
 }
 
-/// C9C80/C9DC8 for one Auto Repeater edge. Native side1 is the low edge.
+/// C9C80/C9DC8 for one Auto Repeater edge. Native side 1 is the low edge.
 /// The specific path captures R before checking Q13/validity; broad reads no Q.
 /// Warning evaluation never changes validity, DUP, endpoints or reserved bytes.
 pub fn auto_repeater_edge_bad(
@@ -998,7 +998,7 @@ pub fn auto_repeater_edge_bad(
     if numeric_only {
         return Ok(holder.valid() && !(30_000..=470_000_000).contains(&frequency));
     }
-    // 569FC ignores its nominal C argument and queries live Q through100F4.
+    // 569FC ignores its nominal C argument and queries live Q through 100F4.
     // source_selector is the existing single implementation of that R boundary.
     let r = live_q.source_selector(system_langid)? == 0;
     if live_q.as_bytes()[0x13] != 1 || r || !holder.valid() {
@@ -1030,7 +1030,7 @@ pub fn auto_repeater_bad(
     )
 }
 
-/// Borrowed normal/call61CE0 arg0. This boundary requires the real L120 source
+/// Borrowed normal/call 61CE0 arg 0. This boundary requires the real L120 source
 /// at call H38=aux12/13, even after shared bad=true. It cannot synthesize L148
 /// for arbitrary H38. Full-kind consumers use channel_bad with an owned B.
 pub fn previous_channel_bad(
@@ -1049,7 +1049,7 @@ pub fn previous_channel_bad(
             .copied()
             .ok_or(invalid("call auxiliary range index unavailable"))
     })?;
-    // C94A8 and10144 are real constant-false functions, not unknown fallbacks.
+    // C94A8 and 10144 are real constant-false functions, not unknown fallbacks.
     Ok(bad || (holder.valid() && holder.mode() == 24))
 }
 
@@ -1058,7 +1058,7 @@ mod tests {
     use super::super::record;
     use super::*;
 
-    // Independently calculated from35 hashed PE source windows using normal
+    // Independently calculated from 35 hashed PE source windows using normal
     // point-set union/difference/intersection, not these native algorithms.
     const GENERATION_ORACLE: u64 = 0xc509_23aa_09c8_39dd;
 
@@ -1507,7 +1507,7 @@ mod tests {
                     channel_frequency_bad(&h, &ranges, &live).unwrap(),
                     matches!(kind, 3 | 4) && aux_bad
                 );
-                assert!(channel_bad(&h, &ranges, &q0, false).unwrap()); // Full mode24.
+                assert!(channel_bad(&h, &ranges, &q0, false).unwrap()); // Full mode 24.
                 assert_eq!(
                     channel_bad(&h, &ranges, &q0, true).unwrap(),
                     !(30_000..=470_000_000).contains(&f)
@@ -1601,7 +1601,7 @@ mod tests {
         assert_eq!(
             r.frequency_input(8, u32::MAX).unwrap().second_value,
             1_000_000_000
-        ); // Not470M from the first clamp.
+        ); // Not 470M from the first clamp.
     }
 
     #[test]

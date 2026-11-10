@@ -24,7 +24,7 @@ impl Field {
 }
 
 /// Live caller/node scalars, not a prepared holder or an accepted helper result.
-/// view_last/view_enabled are descriptor+8/+C consumed by635F4 ->614A8;
+/// view_last/view_enabled are descriptor+8/+C consumed by 635F4 -> 614A8;
 /// they are not recomputed from the current UR count or holder validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -78,7 +78,7 @@ fn prefix(bytes: &[u8]) -> Vec<u8> {
 }
 
 impl WorkingUr {
-    /// 6494C ->6C3B7/6C464 using the shared platform NLS producer. On other
+    /// 6494C -> 6C3B7/6C464 using the shared platform NLS producer. On other
     /// platforms its explicit ASCII boundary still refuses unavailable NLS data.
     pub fn native_text(
         &mut self,
@@ -95,8 +95,8 @@ impl WorkingUr {
         )
     }
 
-    /// Name uses mode1/name_candidate; Call uses mode0/whole_text with the
-    /// actual LCMapStringA2n and additional CharUpperBuffAn output boundaries.
+    /// Name uses mode 1/name_candidate; Call uses mode 0/whole_text with the
+    /// actual LCMapStringA 2n and additional CharUpperBuffA n output boundaries.
     /// Errors preserve earlier insertion, source sanitation and typed writes.
     pub fn native_text_with_nls(
         &mut self,
@@ -189,7 +189,7 @@ impl WorkingUr {
                         effect.display = Some(candidate.clone());
                     }
                 }
-                // The real type0D saver commits Name16 then Call8, even valid0.
+                // The real type 0D saver commits Name16 then Call8, even valid 0.
                 self.save(index, &holder)?;
                 self.load_into(index, &mut holder)?;
                 frame.ur_changed = true;
@@ -411,7 +411,7 @@ mod tests {
             assert_eq!(&model.working()[0x3c901..0x3c903], &0x1234u16.to_le_bytes());
             assert_eq!(effect.notifications, [0x40, 0x39]);
             assert!(effect.inserted && effect.view_bad);
-            assert_eq!(effect.stored, accept); // The reloaded holder was cleared valid0.
+            assert_eq!(effect.stored, accept); // The reloaded holder was cleared valid 0.
             assert_eq!(effect.display, Some(Vec::new()));
             assert_eq!(frame.node_flags, 0xa4);
             assert_eq!(frame.warning_bits, 0x80); // Old view-bad skips C9678.

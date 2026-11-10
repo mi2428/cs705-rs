@@ -1,6 +1,6 @@
 //! Decoded Type conversion and its ordered field-handler effects.
-//! C7340's0..5 helper domain is distinct from the registered UI's0..3 choices.
-//! Placeholder/marker/default type22 data are explicit source inputs, never
+//! C7340's 0..5 helper domain is distinct from the registered UI's 0..3 choices.
+//! Placeholder/marker/default type 22 data are explicit source inputs, never
 //! copied factory constants or invented blank/default values.
 
 use super::staging::{Record, classify};
@@ -39,7 +39,7 @@ fn put(row: &mut Record, at: usize, n: u32) {
 }
 
 /// C7340. Unknown candidate performs no writes, as in the source helper. This
-/// does not expose cases4/5 as registered GUI candidates or clear valid0.
+/// does not expose cases 4/5 as registered GUI candidates or clear valid 0.
 pub fn transform_type(row: &mut Record, candidate: u32, source: TypeSource) -> bool {
     match candidate {
         0 => {
@@ -223,7 +223,7 @@ pub enum Outcome {
     Saved,
 }
 
-/// B0950 consumes only ordinary1..126 codes. It does not delete a selected
+/// B0950 consumes only ordinary 1..126 codes. It does not delete a selected
 /// pointer, reset phase or make Mode's explicit selected event unreachable.
 pub fn suppress_mode_code(code: &mut i32) {
     if (1..=126).contains(code) {
@@ -231,7 +231,7 @@ pub fn suppress_mode_code(code: &mut i32) {
     }
 }
 
-/// 1035C/1038C list filter with9A6C4's current-value bypass. This is NOT a
+/// 1035C/1038C list filter with 9A6C4's current-value bypass. This is NOT a
 /// selected-event storage guard. Out-of-table access is an explicit unavailable
 /// native memory input rather than false/default/clamp.
 pub fn candidate_allowed(
@@ -325,8 +325,8 @@ pub fn quantize_offset_hz(value: u32) -> u32 {
 }
 
 /// 6D7AF: actual C78C0 blocked result is supplied by its caller. Nonblocked style
-/// runs BEFORE the numeric helper result is consumed, even when result0 skips
-/// saving. This field never adds frequency's DUP/USE coupling or flag20.
+/// runs BEFORE the numeric helper result is consumed, even when result 0 skips
+/// saving. This field never adds frequency's DUP/USE coupling or flag 20.
 pub fn select_offset(
     row: &mut Record,
     blocked: bool,
@@ -352,7 +352,7 @@ pub fn select_offset(
 }
 
 /// 6DC62 consumes the FULL native EAX, not AL. A false optional parser may have
-/// modified its local candidate to7FFF, but must not modify holder/typed image.
+/// modified its local candidate to 7FFF, but must not modify holder/typed image.
 pub fn select_utc_offset(
     row: &mut Record,
     native_result: u32,

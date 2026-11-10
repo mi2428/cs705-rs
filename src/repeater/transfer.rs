@@ -28,10 +28,10 @@ pub enum ImportMode {
     Replace,
 }
 
-/// Actual P+4/+8/+C source and reader for mode1's oldCount0 native heap case.
+/// Actual P+4/+8/+C source and reader for mode 1's oldCount 0 native heap case.
 /// The values are not initialized to zero or clamped to the old snapshot.
-/// Needed only if mode1 finishes with a nonempty new range. Empty imports,
-/// mode0 and mode2 do not ask their callers for native heap contents.
+/// Needed only if mode 1 finishes with a nonempty new range. Empty imports,
+/// mode 0 and mode 2 do not ask their callers for native heap contents.
 pub struct UnwrittenSource<'a> {
     pub source: PreserveSource,
     pub read_budget: usize,
@@ -457,7 +457,7 @@ pub fn import_csv_merge(
     out
 }
 
-/// Source-driven17-cell export. Public static labels and all scalar expressions
+/// Source-driven 17-cell export. Public static labels and all scalar expressions
 /// are portable; no caller-supplied per-field formatter is needed for Repeater.
 pub fn export_working_csv(image: &Working, scope: Scope, locale: csv::Locale) -> Export {
     let header = csv::split_cells(&super::HEADER[..super::HEADER.len() - 2], b',');

@@ -139,18 +139,18 @@ pub struct ChannelNormalization {
     pub index: u32,
     pub working_binding: u32,
     pub default_binding: u32,
-    /// Captured `Q[12]`; only zero enables replacement of tone index50.
+    /// Captured `Q[12]`; only zero enables replacement of tone index 50.
     pub q12: u8,
-    /// Captured VA864614; only zero permits the split-OFF previous-side reload.
+    /// Captured VA 864614; only zero permits the split-OFF previous-side reload.
     pub previous_reload_guard: u32,
 }
 
 /// Execute stage9's actual normal/call typed load/correct/store/reload sequence.
 ///
 /// This is a prefix component, not a complete stage9 or a signature repair. The
-/// caller supplies the real61CE0(arg0) predicate, including its ordered range and
-/// record reads. It is called only after offset rounding and only for side1 with
-/// split0/guard0. The unused-looking same-index default load is mandatory and can
+/// caller supplies the real 61CE0(arg0) predicate, including its ordered range and
+/// record reads. It is called only after offset rounding and only for side 1 with
+/// split 0/guard 0. The unused-looking same-index default load is mandatory and can
 /// fail before any working-image write. Previous-side reload is NOT re-rounded.
 /// Every raw store uses the shared codec; failure retains earlier image commits.
 pub fn normalize_channel_at(
@@ -236,9 +236,9 @@ pub fn normalize_range_at(
     Ok(Some(load(image, bindings.0)?))
 }
 
-/// Stage9 kind04/05/08/19/1A/1B: real W load, validity gate, same-row live F
+/// Stage9 kind 04/05/08/19/1A/1B: real W load, validity gate, same-row live F
 /// load, offset rounding and mode/DATA/tone correction, ordered save and reload.
-/// Scan uses filter255 and never replaces tone50. The raw saver remains special's
+/// Scan uses filter 255 and never replaces tone 50. The raw saver remains special's
 /// single implementation. Callback offsets are relative for compact, absolute for
 /// scan, exactly as their image-adapter APIs specify.
 pub fn normalize_special_at(
@@ -281,7 +281,7 @@ pub fn normalize_special_at(
     Ok(Some(load(image, bindings.0)?))
 }
 
-/// Runtime table built by5B30/4C404, in actual slot order (not numeric kind order).
+/// Runtime table built by 5B30/4C404, in actual slot order (not numeric kind order).
 pub const TYPED_SLOTS: [(u32, u32, u32); 11] = [
     (2, 0, 19999),
     (3, 0, 7),
@@ -301,11 +301,11 @@ pub struct TypedCounts {
     pub memopad_valid: u32,
 }
 
-/// Execute ALL11 runtime slots, using the shared generated B and actual codecs.
-/// The type18 entry condition and tone byte are captured before the table walk.
+/// Execute ALL 11 runtime slots, using the shared generated B and actual codecs.
+/// The type 18 entry condition and tone byte are captured before the table walk.
 /// Every valid row loads live F, stores, then reloads. Memopad compaction runs
 /// after its slot even if no valid row was encountered. No marker is written
-/// here: the full driver must still finish type0C, central and R/V/reference work.
+/// here: the full driver must still finish type 0C, central and R/V/reference work.
 pub fn typed_loop(
     image: &mut [u8],
     defaults: ReferenceImage<'_>,
@@ -314,8 +314,8 @@ pub fn typed_loop(
     system_langid: Option<u16>,
     previous_reload_guard: u32,
 ) -> Result<TypedCounts, Error> {
-    // 4D4A7/4D4B9 captures NOT(56E9C(Q));56E9C is Q13==1.
-    // 569FC is also captured unconditionally, even when the first flag skips18.
+    // 4D4A7/4D4B9 captures NOT(56E9C(Q)); 56E9C is Q13==1.
+    // 569FC is also captured unconditionally, even when the first flag skips 18.
     let q13 = q.as_bytes()[0x13];
     let japanese = q.source_selector(system_langid)? == 0;
     let skip18 = q13 != 1 || japanese;
@@ -382,11 +382,11 @@ pub fn typed_loop(
     Ok(counts)
 }
 
-/// 4F318's memopad1..10 post-loop compaction. Exactly10 passes, not a raw slice
+/// 4F318's memopad 1..10 post-loop compaction. Exactly 10 passes, not a raw slice
 /// rotation: each shifted row goes through the shared loader/saver. Only the
 /// frequency of the retained shift holder becomes MAX at the tail; its validity
-/// and body are NOT cleared. With no observed non-hole, restore151DWORDs from
-/// each live F holder (not a raw36 copy). Slot0 is never visited.
+/// and body are NOT cleared. With no observed non-hole, restore 151 DWORDs from
+/// each live F holder (not a raw 36 copy). Slot 0 is never visited.
 pub fn stage9_memopad(
     image: &mut [u8],
     defaults: ReferenceImage<'_>,
@@ -496,7 +496,7 @@ fn compact_zero(bytes: &mut [u8]) {
     bytes[target..].fill(b' ');
 }
 
-/// Stage-9's six fixed20-byte windows, in actual call order. Both helpers use
+/// Stage-9's six fixed 20-byte windows, in actual call order. Both helpers use
 /// replacement space, so they never append a terminator or compact the buffer.
 pub fn stage9_fixed_text(image: &mut [u8]) -> Result<(), Error> {
     if image.len() < 0x3c63c {
@@ -590,7 +590,7 @@ pub(super) fn copy_field(
 }
 
 /// 4DCA4..4DEFB's independent control-bit restoration block. Only original
-/// bits7/6/4/3/0 of37780, bits3..0 of37781 and full377FE come from live F.
+/// bits 7/6/4/3/0 of 37780, bits 3..0 of 37781 and full 377FE come from live F.
 /// No mode/radio inference, opaque-bit reset or whole-byte substitute is added.
 pub fn stage9_control_bits(image: &mut [u8], defaults: ReferenceImage<'_>) -> Result<(), Error> {
     copy_mask(image, defaults, 0x37780, 0xd9)?;
@@ -632,9 +632,9 @@ pub fn stage9_profile_prefix(
     Ok(())
 }
 
-/// 4DF55..4E222's Q-conditional bits0..2 restoration followed by the independent
-///17-byte bit loop. The low2-bit passes precede the bit2 passes. W=F is still
-/// nonidentity: indices13..16 lose bit2, then all17bytes gain bit3.
+/// 4DF55..4E222's Q-conditional bits 0..2 restoration followed by the independent
+/// 17-byte bit loop. The low 2-bit passes precede the bit 2 passes. W=F is still
+/// nonidentity: indices 13..16 lose bit 2, then all 17 bytes gain bit 3.
 pub fn stage9_filter_bits(
     image: &mut [u8],
     defaults: ReferenceImage<'_>,
@@ -761,9 +761,9 @@ fn byte(image: &[u8], at: usize) -> Result<u8, Error> {
 
 /// 631CC/C6190 ->625F8(type0D,arg0 then arg1): the WHOLE live T list, not only
 /// the selected row. C9678 compares each row with BE4A4's first exact match;
-/// blank returns300 without a search. No trim/casefold/valid gate or order map.
-/// Count0 returns before any holder load. The arg1 implementation is originally
-/// constant false, so it adds no reads after a successful complete arg0 pass.
+/// blank returns 300 without a search. No trim/casefold/valid gate or order map.
+/// Count 0 returns before any holder load. The arg 1 implementation is originally
+/// constant false, so it adds no reads after a successful complete arg 0 pass.
 pub fn late_callsign_list_bad(current: &[u8], binding: u32) -> Result<bool, Error> {
     let count = u16::from_le_bytes(
         current
@@ -782,8 +782,8 @@ pub fn late_callsign_list_bad(current: &[u8], binding: u32) -> Result<bool, Erro
     Ok(false)
 }
 
-/// Observable list phase of4F538, not the original AL return (AL only reports
-/// typed deletion; a saved frequency/callsign correction can leave ALzero).
+/// Observable list phase of 4F538, not the original AL return (AL only reports
+/// typed deletion; a saved frequency/callsign correction can leave AL zero).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ResetLists {
     pub saved_repeaters: u32,
@@ -792,7 +792,7 @@ pub struct ResetLists {
     pub deleted_allowed: u32,
 }
 
-/// Shared61CE0/61D34/61E3C/61ED4/61E88/61DC0/61D88/61EAC dispatch.
+/// Shared 61CE0/61D34/61E3C/61ED4/61E88/61DC0/61D88/61EAC dispatch.
 /// The bool is the native arg: false=specific, true=numeric-only. Each field
 /// predicate remains owned by its existing codec/engine; no arbitrary result
 /// provider or second band classifier is accepted here.
@@ -860,12 +860,12 @@ pub fn typed_bad(
             } else {
                 record_image::callsign_bad(image, holder)
             }
-        } // Native arg1 is constantfalse.
+        } // Native arg 1 is constant false.
         _ => Err(invalid("typed warning kind not implemented")),
     }
 }
 
-/// Actual caller-owned show-both DWORD and VA864930 cache byte. Neither is a
+/// Actual caller-owned show-both DWORD and VA 864930 cache byte. Neither is a
 /// predicate result, image field or default inferred from the current profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResetState {
@@ -874,12 +874,12 @@ pub struct ResetState {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResetReport {
-    /// Valid-row81E8 invocations, not a byte-difference count.
+    /// Valid-row 81E8 invocations, not a byte-difference count.
     pub typed_saved: u32,
     pub lists: ResetLists,
 }
 
-/// Actual4F538 for W=current (C/T alias W). Stage9/terminal marker are separate.
+/// Actual 4F538 for W=current (C/T alias W). Stage9/terminal marker are separate.
 /// Errors leave earlier Home, map, typed save and deletion prefixes intact.
 pub fn reset_operating_state(
     image: &mut [u8],
@@ -972,7 +972,7 @@ pub fn reset_operating_state(
             let mut h = record::reset_holder(kind, index, 1);
             record_image::load_into(image, kind, index, &mut h)?;
             let mut f = record::reset_holder(kind, index, 2);
-            record_image::load_into(defaults.get(image), kind, index, &mut f)?; // Even W.valid0 reads F first.
+            record_image::load_into(defaults.get(image), kind, index, &mut f)?; // Even W.valid 0 reads F first.
             if !h.valid() {
                 continue;
             }
@@ -1027,8 +1027,8 @@ pub fn reset_operating_state(
     })
 }
 
-/// D1DBC: shift through the full30-slot tail using the shared typed adapter;
-/// type24 is8spaces. There is no stored count or default-reference reset here.
+/// D1DBC: shift through the full 30-slot tail using the shared typed adapter;
+/// type 24 is 8 spaces. There is no stored count or default-reference reset here.
 pub fn delete_allowed_into(image: &mut [u8], index: u32) -> Result<(), Error> {
     for destination in (index as i32)..29 {
         let next = destination.wrapping_add(1) as u32;
@@ -1042,7 +1042,7 @@ pub fn delete_allowed_into(image: &mut [u8], index: u32) -> Result<(), Error> {
     record_image::store_into(image, 0x17, tail, &mut holder)
 }
 
-/// 4F8EB..4FA84's actual0C->0D->17 descending phases. Each predicate/load/save
+/// 4F8EB..4FA84's actual 0C->0D->17 descending phases. Each predicate/load/save
 /// reads current again. This is shared with the full operating reset root; it
 /// does not replace that root's earlier Home/scan/typed correction work.
 pub fn reset_lists(
@@ -1389,10 +1389,10 @@ mod tests {
         source[0x3c84a] = 1;
         source[0x3a8c9] = 1;
         source[0x3a8ca] = 1;
-        source[0x3c84f..0x3c853].fill(0xff); // Kind19 remains valid, unlike kind04/05.
+        source[0x3c84f..0x3c853].fill(0xff); // Kind 19 remains valid, unlike kind 04/05.
         for row in 0..12 {
             let at = 0x370e0 + 10 * row;
-            source[at] = 1; // Seed valid type18 rows, not the old always-valid0 pair.
+            source[at] = 1; // Seed valid type 18 rows, not the old always-valid 0 pair.
             source[at + 2..at + 6].copy_from_slice(&1_u32.to_le_bytes());
             source[at + 6..at + 10].copy_from_slice(&2_u32.to_le_bytes());
         }
@@ -1436,7 +1436,7 @@ mod tests {
     #[test]
     fn special_prefix_reads_live_default_before_rounding_and_keeps_scan_tones_separate() {
         let mut image = channel_image();
-        put_memopad(&mut image, 1, 123, 0x82); // Full mode0F: DATA clears, filter0.
+        put_memopad(&mut image, 1, 123, 0x82); // Full mode 0F: DATA clears, filter 0.
         let before = image.clone();
         assert!(
             normalize_special_at(
@@ -1546,7 +1546,7 @@ mod tests {
         assert_eq!(&image[0x36f54..first], reserved);
         assert_eq!(stores.len(), 20); // Nine shifts and a valid tail holder: two stores each.
         assert_eq!(&stores[18..], &[(10, 0), (10, 4)]);
-        // No stage9 mode or100Hz rounding is smuggled into the compactor.
+        // No stage9 mode or 100 Hz rounding is smuggled into the compactor.
         assert_eq!(&image[first + 10..first + 14], &149_u32.to_le_bytes());
         assert_eq!(&image[0x3c9b0..0x3c9c0], &[0xcc; 16]);
     }
@@ -1636,7 +1636,7 @@ mod tests {
         };
         assert!(!previous_channel_bad(&holder, Some(&unrestricted)).unwrap());
         assert!(previous_channel_bad(&holder, None).is_err());
-        holder.set_mode(0x118); // Low byte24 is not full mode24.
+        holder.set_mode(0x118); // Low byte 24 is not full mode 24.
         assert!(!previous_channel_bad(&holder, Some(&unrestricted)).unwrap());
         holder.set_mode(24);
         assert!(previous_channel_bad(&holder, Some(&unrestricted)).unwrap());
@@ -1677,7 +1677,7 @@ mod tests {
         current[0x3c0a7..0x3c2ff].fill(0xff); // Stored order is not consulted.
         assert!(!late_callsign_list_bad(&current, 17).unwrap());
         current[0x2edb3..0x2edbb].copy_from_slice(b"AA      ");
-        assert!(late_callsign_list_bad(&current, 17).unwrap()); // A later row, not only selected0.
+        assert!(late_callsign_list_bad(&current, 17).unwrap()); // A later row, not only selected 0.
         current[0x49978..0x4997a].copy_from_slice(&2_u16.to_le_bytes());
         assert!(!late_callsign_list_bad(&current, 17).unwrap()); // Tail duplicate is outside live T count.
         current[0x2edab..0x2edb3].fill(b' ');
@@ -1944,7 +1944,7 @@ mod tests {
         let mut expected = vec![0xa6; 0x4997a];
         expected[0x378b9] = 0xa5;
         expected[0x378ba] = 0xa5;
-        assert_eq!(image, expected); // Low2 pass failed BEFORE any bit2 or unconditional loop.
+        assert_eq!(image, expected); // Low 2 pass failed BEFORE any bit 2 or unconditional loop.
     }
 
     #[test]
@@ -2000,7 +2000,7 @@ mod tests {
         let before = image.clone();
         stage9_settings_tail(&mut image, ReferenceImage::Working, &context, 0, None).unwrap();
         assert_eq!(image, before);
-        // kind16 needs the actual SYSTEM LANGID only on captured-q13==1.
+        // kind 16 needs the actual SYSTEM LANGID only on captured-q13==1.
         let context = super::super::context::Context::before_registry();
         assert!(
             stage9_settings_tail(
@@ -2072,7 +2072,7 @@ mod tests {
             &super::super::context::Context::before_registry(),
         )
         .unwrap();
-        assert_eq!(image[0xa78c], 0); // Real selected/compatible mask00 field keeps the current preset.
+        assert_eq!(image[0xa78c], 0); // Real selected/compatible mask 00 field keeps the current preset.
         image[0xa6dc..0xa6dc + 22].fill(0xff);
         stage9_profile_prefix(
             &mut image,

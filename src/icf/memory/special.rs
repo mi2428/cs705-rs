@@ -255,7 +255,7 @@ impl CompactChannel {
     pub fn decode_valid(raw: &[u8; 36], valid: bool) -> Result<Self, Error> {
         Self::decode_bound(Some(raw), valid)
     }
-    /// Checked shared-kind19/1A/1B entry: validity comes from the caller's real
+    /// Checked shared-kind 19/1A/1B entry: validity comes from the caller's real
     /// external flag, not frequency. Invalid skips the source entirely; valid
     /// requires a supplied raw36 even when frequency itself is FFFFFFFF.
     /// The same field decoder serves normal compact and shared records.
@@ -353,8 +353,8 @@ impl CompactChannel {
         self.write_to(&raw, |offset, bytes| put(image, at + offset, bytes))
     }
     /// Original raw36 saver with relative offsets for a checked caller target.
-    /// Frequency (offset0/4 bytes) commits before valid; a valid record then
-    /// commits offset4/32 bytes. Abort on the first callback error without
+    /// Frequency (offset 0/4 bytes) commits before valid; a valid record then
+    /// commits offset 4/32 bytes. Abort on the first callback error without
     /// undoing prior writes or holder callsign correction. No DATA/filter paste
     /// normalization is implied. old is the actual target's reserved-bit source.
     pub fn write_to(
@@ -448,9 +448,9 @@ impl CompactClipboard {
     }
 }
 
-/// D0AFC/CBE44: confirm1 -> G decoded copy -> normalized sequential stores ->
-/// planned row14 notifications -> queue11/3C. A band exclusion produces 42
-/// contiguous writes but 45 row notifications; reserved memopad row0 is untouched.
+/// D0AFC/CBE44: confirm 1 -> G decoded copy -> normalized sequential stores ->
+/// planned row 14 notifications -> queue 11/3C. A band exclusion produces 42
+/// contiguous writes but 45 row notifications; reserved memopad row 0 is untouched.
 pub fn reset_compact(
     image: &mut Icf<'_>,
     g: &[u8],
@@ -639,7 +639,7 @@ pub fn scan_suitable_rows(
     Ok(rows)
 }
 
-/// AA658's stored selection includes low5 values25..31 outside the menu rows.
+/// AA658's stored selection includes low 5 values 25..31 outside the menu rows.
 pub fn selected_scan_raw(image: &[u8]) -> Result<u8, Error> {
     Ok((byte(image, 0x37802)? >> 2) & 31)
 }
@@ -649,8 +649,8 @@ pub fn select_scan(image: &mut Icf<'_>, g: &[u8], row: usize, reset: bool) -> Re
     select_scan_raw(image, g, row as i32, reset)
 }
 
-/// AA658's accepted selected candidate bypasses the normal25-row menu domain.
-/// Its low5 bits are stored before any conditional reset or G source read.
+/// AA658's accepted selected candidate bypasses the normal 25-row menu domain.
+/// Its low 5 bits are stored before any conditional reset or G source read.
 pub fn select_scan_raw(
     image: &mut Icf<'_>,
     g: &[u8],
@@ -997,8 +997,8 @@ pub fn scan_rows(
         effects.writes += 1;
     }
     let mut defaults_plan = Vec::new();
-    // CBE44 captures all G holders before any DEFAULT write. Valid0 retains
-    // its decoded mode/DATA/filter, unlike fresh type1F initialization.
+    // CBE44 captures all G holders before any DEFAULT write. Valid 0 retains
+    // its decoded mode/DATA/filter, unlike fresh type 1F initialization.
     for row in defaults.clone() {
         let mut h = ScanEdge::read(g, row)?;
         h.valid = false;
@@ -1057,7 +1057,7 @@ fn scan_reference(
 ) -> Result<(), Error> {
     let old = byte(image.memory(), 0x37802)?;
     let selected = usize::from(selected_scan_raw(image.memory())?);
-    // 999FC flags0/0/0 uses broad bounds only. Its bad callback is never called.
+    // 999FC flags 0/0/0 uses broad bounds only. Its bad callback is never called.
     let suitable = scan_suitable_rows(image.memory(), image.memory(), false, false, false, |_| {
         unreachable!("specific disabled")
     })?;
@@ -1240,8 +1240,8 @@ impl Preset {
     pub fn bandwidth_hz(&self) -> Result<i32, Error> {
         decode_bandwidth(self.bandwidth_class(), self.body[3])
     }
-    /// Native385 logical text and optional CANVAS check, not a mask number.
-    /// A normal checkbox has empty text; only exact mask00 draws the check.
+    /// Native 385 logical text and optional CANVAS check, not a mask number.
+    /// A normal checkbox has empty text; only exact mask 00 draws the check.
     pub fn checkbox_paint(&self, field: u32) -> Result<(Vec<u8>, Option<bool>), Error> {
         if self.incompatible(field)? {
             return Ok((b"--".to_vec(), None));
@@ -1252,8 +1252,8 @@ impl Preset {
             .ok_or(invalid("unknown preset checkbox field"))?;
         Ok((Vec::new(), Some(self.masks[mask] == 0)))
     }
-    /// Native389 uses unpadded integer Hz and a suffix with a trailing space.
-    /// Own maskFF is only a color change, not a reason to hide the value.
+    /// Native 389 uses unpadded integer Hz and a suffix with a trailing space.
+    /// Own mask FF is only a color change, not a reason to hide the value.
     pub fn bandwidth_paint(&self) -> Result<Vec<u8>, Error> {
         if self.incompatible(3)? || self.bandwidth_class() > 4 {
             return Ok(b"---".to_vec());
@@ -1311,15 +1311,15 @@ impl Preset {
     }
 }
 
-// B091C/C8BE4 field IDs, in the 22 mask positions. Field0 is placeholder;
-// field16h is the second filter type, not a 23rd mask byte.
+// B091C/C8BE4 field IDs, in the 22 mask positions. Field 0 is placeholder;
+// field 16h is the second filter type, not a 23rd mask byte.
 const PRESET_FIELDS: [u32; 22] = [
     1, 2, 3, 4, 0x16, 5, 6, 7, 8, 0xf, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0x10, 0x11, 0x12, 0x13, 0x14,
     0x15,
 ];
 
 /// B008C/B0100 piecewise signed arithmetic. The five coefficient records reduce
-/// to two distinct formulae (class3 only differs in an unused limit). No clamp,
+/// to two distinct formulae (class 3 only differs in an unused limit). No clamp,
 /// rounding-to-nearest or strict known-raw gate is added.
 pub fn decode_bandwidth(class: u32, raw: u8) -> Result<i32, Error> {
     let (a, b, d, e) = bandwidth_coefficients(class)?;
@@ -1771,8 +1771,8 @@ pub struct PresetBandwidthEffect {
     pub effects: Effects,
 }
 
-/// Preset389: guard before the shared BW helper, then preserve commit_preset's
-/// sequential BW/filter-type/G-selection stores. Own maskFF only grays output.
+/// Preset 389: guard before the shared BW helper, then preserve commit_preset's
+/// sequential BW/filter-type/G-selection stores. Own mask FF only grays output.
 pub fn edit_preset_bandwidth(
     image: &mut Icf<'_>,
     g: &[u8],
@@ -1815,7 +1815,7 @@ pub fn edit_preset_bandwidth(
 }
 
 /// 7C891/7CB24/7CD14/7D8BD: parse the actual Preset old byte through the
-/// shared A4870/A4E2C grammar before commit_preset. MaskFF only grays the
+/// shared A4870/A4E2C grammar before commit_preset. Mask FF only grays the
 /// result; it does not block input. The level suffix uses the PRE-edit byte.
 /// Cancel/false preserves both the field and related G selection byte. A later
 /// commit error still preserves the original byte-store prefix.
@@ -2997,7 +2997,7 @@ mod tests {
         use crate::icf::settings::extended::NumberInput;
         let mut g = vec![0; 0xa78d];
         g[0xa78c] = 0x6b;
-        // BA02d: AF/IF/MOD/+address use offsets10/12/0F/16 and masks13/15/12/19.
+        // BA02d: AF/IF/MOD/+address use offsets 10/12/0F/16 and masks 13/15/12/19.
         for p in 0..5 {
             for (key, offset, mask, old, text, value, suffix) in [
                 (
@@ -3282,7 +3282,7 @@ mod tests {
                 } {
                     let mut i = preset_fixture(p);
                     let a = 0xa60f + 41 * p;
-                    put_byte(&mut i, a + 3, 10).unwrap(); // 600Hz makes both filter-type fields eligible.
+                    put_byte(&mut i, a + 3, 10).unwrap(); // 600 Hz makes both filter-type fields eligible.
                     let before = i.memory().to_vec();
                     let candidate = match field.key {
                         0x389 => 600,

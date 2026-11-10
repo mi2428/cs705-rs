@@ -52,7 +52,7 @@ pub struct CopySource {
     pub request: u32,
     pub expanded: bool,
     pub binding: u32,
-    /// Actual56DA4 result. Only a reached band-stack special branch reads it.
+    /// Actual 56DA4 result. Only a reached band-stack special branch reads it.
     pub band_enabled: Option<bool>,
 }
 pub fn compatible(source: u32, destination: u32) -> bool {
@@ -216,7 +216,7 @@ pub struct Outcome {
     pub exhausted: bool,
 }
 
-/// Live scalar caller frame for69977. These are not holder/body defaults.
+/// Live scalar caller frame for 69977. These are not holder/body defaults.
 /// Node flags may change while accepting a display request; pre_step is captured
 /// before the editor and the final merge bit still uses that captured value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +242,7 @@ pub struct SplitOutcome {
     pub popup_requested: bool,
 }
 
-/// The four9A67C/9A6C4 channel fields with fixed key1 catalogs. This engine is
+/// The four 9A67C/9A6C4 channel fields with fixed key 1 catalogs. This engine is
 /// shared with call consumers; call SEL is deliberately not a writable field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelChoice {
@@ -364,7 +364,7 @@ pub struct ChoiceFrame {
     pub node_flags: u8,
 }
 
-/// Actual caller scalars used by642F9, before any field editor runs.
+/// Actual caller scalars used by 642F9, before any field editor runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelCaller {
     pub code: i32,
@@ -443,7 +443,7 @@ pub struct CallsignTextRequest<'a> {
     pub field: crate::icf::MemoryCallsign,
     pub input: crate::icf::settings::extended::TextInput<'a>,
     pub right_word: bool,
-    /// Actual17FFCC full-EAX result for the signed input byte, not LCMapStringA.
+    /// Actual 17FFCC full-EAX result for the signed input byte, not LCMapStringA.
     pub upper: &'a mut dyn FnMut(i32) -> Result<i32, Error>,
     pub context: EditorContext<'a>,
 }
@@ -458,7 +458,7 @@ pub struct CallsignInline {
 }
 
 /// 9C44A..9C5A9's inline producer, after the caller has selected this branch.
-/// Enter with the dialog option disabled is not the separate commandD1 list.
+/// Enter with the dialog option disabled is not the separate command D1 list.
 pub fn callsign_inline(
     h: &DecodedRecord,
     field: crate::icf::MemoryCallsign,
@@ -506,7 +506,7 @@ pub struct NumericOutcome {
     pub state_out: u32,
 }
 
-/// A5134/A522C callers here have scale6, quantum1 and no SPACE/BACKSPACE step.
+/// A5134/A522C callers here have scale 6, quantum 1 and no SPACE/BACKSPACE step.
 /// The shared helper owns filtering, eleven-byte truncation and signed rounding.
 fn scaled_channel_input(
     input: crate::icf::settings::extended::NumberInput<'_>,
@@ -649,8 +649,8 @@ fn name_candidate_input(
     }
 }
 
-/// 69401 has no split/gray write gate. Unsigned100Hz rounding is a separate
-/// native99F04 step; the common saver still applies its own raw upper bound.
+/// 69401 has no split/gray write gate. Unsigned 100 Hz rounding is a separate
+/// native 99F04 step; the common saver still applies its own raw upper bound.
 pub fn channel_offset_input(
     h: &mut DecodedRecord,
     input: crate::icf::settings::extended::NumberInput<'_>,
@@ -733,8 +733,8 @@ pub struct EnumOutcome {
     pub warning_bits: Option<u8>,
 }
 
-/// 69521/69697/69813 field bodies. Mode's selected key is7, not the generic
-/// key1 used by DATA/filter; the shared choice calculator still owns actions.
+/// 69521/69697/69813 field bodies. Mode's selected key is 7, not the generic
+/// key 1 used by DATA/filter; the shared choice calculator still owns actions.
 pub fn channel_enum_input(
     h: &mut DecodedRecord,
     field: ChannelEnum,
@@ -826,8 +826,8 @@ impl ToneField {
     }
 }
 
-/// Fixed source schemas, NOT second storage lookup tables. DTCS is20 rows,
-/// TFreq is10 rows; resource-first tie order must not be sorted by saved index.
+/// Fixed source schemas, NOT second storage lookup tables. DTCS is 20 rows,
+/// TFreq is 10 rows; resource-first tie order must not be sorted by saved index.
 pub fn tone_choices(
     field: ToneField,
     live_q: Option<&crate::icf::context::Context>,
@@ -842,7 +842,7 @@ pub fn tone_choices(
             .collect(),
         ToneField::Tx | ToneField::Rx => {
             let q = live_q.ok_or(invalid("TFreq source99E44 requires the actual live Q"))?;
-            // 99E44->56E70: Q12==0 selects MTON51, nonzero selects normal50.
+            // 99E44->56E70: Q12==0 selects MTON 51, nonzero selects normal 50.
             let count = if q.as_bytes()[0x12] == 0 { 51 } else { 50 };
             (0..10)
                 .flat_map(|r| (0..6).map(move |c| r + 10 * c))
@@ -873,7 +873,7 @@ pub struct ToneInput<'a> {
     pub input: crate::icf::settings::extended::NumberInput<'a>,
     pub point: u8,
     pub live_q: Option<&'a crate::icf::context::Context>,
-    /// Begin+inline is7100/current label, or a digit-start when first is Some.
+    /// Begin+inline is 7100/current label, or a digit-start when first is Some.
     pub inline: bool,
     pub first: Option<u8>,
     pub upper: &'a mut dyn FnMut(&mut [u8]) -> Result<(), crate::csv::Error>,
@@ -893,8 +893,8 @@ pub struct ToneEffect {
     pub inline_text: Option<Vec<u8>>,
 }
 
-/// Shared A5EDC field engine for normal/call: mode3 ignores typed text, while
-/// mode0 parses the entire trimmed/upper C-prefix without numeric11byte filter.
+/// Shared A5EDC field engine for normal/call: mode 3 ignores typed text, while
+/// mode 0 parses the entire trimmed/upper C-prefix without numeric 11 byte filter.
 /// The supplied NLS boundary must be actual output; prior text survives errors.
 pub fn channel_tone_input(
     h: &mut DecodedRecord,
@@ -997,7 +997,7 @@ pub struct CodeOutcome {
     pub selection: (usize, usize),
 }
 
-/// 9A468's signed32 minimum-width2 display. No clipping, unsigned rewrite or
+/// 9A468's signed 32 minimum-width 2 display. No clipping, unsigned rewrite or
 /// low-byte projection belongs to this shared readonly formatter.
 pub fn digital_code_label(value: u32) -> Vec<u8> {
     format!("{:02}", value as i32).into_bytes()
@@ -1150,7 +1150,7 @@ pub fn default_filter_into(
     Ok(())
 }
 
-// EE90 is one projection of F014, shared by8928 and B4BF8.
+// EE90 is one projection of F014, shared by 8928 and B4BF8.
 fn band_class(ranges: &crate::icf::frequency::Ranges, frequency: u32) -> usize {
     match ranges.f014(frequency) {
         0..=12 => 0,
@@ -1169,7 +1169,7 @@ fn same_filter_entry(cache: &DecodedRecord, h: &DecodedRecord) -> bool {
                         .wrapping_add(if h.side() == 0 { 1 } else { u32::MAX }))
 }
 impl EditorState {
-    /// Document4C5CB..4C648: two5E1C/5F64 holders, valid cleared, enable0;
+    /// Document 4C5CB..4C648: two 5E1C/5F64 holders, valid cleared, enable 0;
     /// 53240 resets the separate pending object. No Q, G or GUI state is guessed.
     pub fn initialized() -> Self {
         let mut holder = record::reset_holder(0, 0, 0);
@@ -1242,7 +1242,7 @@ fn save_reload_into(
     Ok(())
 }
 
-/// B4BF8 reads the actual current type1A, not the edited call row or G. The
+/// B4BF8 reads the actual current type 1A, not the edited call row or G. The
 /// Home request precedes that read, so a missing DR source keeps its prefix.
 pub fn call_after_into(
     w: &[u8],
@@ -1264,7 +1264,7 @@ pub fn call_after_into(
     Ok(())
 }
 
-/// One53830/53A6C body for normal and call, including actual ordered saves and
+/// One 53830/53A6C body for normal and call, including actual ordered saves and
 /// re-reads. No second cache codec or synthesized normal image backs call edits.
 pub fn channel_save_cached_into(
     w: &mut [u8],
@@ -1319,8 +1319,8 @@ pub fn channel_save_cached_into(
     save_reload_into(w, kind, h, &mut before_store)
 }
 
-/// The first53830 saver is also D1's complete save path; it does not execute
-/// the second53A6C filter-cache transition used by ordinary field handlers.
+/// The first 53830 saver is also D1's complete save path; it does not execute
+/// the second 53A6C filter-cache transition used by ordinary field handlers.
 fn channel_save_mode_into(
     w: &mut [u8],
     h: &mut DecodedRecord,
@@ -1554,9 +1554,9 @@ pub fn call_name_input_into(
     Ok(())
 }
 
-/// The9C2C8 direct-text branch of UR/RPT, not its DR modal/list branches. Each
+/// The 9C2C8 direct-text branch of UR/RPT, not its DR modal/list branches. Each
 /// native upper result commits one holder byte before the next call can fail.
-/// The return value is an actual completed save, not9C5C4's outer AL result.
+/// The return value is an actual completed save, not 9C5C4's outer AL result.
 pub fn channel_callsign_text_input_into(
     w: &mut [u8],
     h: &mut DecodedRecord,
@@ -1831,7 +1831,7 @@ fn allocate_registration_into(
 }
 
 /// Normal call rows already exist; there is no normal-slot allocation or first
-/// opposite-side mirror. H38 from the actual call adapter selects range12/13.
+/// opposite-side mirror. H38 from the actual call adapter selects range 12/13.
 pub fn call_frequency_input_into(
     w: &mut [u8],
     h: &mut DecodedRecord,
@@ -1883,7 +1883,7 @@ pub fn call_frequency_input_into(
     Ok(out)
 }
 
-/// Native69977 uses the same split editor and cache saver for normal and call.
+/// Native 69977 uses the same split editor and cache saver for normal and call.
 /// Callers supply live grid scalars; requests are not simulated OS dispatch.
 pub fn channel_split_input_into(
     w: &mut [u8],
@@ -1982,7 +1982,7 @@ impl NormalMemory {
     }
 
     /// Accepted name producer. Invalid nonempty names are pending only; the
-    /// caller supplies the actual24-byte notification context separately.
+    /// caller supplies the actual 24-byte notification context separately.
     pub fn native_pending_name(
         &self,
         h: &DecodedRecord,
@@ -2249,7 +2249,7 @@ impl NormalMemory {
                 effects.queue(0x3c, 1, 0);
                 out.stored = true;
             }
-            // Both flags are native normal-return writes, including capacity0.
+            // Both flags are native normal-return writes, including capacity 0.
             out.notify_flags |= 0x18;
         }
         frequency_tail(h, state, &request, &mut out)?;
@@ -2286,7 +2286,7 @@ impl NormalMemory {
         Ok(out)
     }
 
-    /// 689FD uses the shared key105 byte grammar before either native saver or
+    /// 689FD uses the shared key 105 byte grammar before either native saver or
     /// live pending-name producer. Effects retain sanitation before later error.
     pub fn native_name_input(
         &mut self,
@@ -2385,7 +2385,7 @@ impl NormalMemory {
         Ok(result)
     }
 
-    /// Native69977 case with the shared OnOff2 editor and two actual cached
+    /// Native 69977 case with the shared OnOff2 editor and two actual cached
     /// save/reloads. The notice callback is a PRE-REQUEST cutpoint, not a fake
     /// GUI dispatcher. Effects own the accepted requests; OS delivery is absent.
     pub fn native_split_input(
@@ -2449,7 +2449,7 @@ fn reference(
 }
 
 /// Borrowed shared D4/D5/D7/D8/D9 primitive. For D5, destination carries the
-/// original signed32 direction bits; the other actions do not consume it.
+/// original signed 32 direction bits; the other actions do not consume it.
 pub fn reference_into(
     w: &mut [u8],
     action: u32,
@@ -2670,7 +2670,7 @@ impl NormalMemory {
             ..Outcome::default()
         })
     }
-    /// The map-only native step2 path. Step1 uses decoded copy/paste separately.
+    /// The map-only native step 2 path. Step 1 uses decoded copy/paste separately.
     pub fn native_carry_step2(
         &mut self,
         selection: Selection,
@@ -2702,7 +2702,7 @@ impl NormalMemory {
         })
     }
     /// CB63C chooses step from the active side, split, direction and show-both.
-    /// Step1 uses two private decoded clipboards and deliberately skips D1E88.
+    /// Step 1 uses two private decoded clipboards and deliberately skips D1E88.
     pub fn native_carry(
         &mut self,
         selection: Selection,
@@ -2890,7 +2890,7 @@ fn prepare_source(h: &mut DecodedRecord) {
 
 // Cross-kind paste keeps the source kind in the clipboard header. Only the
 // explicit destination kind/index resolves storage: normal logical sides use
-// the map, while call sides address four fixed raw83 pairs. Mode2 borrows target
+// the map, while call sides address four fixed raw83 pairs. Mode 2 borrows target
 // name/split/SEL from the pre-write snapshot, never from a partly updated target.
 fn write_source(
     image: &mut [u8],
@@ -4395,7 +4395,7 @@ mod tests {
             let mut h = holder(&m, 4).unwrap();
             h.set_mode(mode);
             m.store_channel(4, &mut h).unwrap();
-            // Mode17 is a conditional holder input, not a raw MODE-table entry.
+            // Mode 17 is a conditional holder input, not a raw MODE-table entry.
             h.set_mode(mode);
             let before = m.record(0, 2).unwrap().unwrap().to_vec();
             let used = m.used_slots();
@@ -5571,7 +5571,7 @@ mod tests {
         assert!(!state.pending.active);
         assert_eq!(state.pending.index, u32::MAX);
         assert_eq!(h.tx_tone(), 29);
-        // F1DC index2 selects class1 directly, not EFCC(default frequency).
+        // F1DC index 2 selects class 1 directly, not EFCC(default frequency).
         assert_eq!(h.offset_hz(), 600_000);
         assert!(
             m.native_save_cached(

@@ -1,4 +1,4 @@
-//! Type20 current-clock initializer. Type21/CSV and raw decoding stay separate.
+//! Type 20 current-clock initializer. Type 21/CSV and raw decoding stay separate.
 
 use super::{DecodedRecord, encode_gps_into, reset_holder};
 use crate::{
@@ -12,9 +12,9 @@ fn invalid(reason: &'static str) -> Error {
     Error::Invalid { line: 0, reason }
 }
 
-/// Native610C/type20 reads current396FF, subtracts that signed-minute offset
+/// Native 610C/type 20 reads current 396FF, subtracts that signed-minute offset
 /// from GetLocalTime, and only THEN packs calendar/time bytes. No system clock is
-/// acquired here and no completed616-byte holder is accepted from a client.
+/// acquired here and no completed 616-byte holder is accepted from a client.
 pub fn holder(
     image: &Icf<'_>,
     q: &Context,
@@ -50,7 +50,7 @@ pub fn holder(
     ]);
     bytes[0x25a..0x25d].fill(0);
     bytes[0x25e..0x261].fill(0);
-    // The same10420 Q/source selection is already implemented for type22.
+    // The same 10420 Q/source selection is already implemented for type 22.
     let directions = DefaultContext::from_context(q, system_langid)
         .map_err(|_| invalid("GPS initializer Q/source unavailable"))?
         .hemispheres;
@@ -71,8 +71,8 @@ pub fn holder(
     Ok(out)
 }
 
-/// D15A4 allocates metadata FIRST, then610C(type20,index0), then the EXISTING
-/// type0A saver. The caller keeps allocation/notification order and failure prefix.
+/// D15A4 allocates metadata FIRST, then 610C(type 20, index 0), then the EXISTING
+/// type 0A saver. The caller keeps allocation/notification order and failure prefix.
 pub fn seed(
     image: &Icf<'_>,
     q: &Context,

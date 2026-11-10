@@ -29,10 +29,10 @@ pub(crate) struct Args {
     /// Actual typed views, in the shared document descriptor JSON format.
     #[arg(long)]
     validation_views: Option<String>,
-    /// Actual caller-owned show-both DWORD for private slot10.
+    /// Actual caller-owned show-both DWORD for private slot 10.
     #[arg(long, required_unless_present = "cancel")]
     show_both: Option<u32>,
-    /// Actual caller-owned home-cache byte for private slot10.
+    /// Actual caller-owned home-cache byte for private slot 10.
     #[arg(long, required_unless_present = "cancel")]
     home_cache: Option<u8>,
     #[arg(long, conflicts_with = "option_input", value_parser = clap::value_parser!(u8).range(0..=31))]
@@ -40,7 +40,7 @@ pub(crate) struct Args {
     /// Actual option word/checkbox-state JSON, passed through the native producer.
     #[arg(long)]
     option_input: Option<String>,
-    /// Explicit approval maps to clone response1, never file Yes6.
+    /// Explicit approval maps to clone response 1, never file Yes 6.
     #[arg(long)]
     yes: bool,
     /// Cancel before reading any native source or opening a transport.

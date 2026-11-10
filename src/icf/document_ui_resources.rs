@@ -113,8 +113,8 @@ fn query_csv(context: &mut MenuContext<'_>, node: &mut MenuDescriptor) -> Result
         }
         _ => {}
     }
-    // 95550 retains Disabled(bit1) and Hidden(bit0) as separate properties.
-    // Its alternate-selection local is0;20/25 therefore remain hidden.
+    // 95550 retains Disabled(bit 1) and Hidden(bit 0) as separate properties.
+    // Its alternate-selection local is 0; 20/25 therefore remain hidden.
     let (disabled, hidden) = match node.key {
         0x1c => (!import, grouped),
         0x1d | 0x1e => (!grouped, !grouped),
@@ -152,7 +152,7 @@ fn query_recent(context: &mut MenuContext<'_>, node: &mut MenuDescriptor) -> Res
 }
 
 fn query_main(context: &mut MenuContext<'_>, node: &mut MenuDescriptor) -> Result<(), Error> {
-    // 3E338..386 resets dynamic menu bits BEFORE the registered phase0 case.
+    // 3E338..386 resets dynamic menu bits BEFORE the registered phase 0 case.
     node.flags1e &= !7;
     node.flags1d &= 0x7f;
     match node.key {
@@ -169,7 +169,7 @@ fn query_main(context: &mut MenuContext<'_>, node: &mut MenuDescriptor) -> Resul
         | 0x42
         | 0x43 => {
             // Explicit original case bodies: context40==0D gates their actions;
-            // phase0 leaves flags unchanged. 3AE is the resource literal node,
+            // phase 0 leaves flags unchanged. 3AE is the resource literal node,
             // not a named command. Unknown keys still fail below.
             Ok(())
         }
@@ -247,15 +247,15 @@ impl UiState {
         }
         Ok(())
     }
-    /// 4A5EC/event49/4A stores8646AC BEFORE any nested notification or Close.
+    /// 4A5EC/event 49/4A stores 8646AC BEFORE any nested notification or Close.
     /// This is the raw signed-kind predicate, not Profile::selector validation.
     pub fn form2_profile(&mut self, session: &Session) -> bool {
         self.profile_ready = u8::from((session.context.fields().0[0] as i32) < 16);
         self.profile_ready != 0
     }
 
-    /// Derived document event2B only adopts G while main visible57 is ZERO.
-    /// Path/target/pending stay on the same document. Slot2C clears1AC/1AD.
+    /// Derived document event 2B only adopts G while main visible57 is ZERO.
+    /// Path/target/pending stay on the same document. Slot 2C clears 1AC/1AD.
     pub fn sync2b(&mut self, document: &mut Document, session: &mut Session) -> Result<(), Error> {
         if self
             .form

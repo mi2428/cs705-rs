@@ -423,7 +423,7 @@ mod tests {
             put32(&mut pe, at + 16, size);
             put32(&mut pe, at + 20, raw);
         }
-        put32(&mut pe, 0x6f44, 0x810000); // key0, not a completed field name input.
+        put32(&mut pe, 0x6f44, 0x810000); // key 0, not a completed field name input.
         pe[0x8400..0x8400 + name.len()].copy_from_slice(name);
         let files = [FILE_RESOURCE, b"\0english.chm\0japanese.chm\0\0#\0"].concat();
         pe[0x476..0x476 + files.len()].copy_from_slice(&files);

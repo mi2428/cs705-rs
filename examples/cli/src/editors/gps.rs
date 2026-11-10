@@ -63,7 +63,7 @@ enum Command {
         value: InputValue,
         #[arg(long, requires = "symbol_resource")]
         menu: bool,
-        /// Actual native148-byte lookup resource, not a completed symbol pair.
+        /// Actual native 148-byte lookup resource, not a completed symbol pair.
         #[arg(long, requires = "menu")]
         symbol_resource: Option<String>,
         #[arg(long, conflicts_with = "menu")]
@@ -71,7 +71,7 @@ enum Command {
         #[command(flatten)]
         publication: Publication,
     },
-    /// Native coordinate/area mask frame, or explicit native phase2 bytes.
+    /// Native coordinate/area mask frame, or explicit native phase 2 bytes.
     #[command(alias = "area")]
     Coordinate {
         #[command(flatten)]
@@ -94,7 +94,7 @@ enum Command {
         #[command(flatten)]
         publication: Publication,
     },
-    /// Native checkbox frame steps, in order; indices are the original1..6/1..4.
+    /// Native checkbox frame steps, in order; indices are the original 1..6/1..4.
     Sentences {
         #[command(flatten)]
         read: Read,
@@ -194,7 +194,7 @@ fn edit_record(
     }
     let mut holder = record::load(image, absolute, 1)?;
     // The native add branch clears validity after reload. This invocation can
-    // approve Name text without storing it; a later invocation reloads valid1.
+    // approve Name text without storing it; a later invocation reloads valid 1.
     if added {
         holder.set_valid(false);
     }

@@ -1,11 +1,11 @@
-//! Native Filter FIX text, distinct from editable12A..12E and Preset389.
+//! Native Filter FIX text, distinct from editable 12A..12E and Preset 389.
 
 use super::{NoticeParent, invalid, notice_cell};
 use crate::icf::Icf;
 use std::io;
 
-/// IC-705's St_Common registers only12 predicates at5864C..58834; none is
-/// Hide_Filter_DD. Its VMT+10 routes through58DBC/58D00 to2DD58, where this
+/// IC-705's St_Common registers only 12 predicates at 5864C..58834; none is
+/// Hide_Filter_DD. Its VMT+10 routes through 58DBC/58D00 to 2DD58, where this
 /// directive is a no-op. Thus the six DD resource rows remain, without live Q.
 /// This is specific to the registered IC-705 Filter factory, not an unknown-name
 /// success policy for other directives or products.
@@ -13,9 +13,9 @@ pub fn dd_rows_visible() -> bool {
     true
 }
 
-/// Readonly6B698/6B6E8/6B730. FIX cells never read or clip the live filter image.
+/// Readonly 6B698/6B6E8/6B730. FIX cells never read or clip the live filter image.
 /// BW/PBW use the existing captured PE provider; PBT/Shift need no source asset.
-/// Keep the actual resource index: editable0..14 is not a fixed-row index/side.
+/// Keep the actual resource index: editable 0..14 is not a fixed-row index/side.
 pub fn paint(
     _image: &Icf<'_>,
     key: u16,

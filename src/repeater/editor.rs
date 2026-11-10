@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-/// C7340 and6CB13/6CB57 short literals, independently matched to their hashes.
+/// C7340 and 6CB13/6CB57 short literals, independently matched to their hashes.
 pub const TYPE_SOURCE: TypeSource = TypeSource {
     placeholder: *b"CALLSIGN",
     gateway_marker: *b"       G",
@@ -28,12 +28,12 @@ pub const TYPE_SOURCE: TypeSource = TypeSource {
 pub struct Runtime<'a> {
     /// Captured B owns F20C's source selector, independent of later live Q.
     pub ranges: &'a Ranges,
-    /// Type22 defaults and live-Q warnings still consume this actual Q.
+    /// Type 22 defaults and live-Q warnings still consume this actual Q.
     pub live_q: &'a Context,
     pub system_langid: Option<u16>,
     /// Only reached row insertion/reference callbacks read this actual G.
     pub generation: Option<&'a [u8]>,
-    /// Actual864634 option, not a blanket right-justify policy.
+    /// Actual 864634 option, not a blanket right-justify policy.
     pub align_callsign: bool,
     pub crt_decimal: u8,
 }
@@ -82,7 +82,7 @@ pub enum NumberField {
     UtcOffset,
 }
 
-/// Real LCMap2n and CharUppern inputs/outputs, not completed record packets.
+/// Real LCMap 2n and CharUpper n inputs/outputs, not completed record packets.
 pub type Map<'a> = dyn FnMut(&[u8], &mut [u8]) -> Result<i32, Error> + 'a;
 pub struct Nls<'a> {
     pub map: &'a mut Map<'a>,
@@ -207,7 +207,7 @@ fn utc_input(input: NumberInput<'_>, old: i16, effect: &mut Effect) -> Result<(i
                 .filter(|b| b.is_ascii_digit() || *b == b':')
                 .collect();
             let mut parts = digits.split(|&b| b == b':');
-            // Decimal-prefix byte projection belongs to9D968, not strict HH:MM.
+            // Decimal-prefix byte projection belongs to 9D968, not strict HH:MM.
             let decimal = |s: &[u8]| {
                 s.iter()
                     .take_while(|b| b.is_ascii_digit())
@@ -235,9 +235,9 @@ fn utc_input(input: NumberInput<'_>, old: i16, effect: &mut Effect) -> Result<(i
     })
 }
 
-/// Native181860 adds decimal exponent to the existing finite mantissa helper.
-/// x/X is a foreign suffix (0x... is decimal-prefix0), NOT C99 hex floating.
-/// The scanner consumes an incomplete exponent as exponent0, not parse failure.
+/// Native 181860 adds decimal exponent to the existing finite mantissa helper.
+/// x/X is a foreign suffix (0x... is decimal-prefix 0), NOT C99 hex floating.
+/// The scanner consumes an incomplete exponent as exponent 0, not parse failure.
 pub(crate) fn tone_crt(source: &[u8], point: u8) -> Result<f64, Error> {
     let prefix = source.split(|&b| b == 0).next().unwrap_or_default();
     let text = &prefix[prefix
@@ -496,7 +496,7 @@ pub fn number(
     result
 }
 
-/// Actual9E714 fixed-position phase2 parse. DMSType is the live current396B4
+/// Actual 9E714 fixed-position phase 2 parse. DMSType is the live current 396B4
 /// byte. It is deliberately NOT CSV decimal-coordinate parsing or a raw4 input.
 pub fn coordinate(
     w: &mut Working,
@@ -542,7 +542,7 @@ pub fn coordinate(
 }
 
 /// Normal ASCII key/control input through the real mask, validator and modal
-/// callbacks. The lower-level coordinate() remains an explicit phase2 cutpoint.
+/// callbacks. The lower-level coordinate() remains an explicit phase 2 cutpoint.
 pub fn coordinate_input(
     w: &mut Working,
     holder: &mut DecodedRecord,
@@ -714,7 +714,7 @@ pub fn begin_type(
 }
 
 /// Actual selector invocation. Menus and raw selected candidates are distinct:
-/// Type advertises0..3, but the helper does not invent a candidate range guard.
+/// Type advertises 0..3, but the helper does not invent a candidate range guard.
 pub fn choice(
     w: &mut Working,
     holder: &mut DecodedRecord,
@@ -840,7 +840,7 @@ pub fn choice(
     result
 }
 
-/// Repeater Name/SubName use mode1; callsigns use the existing mode0 NLS pipeline.
+/// Repeater Name/SubName use mode 1; callsigns use the existing mode 0 NLS pipeline.
 /// The native return outputs are real byte transforms supplied by the caller.
 pub fn text(
     w: &mut Working,

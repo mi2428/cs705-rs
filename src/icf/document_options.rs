@@ -15,7 +15,7 @@ pub struct CloneOptions {
     pub states: [u8; 5],
 }
 impl CloneOptions {
-    /// Clear bit0 BEFORE constructing controls. Each later control reads live
+    /// Clear bit 0 BEFORE constructing controls. Each later control reads live
     /// word independently; a failed producer retains all preceding changes.
     pub fn open(word: u32) -> Self {
         Self {
@@ -48,7 +48,7 @@ impl CloneOptions {
         }
         Ok(button == CloneOptionButton::Ok)
     }
-    /// TCheckBox Checked is state==1; gray state2 is false.
+    /// TCheckBox Checked is state==1; gray state 2 is false.
     pub fn press(&mut self, button: CloneOptionButton) -> Result<bool, Error> {
         self.save(button, |index, state| {
             Ok(u32::from(state.states[index] == 1))

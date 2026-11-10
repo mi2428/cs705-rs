@@ -1,5 +1,5 @@
-//! Repeater byte CSV value phase followed by84A58. The required header is only
-//! Repeater Call Sign. Missing columns preserve type22 fields; empty present cells do not.
+//! Repeater byte CSV value phase followed by 84A58. The required header is only
+//! Repeater Call Sign. Missing columns preserve type 22 fields; empty present cells do not.
 
 use super::{
     fields::TypeSource,
@@ -55,7 +55,7 @@ impl<'a> Rows<'a> {
             next: 0,
         })
     }
-    /// The supplied record is this row's actual type22 load, not zero-filled
+    /// The supplied record is this row's actual type 22 load, not zero-filled
     /// scratch. NLS is requested only for a present callsign column.
     pub fn next_with(
         &mut self,

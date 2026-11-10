@@ -1,14 +1,14 @@
 use super::{Error, Icf, RECORD_BYTES};
 
 impl Icf<'_> {
-    /// Raw selected-event dFSpan bits1..3. Unknown7 remains observable/storable.
+    /// Raw selected-event dFSpan bits 1..3. Unknown 7 remains observable/storable.
     pub fn delta_f_span_raw(&self) -> u8 {
         (self.memory[0x37804] >> 1) & 7
     }
     pub fn set_delta_f_span_raw(&mut self, candidate: i32) {
         self.memory[0x37804] = (self.memory[0x37804] & 0xf1) | ((candidate as u8 & 7) << 1);
     }
-    /// Native mode getter uses the FULL fixed byte and scroll lowbit only.
+    /// Native mode getter uses the FULL fixed byte and scroll low bit only.
     pub fn scope_mode_raw(&self) -> i32 {
         i32::from(self.memory[0x377c6]) + 2 * i32::from(self.memory[0x3808a] & 1)
     }
@@ -549,13 +549,13 @@ stored_enum!(TransmitMeter, transmit_meter, set_transmit_meter, 0x37786, "transm
 stored_enum!(Language, display_language, set_display_language, 0x396bb, "display language", {English = 0, Japanese = 1});
 // Key 0x225: read RVA 0x72eb1, store RVA 0x72eed (common ID A2-H54848-39).
 stored_setting!(system_language, set_system_language, Language, 0x396bc, "system language", {0 => Language::English, 1 => Language::Japanese});
-// Key 0x22a: read RVA 0x73093;0x730e2, store RVA 0x730cf;0x7311e (common ID A2-H54848-40).
+// Key 0x22a: read RVA 0x73093; 0x730e2, store RVA 0x730cf; 0x7311e (common ID A2-H54848-40).
 stored_enum!(CoordinateDisplay, coordinate_display, set_coordinate_display, 0x396b4, "coordinate display", {DegreesDecimalMinutes = 0, DegreesMinutesSeconds = 1, DecimalDegrees = 2});
 // Key 0x22b: read RVA 0x73131, store RVA 0x7316d (common ID A2-H54848-41).
 stored_enum!(AltitudeDistanceUnit, altitude_distance_unit, set_altitude_distance_unit, 0x396b5, "altitude/distance unit", {Meters = 0, FeetMiles = 1});
 // Key 0x22c: read RVA 0x73180, store RVA 0x731bc (common ID A2-H54848-42).
 stored_enum!(SpeedUnit, speed_unit, set_speed_unit, 0x396b6, "speed unit", {KilometersPerHour = 0, MilesPerHour = 1, Knots = 2});
-// Key 0x22d: read RVA 0x731d8;0x73227, store RVA 0x73214;0x73263 (common ID A2-H54848-43).
+// Key 0x22d: read RVA 0x731d8; 0x73227, store RVA 0x73214; 0x73263 (common ID A2-H54848-43).
 stored_enum!(TemperatureUnit, temperature_unit, set_temperature_unit, 0x396b7, "temperature unit", {Celsius = 0, Fahrenheit = 1});
 // Key 0x22e: read RVA 0x73276, store RVA 0x732b2 (common ID A2-H54848-44).
 stored_enum!(PressureUnit, pressure_unit, set_pressure_unit, 0x396b8, "pressure unit", {Hectopascals = 0, Millibars = 1, MillimetersMercury = 2, InchesMercury = 3});
@@ -1403,7 +1403,7 @@ stored_setting!(audio_fft_waterfall_display, set_audio_fft_waterfall_display, bo
 stored_enum!(AudioOscLevel, audio_osc_level, set_audio_osc_level, 0x37800, "Audio Osc level", {Db0 = 0, Minus10Db = 1, Minus20Db = 2, Minus30Db = 3});
 stored_enum!(AudioOscSweepTime, audio_osc_sweep_time, set_audio_osc_sweep_time, 0x377ff, "Audio Osc sweep time", {Ms1 = 0, Ms3 = 1, Ms10 = 2, Ms30 = 3, Ms100 = 4, Ms300 = 5});
 // Keys 0x359/0x35d: 0x7aa44/0x7aab5 -> 0x9d308. COLORREF 0x00BBGGRR
-// is stored as exactly R,G,B bytes at 0x9d3d3/0x9d3d5/0x9d3df, never alpha.
+// is stored as exactly R, G, B bytes at 0x9d3d3/0x9d3d5/0x9d3df, never alpha.
 stored_color!(
     audio_fft_waveform_color,
     set_audio_fft_waveform_color,
@@ -1555,7 +1555,7 @@ stored_enum!(ScopeVbw, scope_vbw, set_scope_vbw, 0x39736, "Spectrum VBW", {Narro
 stored_enum!(ScopeAveraging, scope_averaging, set_scope_averaging, 0x39737, "Spectrum averaging", {Off = 0, Two = 1, Three = 2, Four = 3});
 stored_enum!(ScopeWaveform, scope_waveform, set_scope_waveform, 0x39727, "Spectrum waveform", {Fill = 0, FillAndLine = 1});
 // Keys 0x36a/0x36b/0x36c: callers 0x7ae4a/0x7ae6c/0x7ae8d -> 0x9d308.
-// Exactly R,G,B bytes (COLORREF 0x00BBGGRR), no alpha or following VBW byte.
+// Exactly R, G, B bytes (COLORREF 0x00BBGGRR), no alpha or following VBW byte.
 stored_color!(
     scope_waveform_color_current,
     set_scope_waveform_color_current,

@@ -1578,8 +1578,8 @@ fn memory_import_process_reaches_map_pair_stores_without_row_packets_and_preserv
     exit(&cli(&args, csv), 4);
     args.push("--dry-run");
     exit(&cli(&args, csv), 0);
-    // CSV removes tone50 when Q12!=0; stage9 removes it when Q12==0.
-    // Both paths finish at24; captured B still owns the default offset.
+    // CSV removes tone 50 when Q12!=0; stage9 removes it when Q12==0.
+    // Both paths finish at 24; captured B still owns the default offset.
     for (captured, live, gate, offset) in [
         (0, 1, 0, 0),
         (1, 0, 0, 600_000),
@@ -1874,7 +1874,7 @@ fn repeater_all_three_modes_use_captured_b_offset_live_q_defaults_and_shared_app
     let seed = f.write("generation.icf", &generation.to_bytes());
     let mut value = repeater_context(&f, &seed);
     let csv=f.write("repeater.csv",b"Group No,Group Name,Name,Repeater Call Sign,Frequency,Dup,Offset,Mode,RPT1USE\n1,NEW,UPDATED,CALLA  B,145.125,DUP+,100,DV,YES\n");
-    // F20C/56CC8 reads captured B, unlike type22's live-Q hemisphere source.
+    // F20C/56CC8 reads captured B, unlike type 22's live-Q hemisphere source.
     for (captured, live, offset, duplex, longitude) in [
         (0, 1, 0, "OFF", "-0.000000"),
         (1, 0, 600_000, "DUP-", "0.000000"),
@@ -1922,7 +1922,7 @@ fn repeater_all_three_modes_use_captured_b_offset_live_q_defaults_and_shared_app
             );
             assert_eq!(&image.memory()[0x3c8b9..0x3c8bb], &0x1234_u16.to_le_bytes());
             // Stage9 suffix restores this secondary reference from document G
-            // because the primary0x1234 reference lies outside2500 rows.
+            // because the primary 0x1234 reference lies outside 2500 rows.
             let document_g = fs::read(value["document_generation"].as_str().unwrap()).unwrap();
             assert_eq!(&document_g[0x3c903..0x3c905], &u16::MAX.to_le_bytes());
             assert_eq!(
@@ -2113,7 +2113,7 @@ fn csv_fix1_document_storage_rejects_inconsistent_normal_free_flags() {
     let f = Files::new();
     let bytes = fixture();
     let mut image = Icf::parse(&bytes).unwrap();
-    // Empty normal maps require500 free slots; zero flags claim none are free.
+    // Empty normal maps require 500 free slots; zero flags claim none are free.
     image.patch_memory(&[(0x3662d, &[0; 500])]).unwrap();
     let original = image.to_bytes();
     let input = f.write("inconsistent.icf", &original);

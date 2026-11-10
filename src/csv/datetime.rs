@@ -344,7 +344,7 @@ pub fn shift_minutes(mut date: Date, time: Time, minutes: i16) -> Result<(Date, 
     ))
 }
 
-/// Original percent-X then decimal TryStrToInt(default99), including malformed
+/// Original percent-X then decimal TryStrToInt(default 99), including malformed
 /// BCD nibbles; it is not the usual nibble validation operation.
 pub fn decode_bcd(byte: u8) -> u8 {
     if byte >> 4 < 10 && byte & 15 < 10 {
@@ -419,7 +419,7 @@ pub fn fixed_time(time: Time, separator: u8) -> Vec<u8> {
     fixed_time_separators(time, [separator; 2])
 }
 
-/// 9F8A0/189018 offset ABI: abs hours are narrowed to low8 BEFORE EncodeTime.
+/// 9F8A0/189018 offset ABI: abs hours are narrowed to low 8 BEFORE EncodeTime.
 /// This preserves accepted large signed-minute bands, instead of clamping all
 /// offsets to +/-1439 or treating the stored word as a display mask.
 pub fn effective_offset(minutes: i16) -> Result<i16, Error> {
@@ -432,7 +432,7 @@ pub fn effective_offset(minutes: i16) -> Result<i16, Error> {
     Ok(if minutes < 0 { -effective } else { effective })
 }
 
-/// BAA10..BAE83, distinct from display's percent-X/default99 BCD conversion.
+/// BAA10..BAE83, distinct from display's percent-X/default 99 BCD conversion.
 /// Missing time keeps a nonmissing BCD date and reports a correction even when
 /// bytes do not change. The date bound is tested BEFORE local-to-UTC shifting.
 /// An offset EncodeTime failure retains any preceding date repair.
@@ -659,7 +659,7 @@ pub fn gps_time(
 }
 
 /// F5930 reads each separator token separately. Zero omits one token but does
-/// not remove the surrounding numeric fields (possible lengths6/7/8).
+/// not remove the surrounding numeric fields (possible lengths 6/7/8).
 pub fn fixed_time_separators(time: Time, separators: [u8; 2]) -> Vec<u8> {
     let fields = [time.hour, time.minute, time.second].map(|n| format!("{n:02}").into_bytes());
     let mut out = Vec::new();
@@ -672,7 +672,7 @@ pub fn fixed_time_separators(time: Time, separators: [u8; 2]) -> Vec<u8> {
     out
 }
 /// A2274 compact timestamp: invalid seconds alone become zero; invalid offsets
-/// keep the initialized offset0 after TryEncodeTime false, instead of throwing.
+/// keep the initialized offset 0 after TryEncodeTime false, instead of throwing.
 pub fn timestamp(raw: [u8; 3], offset: i16, separators: [u8; 2]) -> Vec<u8> {
     let hour = decode_bcd(raw[0]);
     let minute = decode_bcd(raw[1]);

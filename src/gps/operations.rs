@@ -1,9 +1,9 @@
-//! GPS dataset operations on checked current6 storage, distinct from local CSV
+//! GPS dataset operations on checked current 6 storage, distinct from local CSV
 //! setters and core's atomic delete-set/carry convenience APIs.
 //!
 //! C8210/C8328 alter order/starts/alarm but do not erase freed physical records.
 //! Repeated insert/delete re-read current state after synchronous callbacks.
-//! Default type20 data is supplied at the actual load point; no factory/clock
+//! Default type 20 data is supplied at the actual load point; no factory/clock
 //! defaults are invented. Parameter checks are safe-API additions, not claims
 //! that the original unguarded lower-level routine rejected malformed topology.
 
@@ -224,7 +224,7 @@ pub fn insert(
     Ok(out)
 }
 
-/// Native type20 producer, not a completed record seed. Each local-clock read
+/// Native type 20 producer, not a completed record seed. Each local-clock read
 /// follows that row's metadata insertion. A clock/default failure retains the
 /// inserted metadata; notification failure retains all preceding record writes.
 #[allow(
@@ -307,9 +307,9 @@ pub fn delete(
     Ok(requested)
 }
 
-/// Clear is a single supplied type20 source copied to occupied target records,
+/// Clear is a single supplied type 20 source copied to occupied target records,
 /// not a delete. The alarm is cleared only when it names the selected content.
-/// Transfer queue14 delivery belongs to the caller's common transfer layer.
+/// Transfer queue 14 delivery belongs to the caller's common transfer layer.
 pub fn clear(
     image: &mut Icf<'_>,
     group: usize,
@@ -374,14 +374,14 @@ pub fn carry(
             old
         };
         put_word(image, ALARM + 2, next as u16)?;
-        // BA16 CBD4D is inside the type3/same-group guard. Both directions
+        // BA16 CBD4D is inside the type 3/same-group guard. Both directions
         // notify here even when the selected alarm position is unchanged.
         notify(image, Event::sync(0x39))?;
     }
     Ok(true)
 }
 
-/// Explicit raw 16-byte group rename; group0 has no name record. Normalization
+/// Explicit raw 16-byte group rename; group 0 has no name record. Normalization
 /// and its native failures must occur before this storage-only operation.
 pub fn rename_group_raw(image: &mut Icf<'_>, group: usize, name: [u8; 16]) -> Result<(), Error> {
     if !(1..=26).contains(&group) {

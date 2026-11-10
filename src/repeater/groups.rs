@@ -1,6 +1,6 @@
-//! Repeater working50counts and three distinct reference words. Counts live at
-//! expanded49914, NOT in storage Icf; saved starts/order are rebuilt at3BF0A /
-//! 3AB82. This module never decodes52byte row fields or copies them as a shift.
+//! Repeater working 50 counts and three distinct reference words. Counts live at
+//! expanded 49914, NOT in storage Icf; saved starts/order are rebuilt at 3BF0A /
+//! 3AB82. This module never decodes 52 byte row fields or copies them as a shift.
 //! The row backend calls these transitions at their original commit phase.
 
 use crate::icf::{Error, Icf};
@@ -113,7 +113,7 @@ impl Groups {
             references,
         })
     }
-    /// C6624's DWORD sum; no invented per-group50-row restriction.
+    /// C6624's DWORD sum; no invented per-group 50-row restriction.
     pub fn total(&self) -> u32 {
         self.counts.iter().map(|n| u32::from(*n)).sum()
     }
@@ -129,7 +129,7 @@ impl Groups {
             .wrapping_add(u32::from(self.counts[group]))
             .wrapping_sub(1) as i32)
     }
-    /// C6704 intentionally returns50 for an out-of-total reference. It is not
+    /// C6704 intentionally returns 50 for an out-of-total reference. It is not
     /// clamped or treated as FFFF, including during delete reference repair.
     pub fn group_of(&self, absolute: i32) -> usize {
         group_of_counts(&self.counts, absolute)
@@ -218,7 +218,7 @@ impl Groups {
         }
         Ok(())
     }
-    /// Both carry directions use actionD5. The first word follows content, but
+    /// Both carry directions use action D5. The first word follows content, but
     /// the other two words RESET rather than receive the same +/-delta.
     pub fn after_carry(
         &mut self,
@@ -303,8 +303,8 @@ impl Groups {
     }
 }
 
-/// Explicit16-byte group rename, independent of row decoding/topology. Caller
-/// provides the mode1-normalized accepted candidate and owns label/notify tail.
+/// Explicit 16-byte group rename, independent of row decoding/topology. Caller
+/// provides the mode 1-normalized accepted candidate and owns label/notify tail.
 pub fn rename_group_raw(image: &mut Icf<'_>, group: usize, name: [u8; 16]) -> Result<(), Error> {
     if group >= 50 {
         return Err(invalid("repeater named group outside 0..50"));

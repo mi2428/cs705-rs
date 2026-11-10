@@ -1,7 +1,7 @@
 //! Explicit ANSI native-output boundaries, not Unicode/host-locale substitutes.
-//! LCMapStringA's result is not a success/length gate: its whole2n destination
+//! LCMapStringA's result is not a success/length gate: its whole 2n destination
 //! is cleaned, compacted, then n bytes are copied back into the shared source.
-//! The preceding476E4 sanitation belongs to its caller and must already have
+//! The preceding 476E4 sanitation belongs to its caller and must already have
 //! happened before map_copy_back; this function does not claim that whole editor.
 //!
 //! ```text
@@ -54,7 +54,7 @@ pub fn sanitize(bytes: &mut [u8], replacement: u8) -> bool {
     changed
 }
 
-/// Mode1 whole-name grammar, not CSV B70E4: sanitize before trim/overwidth-only
+/// Mode 1 whole-name grammar, not CSV B70E4: sanitize before trim/overwidth-only
 /// clipping, so even an exact-width isolated lead is repaired here.
 pub fn name_candidate(shared: &mut [u8], maximum: usize) -> Result<Vec<u8>, Error> {
     if shared.len() > 1024 * 1024 {
@@ -65,7 +65,7 @@ pub fn name_candidate(shared: &mut [u8], maximum: usize) -> Result<Vec<u8>, Erro
     Ok(clip_dbcs(&candidate, maximum).0.to_vec())
 }
 
-/// LCID0411/flags600000 request with explicit2n capacities. `native` can return
+/// LCID 0411/flags 600000 request with explicit 2n capacities. `native` can return
 /// zero after partial writes; its result is retained but never gates copy-back.
 /// An Err skips copy-back without undoing the caller's prior source sanitation.
 pub fn map_copy_back(
@@ -138,7 +138,7 @@ pub fn trim_candidate(source: &[u8]) -> Vec<u8> {
     }
 }
 
-/// BA9B0's observable low-byte changed flag. Caller consumes AL==1, not fullEAX.
+/// BA9B0's observable low-byte changed flag. Caller consumes AL==1, not full EAX.
 /// All eight logical slots are processed, including bytes after an embedded NUL.
 pub fn fold_callsign(raw: &mut [u8; 8]) -> bool {
     let mut changed = false;
@@ -189,7 +189,7 @@ pub fn ascii_map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
 }
 
 /// Default native producer on Windows, portable ASCII elsewhere. The Windows
-/// request uses the caller's distinct, equal-sized2n buffers with explicit counts,
+/// request uses the caller's distinct, equal-sized 2n buffers with explicit counts,
 /// not NUL termination. A native zero and partial destination writes are retained.
 /// This does not change ascii_map's explicitly portable domain.
 /// Windows rejects empty, odd, unequal or non-INT-sized buffers before FFI;
@@ -242,7 +242,7 @@ fn native_uppercase_count(bytes: usize) -> Result<u32, Error> {
     u32::try_from(bytes).map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD"))
 }
 
-/// Captured descriptor flags relevant to96308, not keyboard/acceptance gates.
+/// Captured descriptor flags relevant to 96308, not keyboard/acceptance gates.
 #[derive(Debug, Clone, Copy)]
 pub struct Profile<'a> {
     pub uppercase: bool,
@@ -282,7 +282,7 @@ fn profile_bytes(bytes: &mut [u8], profile: Profile<'_>) {
     }
 }
 
-/// Mode0's ordered normalizer. LCMap copy-back mutates the shared input before
+/// Mode 0's ordered normalizer. LCMap copy-back mutates the shared input before
 /// any later failure. Additional Upper separates a new n-byte buffer; without
 /// Upper, later byte filters still mutate the caller's shared allocation.
 pub fn whole_text(

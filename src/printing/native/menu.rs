@@ -15,7 +15,7 @@ pub struct Command {
 
 impl Factory {
     /// 62DA4's view-node classification, distinct from a stored record kind or
-    /// CSV dispatch slot. Its explicit default0 does not register an unknown UI.
+    /// CSV dispatch slot. Its explicit default 0 does not register an unknown UI.
     pub fn context_type(&self) -> u32 {
         match self.node {
             0 | 1 | 102 => 1,

@@ -196,7 +196,7 @@ impl Document {
     /// B5A78's nonempty handoff resets pending before a later image writer.
     /// Empty names do not take this branch. A failed later writer must not restore
     /// the consumed pending state. Queue receivers read the live name, not a name
-    /// supposedly captured by their copied24-byte notification.
+    /// supposedly captured by their copied 24-byte notification.
     pub fn take_pending_nonempty(&mut self) -> Option<Vec<u8>> {
         if self
             .pending_name

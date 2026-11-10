@@ -404,7 +404,7 @@ impl Session {
 
     /// Start E3 from the same checked query proof as read_after_query. The image
     /// is copied before run and must use that query's exact profile. Only after
-    /// the identity/context gates succeed does E1 tail bit2 set DATA preamble.
+    /// the identity/context gates succeed does E1 tail bit 2 set DATA preamble.
     pub fn write_after_query(
         config: SessionConfig,
         profile: Profile,
@@ -420,7 +420,7 @@ impl Session {
 
     fn adopt_write_preamble(&mut self) {
         if self.out.operation == Operation::Write {
-            // 56C80 -> 27518 -> 27A4A: only write adopts E1 bit2 into
+            // 56C80 -> 27518 -> 27A4A: only write adopts E1 bit 2 into
             // W40/C18/C1C. Read retains its existing DATA preamble setting.
             self.config.settings.data_preamble =
                 if self.out.identity.as_ref().expect("identity set").tail[0x18] & 4 != 0 {
@@ -639,7 +639,7 @@ impl Session {
                 "query direction or command",
             )));
         }
-        // 16D29/16D57/16D7A -> 16D87: raw BE stores/tail first, result0
+        // 16D29/16D57/16D7A -> 16D87: raw BE stores/tail first, result 0
         // last, including invalid BCD. Do not make the old strict gate normative.
         let identity = Identity {
             model: u16::from_be_bytes([p[4], p[5]]),
@@ -670,7 +670,7 @@ impl Session {
     }
 
     fn read_packet(&mut self, p: &[u8]) -> Result<bool, Failure> {
-        // Original state9 17EBC length gate; it differs from pure Frame decode.
+        // Original state 9 17EBC length gate; it differs from pure Frame decode.
         if !(12..=0x20a).contains(&p.len()) || p[..3] != [0xfe, 0xef, 0xee] {
             return Err(Failure::Protocol(Error::Invalid(
                 "read response header or length",
@@ -820,7 +820,7 @@ impl Session {
                     self.transition(State::ReadWait, now);
                 }
                 State::ReadWait => {
-                    // State9 processes its existing queue only on positive read;
+                    // State 9 processes its existing queue only on positive read;
                     // query/ACK Extractor does not have this gate.
                     if self.receive(t)? > 0 && self.out.echo != Echo::Auto {
                         while let Some(b) = self.receive.pop_front() {
@@ -966,7 +966,7 @@ impl Session {
         t: &mut impl Transport,
         cancelled: &mut impl FnMut() -> bool,
     ) -> Result<(), Failure> {
-        // 15EF0: 100ms wait, then at most 65535 one-byte reads until count0.
+        // 15EF0: 100 ms wait, then at most 65535 one-byte reads until count 0.
         t.wait_ms(100).map_err(|e| Failure::Io(e.kind()))?;
         let mut byte = [0];
         for _ in 0..65535 {

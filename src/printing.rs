@@ -11,7 +11,7 @@ fn invalid(reason: &'static str) -> Error {
 }
 
 /// 43328: fixed cells repeat, a boundary is BEFORE its indexed body cell.
-/// Blocked boundaries come from fixed-row bit80/fixed-column node38, not pages.
+/// Blocked boundaries come from fixed-row bit 80/fixed-column node 38, not pages.
 /// The last remainder wins; a zero candidate becomes one. Output is BE16 spans.
 pub fn axis_spans(
     sizes: &[i32],
@@ -62,7 +62,7 @@ pub fn axis_spans(
 
 /// Portable monospace metrics, not substituted GetTextExtentPoint32A results.
 /// Integer pixel cells enclose the declared glyph/line advances; SVG textLength
-/// uses the same advance. Only font-height conversion uses180BF8 truncation.
+/// uses the same advance. Only font-height conversion uses 180BF8 truncation.
 #[derive(Debug, Clone, Copy)]
 pub struct Metrics {
     pub font_height: i32,
@@ -253,7 +253,7 @@ fn selected_extent(sizes: &[i32], fixed: usize, selected: Range<usize>) -> io::R
 
 /// Initial spans are generated once. Each page remeasures at most four times;
 /// a shrink destroys/recreates the printer view in the native caller. The font
-/// value survives across pages, and180BF8 truncates abs(font)*min(axis ratios).
+/// value survives across pages, and 180BF8 truncates abs(font)*min(axis ratios).
 pub fn layout(grid: &Grid, paper: Paper, metrics: Metrics) -> io::Result<Layout> {
     let (widths, heights) = grid.measure(metrics.font_height, metrics)?;
     let horizontal = axis_spans(
@@ -453,7 +453,7 @@ pub enum PredicateOrder {
     DatasetFirst,
 }
 
-/// 59F84 differs from5BBE8/5BF0C/5C1F8/5C5D0. Do not short circuit an
+/// 59F84 differs from 5BBE8/5BF0C/5C1F8/5C5D0. Do not short circuit an
 /// A5 dataset source/failure merely because BC.bit0 already disables the view.
 pub fn eligible(
     bc: u8,
@@ -505,7 +505,7 @@ pub struct ViewState {
 }
 
 impl ViewState {
-    /// Resource Style/CallSheet bindings at31D281/31DAD1/31E324/327DA0,
+    /// Resource Style/CallSheet bindings at 31D281/31DAD1/31E324/327DA0,
     /// 32AB56/32DE81/32F646/32FA1C/330702/33185F/331B7E/332128/
     /// 341AA5/351251. Default BC.bit0 follows NoPrint; other live bits survive
     /// later state changes rather than being canonicalized by the predicate.
@@ -543,7 +543,7 @@ impl ViewState {
             reply_rows: None,
         })
     }
-    /// The split factory's609BB/60A46 cache is generated from current source.
+    /// The split factory's 609BB/60A46 cache is generated from current source.
     /// A bare resource schema has no invented group-query second scalar.
     pub fn from_image(current: &[u8], kind: ViewKind, group: i32) -> io::Result<Self> {
         Self::from_image_with_split(current, kind, group, 0)
@@ -644,7 +644,7 @@ pub fn split_index(current: &[u8], view: &ViewState, index: i32, expand: bool) -
     Ok(result)
 }
 
-/// Only the live3F/42 producers needed by print. No generic GUI bus/interface.
+/// Only the live 3F/42 producers needed by print. No generic GUI bus/interface.
 /// Registration appends a new active receiver; traversal is reverse live order.
 #[derive(Debug, Default)]
 pub struct Views {
@@ -684,7 +684,7 @@ impl Views {
             .get(id)
             .ok_or_else(|| invalid("unknown print view"))?
             .clone();
-        // St_Preset VMT45B3D4: D68CC returns1 without reading BC or data.
+        // St_Preset VMT 45B3D4: D68CC returns 1 without reading BC or data.
         if view.kind == ViewKind::Preset {
             return Ok(true);
         }
@@ -698,7 +698,7 @@ impl Views {
         };
         eligible(view.bc, order, || {
             let group = if view.group_reply() {
-                // 612DF/63488 copies head00 before the next query. NULL keeps0.
+                // 612DF/63488 copies head 00 before the next query. NULL keeps 0.
                 self.query(current, 0x3f, 0)?
                     .first()
                     .map_or(0, |answer| answer[0]) as i32
@@ -723,7 +723,7 @@ pub struct Editor {
     pub text: Vec<u8>,
 }
 
-/// 36710/event1B clears104 BEFORE dispatch. The child calls the existing field
+/// 36710/event 1B clears 104 BEFORE dispatch. The child calls the existing field
 /// root, not a supplied success result. Hide follows normal dispatch only. This
 /// envelope does not establish native cell/choice inline reachability by itself.
 /// A headless-created view has no visible editor to dispatch.
@@ -763,7 +763,7 @@ pub struct Job {
 }
 
 impl Job {
-    /// Call only after source preparation/preview approval, never preview0.
+    /// Call only after source preparation/preview approval, never preview 0.
     pub fn begin(names: Vec<String>) -> io::Result<Self> {
         if names.is_empty() {
             return Err(invalid("no eligible print sheet"));
@@ -777,7 +777,7 @@ impl Job {
             events: vec![Event::BeginDoc],
         })
     }
-    /// One50ms task callback per sheet, including the Cancel drain. Current
+    /// One 50 ms task callback per sheet, including the Cancel drain. Current
     /// print calls the renderer directly; it does not fabricate a timer delivery.
     pub fn tick(
         &mut self,
@@ -799,7 +799,7 @@ impl Job {
         }
         Ok(!self.ended)
     }
-    /// NewPage precedes page2+ drawing, including a later drawing failure.
+    /// NewPage precedes page 2+ drawing, including a later drawing failure.
     /// Count/layout-only measurement passes never call this method.
     pub fn begin_page(&mut self) {
         if self.pages != 0 {
