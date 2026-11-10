@@ -185,6 +185,8 @@ impl DecodedRecord {
     pub fn set_group(&mut self, group: u32) {
         self.put_word(0x20, group);
     }
+    /// Auxiliary range descriptorH38, distinct from the logical typed index.
+    pub fn range_index(&self)->i32 {self.word(0x38) as i32}
     /// Full decoded mode DWORD. Lookup truncation and mode guards are separate.
     pub fn mode(&self) -> u32 {
         self.word(0x58)
@@ -488,6 +490,11 @@ pub fn mode_filter_class(mode: u32, data: u32) -> u8 {
     } else {
         class
     }
+}
+
+/// C94B8 with the fixed10144(false) predicate: full DWORD mode24 only.
+pub fn channel_mode_bad(holder: &DecodedRecord) -> bool {
+    holder.valid() && holder.mode() == 24
 }
 
 /// 610C type1D. The caller supplies the COMPLETED B generation's source

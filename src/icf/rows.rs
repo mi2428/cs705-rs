@@ -19,6 +19,7 @@ use std::ops::Range;
 
 use super::{Error, Icf, normalizer::ReferenceImage};
 
+pub mod native;
 
 const WORKING_BYTES: usize = 0x4997a;
 const GROUP_COUNT: usize = 0x3fb40;
