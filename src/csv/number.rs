@@ -4,6 +4,11 @@
 
 use super::{Error, trim};
 
+#[path = "number/field.rs"]
+pub mod field;
+#[path = "number/paint.rs"]
+pub mod paint;
+
 /// D5560 lexical gate. No trimming, plus, exponent or suffix; dot-only is zero.
 /// Safe API rejects nonfinite/overlong input instead of invoking x87 overflow.
 pub fn decimal(source: &[u8], point: u8) -> Result<f64, Error> {
@@ -102,6 +107,19 @@ pub fn int32(source: &[u8]) -> Result<i32, Error> {
     } as i32)
 }
 
+/// A4E2C's byte editor: C-prefix, first two retained hex digits, then2..DF.
+/// Empty and wholly filtered input are accepted as2, not an integer parse error.
+pub fn civ_address(source: &[u8]) -> u8 {
+    let digits: Vec<_> = source
+        .iter()
+        .copied()
+        .take_while(|&b| b != 0)
+        .filter(u8::is_ascii_hexdigit)
+        .take(2)
+        .collect();
+    crate::icf::text::hexadecimal_prefix(&digits).clamp(2, 223) as u8
+}
+
 /// B8A18/B8D48: FF sentinel on invalid input; sign includes textual minus zero.
 pub fn coordinate(source: &[u8], latitude: bool, point: u8) -> [u8; 4] {
     let text = trim(source);
@@ -128,12 +146,12 @@ pub fn coordinate(source: &[u8], latitude: bool, point: u8) -> [u8; 4] {
     ]
 }
 
-fn native_substring(source: &[u8], start: usize, len: usize) -> &[u8] {
+pub(crate) fn native_substring(source: &[u8], start: usize, len: usize) -> &[u8] {
     source
         .get(start..source.len().min(start + len))
         .unwrap_or_default()
 }
-fn native_integer(text: &[u8]) -> Result<i32, Error> {
+pub(crate) fn native_integer(text: &[u8]) -> Result<i32, Error> {
     match int32(text) {
         Ok(n) => Ok(n),
         Err(Error::Conversion(_)) => Ok(0),
@@ -354,12 +372,22 @@ impl CoordinateDialog {
     fn first_slot(mode: u8) -> usize {
         match mode {
             5 | 7 | 9 => 1,
-            13 => 2,
+            0 | 13 => 2,
             _ => 0,
         }
     }
     fn from_seed(mode: u8, seed: Vec<u8>, first: Option<u8>) -> Self {
         let mask = COORDINATE_MASKS[usize::from(mode - 5)];
+        Self::from_mask(mode, mask, seed, first)
+    }
+    /// Shared3AA9C mask/control constructor. Each field owns its validator;
+    /// this routine only supplies literal slots, initial caret and key filtering.
+    pub(crate) fn from_mask(
+        mode: u8,
+        mask: &'static [u8],
+        seed: Vec<u8>,
+        first: Option<u8>,
+    ) -> Self {
         let slots: Vec<_> = mask[1..]
             .iter()
             .copied()
@@ -406,6 +434,31 @@ impl CoordinateDialog {
         for &byte in text {
             self.key(byte);
         }
+    }
+    /// Full saved-literal control text, distinct from replace's key sequence.
+    /// Field validators still own date ranges, coordinates and direction rules.
+    pub(crate) fn replace_masked(&mut self, source: &[u8]) -> Result<(), Error> {
+        if source.len() != self.control.len() {
+            return Err(Error::Conversion("native mask width"));
+        }
+        for (at, &slot) in self.slots.iter().enumerate() {
+            if !matches!(slot, b'9' | b'l') {
+                continue;
+            }
+            let value = if slot == b'l' {
+                source[at].to_ascii_uppercase()
+            } else {
+                source[at]
+            };
+            if !matches!(value, b' ' | b'_')
+                && !(slot == b'9' && value.is_ascii_digit())
+                && !(slot == b'l' && value.is_ascii_alphabetic())
+            {
+                return Err(Error::Conversion("native mask field character"));
+            }
+            self.control[at] = value;
+        }
+        Ok(())
     }
     fn key(&mut self, byte: u8) {
         let byte = byte.to_ascii_uppercase();
@@ -489,6 +542,24 @@ impl CoordinateDialog {
     /// whose false-validator branch dispatches the ORIGINAL seed, not a default.
     /// Caller must run phase2/save, then call dispatched() only on normal return.
     pub fn event(&mut self, event: CoordinateEvent) -> Option<Vec<u8>> {
+        let candidate = if matches!(event, CoordinateEvent::Accept | CoordinateEvent::Deactivate)
+            && !self.done
+            && !(event == CoordinateEvent::Deactivate && self.cancel)
+            && self.valid()
+        {
+            Some(self.candidate())
+        } else {
+            None
+        };
+        self.event_with_candidate(event, candidate)
+    }
+    /// A field supplies its own accepted candidate. None means validation false,
+    /// NOT cancellation: Deactivate dispatches the saved seed on that branch.
+    pub(crate) fn event_with_candidate(
+        &mut self,
+        event: CoordinateEvent,
+        candidate: Option<Vec<u8>>,
+    ) -> Option<Vec<u8>> {
         match event {
             CoordinateEvent::Cancel => {
                 self.cancel = true;
@@ -499,7 +570,7 @@ impl CoordinateDialog {
                 self.release_requested = true;
                 return None;
             }
-            CoordinateEvent::Accept if !self.valid() => return None,
+            CoordinateEvent::Accept if candidate.is_none() => return None,
             CoordinateEvent::Deactivate if self.cancel || self.done => {
                 self.release_requested = true;
                 return None;
@@ -509,11 +580,7 @@ impl CoordinateDialog {
         if self.done {
             return None;
         }
-        let text = if self.valid() {
-            self.candidate()
-        } else {
-            self.seed.clone()
-        };
+        let text = candidate.unwrap_or_else(|| self.seed.clone());
         self.phase2 = Some(text.clone());
         Some(text)
     }
@@ -575,12 +642,18 @@ pub fn altitude(source: &[u8], point: u8) -> Result<i32, Error> {
     })
 }
 
+/// B917C signed arithmetic only; callers own the 7FFFFFFF sentinel check.
+pub(crate) fn altitude_metres_tenths(value: i32) -> i32 {
+    let n = ((u64::from(value.unsigned_abs()) * 3048 + 5000) / 10000) as i32;
+    if value < 0 { -n } else { n }
+}
+
 /// B917C: all signed32 magnitudes including INT_MIN; only 7FFFFFFF is empty.
 pub fn altitude_text(value: i32, point: u8) -> Vec<u8> {
     if value == i32::MAX {
         return Vec::new();
     }
-    let n = (u64::from(value.unsigned_abs()) * 3048 + 5000) / 10000;
+    let n = altitude_metres_tenths(value).unsigned_abs();
     let mut out = format!(
         "{}{}.{}",
         if value < 0 && n != 0 { "-" } else { "" },
@@ -679,6 +752,23 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn civ_address_keeps_native_filter_empty_prefix_and_two_digit_limit() {
+        for (text, value) in [
+            (b"".as_slice(), 2),
+            (b"xyz", 2),
+            (b"foo", 15),
+            (b"FF", 223),
+            (b"$DF", 223),
+            (b"0xDF", 13),
+            (b"1234", 18),
+            (b"01", 2),
+            (b"7c\0FF", 124),
+        ] {
+            assert_eq!(civ_address(text), value);
+        }
+    }
+
     #[test]
     fn native_area_literals_seconds_wrap_and_pre_store_errors() {
         for (mode, text, expected) in [
@@ -1010,7 +1100,21 @@ mod tests {
         assert_eq!(coordinate_text([0xff, 0, 0, b'N'], true, b'.'), b"");
         assert_eq!(altitude(b"1.0", b'.').unwrap(), 33);
         assert_eq!(altitude(b"-1.0", b'.').unwrap(), -30);
+        for (value, expected) in [
+            (i32::MIN, -654_553_016),
+            (i32::MAX, 654_553_016),
+            (-2, -1),
+            (-1, 0),
+            (0, 0),
+            (1, 0),
+            (2, 1),
+        ] {
+            assert_eq!(altitude_metres_tenths(value), expected);
+        }
         assert_eq!(altitude_text(i32::MIN, b'.'), b"-65455301.6");
+        assert_eq!(altitude_text(-1, b','), b"0,0");
+        assert_eq!(altitude_text(-2, b','), b"-0,1");
+        assert!(altitude_text(i32::MAX, b'.').is_empty());
         assert_eq!(frequency_text(u32::MAX, b','), b"4294,967295");
         assert_eq!(frequency_hz(b"145.125000", b'.').unwrap(), 145125000);
         assert_eq!(frequency_hz(b"-1", b'.').unwrap(), 0);
