@@ -1,0 +1,55 @@
+name: Examples
+
+'on':
+  push:
+    branches: [main]
+    paths: &paths
+      # The library is a path dependency; its lockfile and tests are not inputs.
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'examples/cli/**'
+      - 'examples/tui/**'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'rustfmt.toml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - '.clippy.toml'
+      - '.github/workflows/examples.yml'
+      - '.github/workflows/actions.lock'
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ${{ matrix.example }}
+    runs-on: ubuntu-latest-self-hosted
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [cli, tui]
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
+        with:
+          cache: false
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+      - name: Check formatting, Clippy, tests, and documentation
+        run: make quality
+      - name: Build the example executable
+        run: make build
