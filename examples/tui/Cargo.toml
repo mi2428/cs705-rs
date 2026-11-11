@@ -3,7 +3,7 @@ name = "cs705-tui"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-description = "Session-based IC-705 settings editor with a Catppuccin Mocha TUI"
+description = "IC-705 configuration TUI"
 publish = false
 
 [workspace]
