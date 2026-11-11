@@ -4,6 +4,7 @@ version = "1.0.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Native Rust library for reading and editing IC-705 configuration files and handling clone protocols"
+license = "MIT OR Apache-2.0"
 publish = false
 autoexamples = false
 
