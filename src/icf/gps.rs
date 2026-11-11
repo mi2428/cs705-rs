@@ -8,6 +8,38 @@ const STARTS: usize = 0x3c5dd;
 const NAMES: usize = 0x353f1;
 const ALARM: usize = 0x3c622;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoded_name_changes_only_the_occupied_name_window() {
+        let mut raw = vec![0xa5; 0x3c9c0];
+        raw[0x355a1] = 6;
+        raw[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+        raw[ORDER..STARTS].fill(0xff);
+        raw[ORDER..ORDER + 2].copy_from_slice(&299_u16.to_le_bytes());
+        let mut image = Icf::from_memory(raw).unwrap();
+        let mut expected = image.memory().to_vec();
+        for slot in [0, 300, usize::MAX] {
+            assert!(
+                image
+                    .set_physical_gps_name_bytes(slot, &[0x82; 16])
+                    .is_err()
+            );
+            assert_eq!(image.memory(), expected);
+        }
+        image.set_physical_gps_name_bytes(299, &[0x82; 16]).unwrap();
+        let at = RECORDS + 34 * 299 + 18;
+        expected[at..at + 16].fill(0x82);
+        assert_eq!(image.memory(), expected);
+        image.memory[ORDER + 2..ORDER + 4].copy_from_slice(&299_u16.to_le_bytes());
+        let before = image.memory().to_vec();
+        assert!(image.set_physical_gps_name_bytes(299, &[b' '; 16]).is_err());
+        assert_eq!(image.memory(), before);
+    }
+}
+
 impl Icf<'_> {
     /// Delete an unordered set of original-state `(group, index)` GPS rows.
     ///
@@ -420,6 +452,15 @@ impl Icf<'_> {
     pub fn set_physical_gps_name_ascii(&mut self, p: usize, value: &str) -> Result<(), Error> {
         let at = self.gps_target(p)?;
         self.gps_ascii(at + 18, value)
+    }
+
+    /// Store an exact caller-encoded name for an occupied slot. The caller owns
+    /// character encoding and padding; no decoding, clipping or NLS occurs.
+    /// Invalid slot/order leaves the image unchanged.
+    pub fn set_physical_gps_name_bytes(&mut self, p: usize, value: &[u8; 16]) -> Result<(), Error> {
+        let at = self.gps_target(p)?;
+        self.memory[at + 18..at + 34].copy_from_slice(value);
+        Ok(())
     }
 
     // Key 0x1b6: load 0x69e3..0x6a01; store 0x7e6b..0x7e82; BCD parse 0x9e028.

@@ -16,6 +16,59 @@ const RECORD_SIZE: usize = 52;
 const USE_BITS: usize = 0x3bf6e;
 const AUX: usize = 0x2a5df;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn narrow_encoded_edits_do_not_decode_or_rewrite_other_repeater_fields() {
+        let mut raw = vec![0xa5; 0x3c9c0];
+        raw[0x355a1] = 6;
+        raw[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
+        raw[ORDER..STARTS].fill(0xff);
+        raw[ORDER..ORDER + 2].copy_from_slice(&2499_u16.to_le_bytes());
+        let mut image = Icf::from_memory(raw).unwrap();
+        let mut expected = image.memory().to_vec();
+        for slot in [0, 2500, usize::MAX] {
+            assert!(
+                image
+                    .set_physical_repeater_name_bytes(slot, &[0x82; 16], &[0x83; 8])
+                    .is_err()
+            );
+            assert!(
+                image
+                    .set_physical_repeater_frequency_hz(slot, 80_000_000)
+                    .is_err()
+            );
+            assert_eq!(image.memory(), expected);
+        }
+        for hz in [0, 29_999, 1_400_000_000, u32::MAX] {
+            assert!(image.set_physical_repeater_frequency_hz(2499, hz).is_err());
+            assert_eq!(image.memory(), expected);
+        }
+        let at = RECORDS + RECORD_SIZE * 2499;
+        image
+            .set_physical_repeater_name_bytes(2499, &[0x82; 16], &[0x83; 8])
+            .unwrap();
+        expected[at + 18..at + 34].fill(0x82);
+        expected[at + 34..at + 42].fill(0x83);
+        assert_eq!(image.memory(), expected);
+        for hz in [30_000_u32, 1_399_999_999] {
+            image.set_physical_repeater_frequency_hz(2499, hz).unwrap();
+            expected[at..at + 4].copy_from_slice(&hz.to_le_bytes());
+            assert_eq!(image.memory(), expected);
+        }
+        image.memory[ORDER + 2..ORDER + 4].copy_from_slice(&2499_u16.to_le_bytes());
+        let before = image.memory().to_vec();
+        assert!(
+            image
+                .set_physical_repeater_frequency_hz(2499, 80_000_000)
+                .is_err()
+        );
+        assert_eq!(image.memory(), before);
+    }
+}
+
 macro_rules! repeater_enum {
     ($ty:ident, $doc:literal, {$($name:ident = $raw:literal),+ $(,)?}) => {
         #[doc = $doc]
@@ -127,6 +180,44 @@ fn unsupported(offset: usize, reason: &'static str) -> Error {
 }
 
 impl Icf<'_> {
+    /// Replace only the exact name fields of an occupied row. The caller owns
+    /// encoding and padding. Unknown other fields are not decoded or rewritten.
+    pub fn set_physical_repeater_name_bytes(
+        &mut self,
+        slot: usize,
+        name: &[u8; 16],
+        sub_name: &[u8; 8],
+    ) -> Result<(), Error> {
+        if !self.repeater_slot_used(slot)? {
+            return Err(unsupported(RECORDS, "cannot name an unused repeater row"));
+        }
+        let at = RECORDS + RECORD_SIZE * slot;
+        self.memory[at + 18..at + 34].copy_from_slice(name);
+        self.memory[at + 34..at + 42].copy_from_slice(sub_name);
+        Ok(())
+    }
+
+    /// Replace only an occupied row's receive frequency in exact Hz. This does
+    /// not normalize unrelated names, callsigns, modes, offsets or coordinates.
+    pub fn set_physical_repeater_frequency_hz(
+        &mut self,
+        slot: usize,
+        hz: u32,
+    ) -> Result<(), Error> {
+        if !self.repeater_slot_used(slot)? {
+            return Err(unsupported(RECORDS, "cannot edit an unused repeater row"));
+        }
+        let at = RECORDS + RECORD_SIZE * slot;
+        if !(30_000..=1_399_999_999).contains(&hz) {
+            return Err(Error::Invalid {
+                line: 5 + at / RECORD_BYTES,
+                reason: "repeater frequency outside 30000..=1399999999 Hz",
+            });
+        }
+        self.memory[at..at + 4].copy_from_slice(&hz.to_le_bytes());
+        Ok(())
+    }
+
     /// Read an occupied physical row as a typed wire view, not canonical input.
     ///
     /// Numeric values, text bytes and signed zero are returned without repair.
