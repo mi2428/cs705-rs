@@ -60,9 +60,109 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Case: Export Memory Channels to CSV
+
+Export all memory groups from `settings.icf` to `memories.csv` using the CS-705 CSV format.
+The output keeps the stored text encoding rather than converting names to UTF-8.
+
+```rust
+use cs705::{
+    csv::{
+        Locale,
+        channel::{self, Kind},
+    },
+    icf::Icf,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let source = std::fs::read("settings.icf")?;
+    let image = Icf::parse(&source)?;
+
+    // Export all groups and rows with explicit decimal and list separators.
+    let locale = Locale {
+        decimal: b'.',
+        list: b',',
+    };
+    let exported = channel::export_memory(&image, Kind::Memory, None, None, locale);
+
+    // An export can fail after producing a prefix; do not save partial output.
+    if let Some(error) = exported.failure {
+        return Err(format!("CSV export failed: {error:?}").into());
+    }
+    std::fs::write("memories.csv", &exported.bytes)?;
+    println!("Exported {} rows to memories.csv", exported.rows);
+    Ok(())
+}
+```
+
+### Case: Read and Write a Raw Clone Image
+
+Use the functions below with an application-owned `Transport` and the radio's matching profile.
+The application selects the port and supplies bounded I/O; each session closes its transport after running.
+See the [CLI transport adapter](examples/cli/src/transport.rs) for a serial-port implementation.
+
+```rust
+use cs705::clone::{self, Outcome, Profile, Session, SessionConfig, Transport, WriteDisposition};
+use std::error::Error;
+
+fn check_clone_result(outcome: Outcome) -> Result<Outcome, Box<dyn Error>> {
+    // Preserve both the protocol error and the final write state in diagnostics.
+    if outcome.failure.is_some() || outcome.close_error.is_some() {
+        return Err(format!(
+            "clone failed: {:?}; close: {:?}; write state: {:?}",
+            outcome.failure, outcome.close_error, outcome.write_disposition
+        )
+        .into());
+    }
+    Ok(outcome)
+}
+
+fn read_raw(transport: &mut impl Transport, profile: Profile) -> Result<Outcome, Box<dyn Error>> {
+    // Query the identity, check the profile, then read the raw image.
+    let session = Session::read(SessionConfig::default(), profile)?;
+    let outcome = check_clone_result(session.run(transport, || false))?;
+
+    // Keep image and coverage together; the buffer can contain an unacquired tail.
+    let required = clone::read_range(profile.selector())?;
+    if required
+        .into_iter()
+        .any(|at| !outcome.acquired(at as usize))
+    {
+        return Err("raw read did not acquire the complete profile range".into());
+    }
+    Ok(outcome)
+}
+
+fn write_raw(
+    transport: &mut impl Transport,
+    profile: Profile,
+    mask: u8,
+    image: &[u8],
+    approved: bool,
+) -> Result<Outcome, Box<dyn Error>> {
+    // Require explicit approval before any protocol bytes are sent.
+    if !approved {
+        return Err("raw write was not approved".into());
+    }
+    let session = Session::write(SessionConfig::default(), profile, mask, image)?;
+    let outcome = check_clone_result(session.run(transport, || false))?;
+
+    // Protocol acknowledgement does not verify the resulting radio settings.
+    if outcome.write_disposition != WriteDisposition::Acknowledged {
+        return Err("raw write was not acknowledged; do not retry automatically".into());
+    }
+    Ok(outcome)
+}
+```
+
+`read_raw` returns the image together with its coverage bitmap, rather than treating every buffer byte as acquired data.
+`write_raw` takes a full internal image for the selected profile; `mask` selects optional regions and does not remove permanent write exclusions.
+Raw writes skip Document validation and normalization, so use only a verified image for the intended radio and keep a fresh backup.
+Never retry a failed or unconfirmed write automatically; acknowledgement is not a readback or persistence check.
+
 ## License
 
-Licensed under either the [MIT](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-MIT) or the [Apache 2.0](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-APACHE), at your option.
+Licensed under either the [MIT](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-MIT) or the [Apache-2.0](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-APACHE), at your option.
 
 >[!IMPORTANT]
 > **Reverse Engineering Notice:**
