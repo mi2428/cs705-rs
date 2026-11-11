@@ -577,6 +577,64 @@ impl NormalMemory {
         )
     }
 
+    /// Replace an occupied logical row's exact encoded name and optional Main/RX
+    /// frequency. This checked, atomic leaf is not the native holder saver:
+    /// re-encoding that holder can clamp offsets or repack callsigns unrelated
+    /// to these edits. Both sides' remaining bytes and all maps stay untouched.
+    /// `None` preserves even an out-of-envelope old frequency; a replacement
+    /// requires 30,000..=470,000,000 Hz. Encoding and padding belong to the caller.
+    pub fn set_channel_name_and_frequency(
+        &mut self,
+        group: usize,
+        row: usize,
+        name: &[u8; 16],
+        frequency_hz: Option<u32>,
+    ) -> Result<(), Error> {
+        self.validate()?;
+        if frequency_hz.is_some_and(|hz| !(30_000..=470_000_000).contains(&hz)) {
+            return Err(invalid("normal frequency outside 30000..=470000000 Hz"));
+        }
+        let slot = self
+            .slot(group, row)?
+            .ok_or(invalid("normal row is empty"))?;
+        let at = 83 * slot;
+        self.working[at + 67..at + 83].copy_from_slice(name);
+        if let Some(hz) = frequency_hz {
+            self.working[at + 1..at + 5].copy_from_slice(&hz.to_le_bytes());
+        }
+        Ok(())
+    }
+
+    /// Copy an occupied row into an empty logical row without decoding either
+    /// stored side. This checked raw copy is not native clipboard paste. It
+    /// allocates one slot, copies raw83 and SEL bits, and leaves unrelated flag
+    /// bits on the destination intact. Existing destinations are never replaced.
+    /// Invalid rows or exhausted capacity leave the model unchanged.
+    pub fn copy_channel(
+        &mut self,
+        source: (usize, usize),
+        target: (usize, usize),
+    ) -> Result<(), Error> {
+        self.validate()?;
+        let from = self
+            .slot(source.0, source.1)?
+            .ok_or(invalid("normal copy source is empty"))?;
+        if self.slot(target.0, target.1)?.is_some() {
+            return Err(invalid("normal copy destination is occupied"));
+        }
+        if self.allocate(target.0, target.1..target.1 + 1)?.allocated != 1 {
+            return Err(invalid("normal copy capacity exhausted"));
+        }
+        let to = self
+            .slot(target.0, target.1)?
+            .expect("single allocation completed");
+        self.working
+            .copy_within(83 * from..83 * (from + 1), 83 * to);
+        self.working[FLAGS + to] =
+            (self.working[FLAGS + to] & 0x3f) | (self.working[FLAGS + from] & 0xc0);
+        Ok(())
+    }
+
     /// Current working group count, including explicitly appended blank groups.
     pub fn group_count(&self) -> usize {
         self.word(GROUP_COUNT) as usize
@@ -914,6 +972,69 @@ fn invalid(reason: &'static str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn narrow_channel_edit_preserves_both_sides_and_rejects_without_partial_stores() {
+        let mut memory = model();
+        memory.allocate(1, 99..100).unwrap();
+        let before = memory.clone();
+        for (group, row, hz) in [
+            (0, 0, None),
+            (2, 0, None),
+            (1, 100, None),
+            (1, 99, Some(0)),
+            (1, 99, Some(470_000_001)),
+        ] {
+            assert!(
+                memory
+                    .set_channel_name_and_frequency(group, row, &[0x82; 16], hz)
+                    .is_err()
+            );
+            assert_eq!(memory, before);
+        }
+        let mut expected = memory.working().to_vec();
+        memory
+            .set_channel_name_and_frequency(1, 99, &[0x82; 16], None)
+            .unwrap();
+        expected[67..83].fill(0x82);
+        assert_eq!(memory.working(), expected);
+        memory
+            .set_channel_name_and_frequency(1, 99, &[b' '; 16], Some(30_000))
+            .unwrap();
+        expected[67..83].fill(b' ');
+        expected[1..5].copy_from_slice(&30_000_u32.to_le_bytes());
+        assert_eq!(memory.working(), expected);
+    }
+
+    #[test]
+    fn raw_channel_copy_keeps_both_sides_and_never_replaces_an_occupied_row() {
+        let mut memory = model();
+        memory.allocate(0, 99..100).unwrap();
+        let record = memory.record(0, 99).unwrap().unwrap().to_vec();
+        memory.copy_channel((0, 99), (1, 7)).unwrap();
+        assert_eq!(memory.record(1, 7).unwrap().unwrap(), record);
+        let before = memory.clone();
+        for (source, target) in [
+            ((0, 99), (1, 7)),
+            ((0, 0), (1, 8)),
+            ((0, 99), (2, 0)),
+            ((0, 99), (1, 100)),
+        ] {
+            assert!(memory.copy_channel(source, target).is_err());
+            assert_eq!(memory, before);
+        }
+        for group in 2..5 {
+            assert_eq!(memory.group_count(), group);
+            assert!(memory.add_group());
+        }
+        for group in 0..5 {
+            memory.allocate(group, 0..100).unwrap();
+        }
+        assert!(memory.add_group());
+        let full = memory.clone();
+        assert!(memory.copy_channel((0, 99), (5, 0)).is_err());
+        assert_eq!(memory, full);
+    }
 
     fn model() -> NormalMemory {
         let mut raw = vec![0xa6; 0x4997a];
