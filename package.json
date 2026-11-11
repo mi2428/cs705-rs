@@ -1,0 +1,14 @@
+{
+  "name": "cs705-rs-pages",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test build.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "pug": "3.0.4"
+  }
+}

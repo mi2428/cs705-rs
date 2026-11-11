@@ -1,0 +1,48 @@
+doctype html
+html(lang="ja")
+  head
+    meta(charset="utf-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1")
+    meta(name="description" content="A Rust library for IC-705 ICF files, configuration editing, CSV conversion and clone transfers.")
+    title cs705-rs — IC-705 Configuration Library
+    style.
+      body { max-width: 48rem; margin: 4rem auto; padding: 0 1.25rem; font: 1rem/1.7 system-ui, sans-serif; color: #222; background: #fff; overflow-wrap: anywhere; }
+      h1 { line-height: 1.3; }
+      a { color: inherit; text-underline-offset: .15em; }
+      p { margin: .65rem 0; }
+      div[lang="en"] { margin-top: 1.5rem; color: #555; }
+      code { font-family: ui-monospace, monospace; }
+      img { display: block; max-width: 100%; height: auto; margin: 1.5rem 0; }
+      footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+  body
+    main
+      h1 cs705-rs
+
+      div(lang="ja")
+        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs]は、#[a(href="https://www.icom.co.jp/lineup/products/IC-705/") Icom IC-705] の設定ファイルとクローン通信を扱うRustライブラリです。Windows用プログラミングソフトウェア #[a(href="https://www.icom.co.jp/support/drivers/8597/") CS-705 v1.30] の実行ファイルをリバースエンジニアリングし、設定イメージ、レコードの符号化、編集時の補正、文書の読込・保存、転送セッションをRustで再構成しています。CS-705のGUIを自動操作するのではなく、バイト列と型付きの値を入出力するライブラリとして利用できます。
+        p 目的は、運用中の周波数を切り替えるリグコントロールではなく、メモリーや各種設定をまとめた設定イメージの編集・変換・転送です。保存したICFを読み込み、レピーターの周波数やトーンを一括更新する、運用地別にグループを組み直す、フィルターやCW設定を揃える、といった処理をプログラムに組み込めます。ファイル処理と通信処理は分離されており、無線機を接続せずに編集結果をICFとして生成できます。
+        ul
+          li ICFのパース・書出し、内部リビジョンとデータ範囲の検査、正規形式のCD（MD5）検証と再生成。正規形式のMapRev 6パーサーとCS-705の読込動作を再構成したリーダーの個別提供、および専用APIによるMapRev 1〜6のイメージ変換
+          li メモリーの周波数のHz単位での取得・変更、モード、DATA、FIL選択、DUP、オフセット、スプリット、トーンスケルチ、DTCSと極性、DV用のUR・RPT1・RPT2の編集。グループ・論理行と物理スロットの分離、行の割当・コピー・移動・挿入・削除、コールメモリー、スキャンエッジ、バンドスタッキング、メモパッドの処理
+          li SSB・SSB-D・CW・RTTY・AMのフィルター帯域幅、PBT、SHARP/SOFT、バンド別のプリアンプとATT、モード別のAGCの設定。CWピッチ、キー種別、パドル極性、ブレークイン、RTTY、音声・表示、GPS、IPv4アドレスとプレフィックスなど無線機へ渡す設定値の編集
+          li 文書の現在イメージ、比較用ベースライン、変更フラグの管理、正規化と保存先レイアウトへの変換。単一フィールドの書換えと文書全体への補正の分離、補正に使うcapabilityコンテキスト・周波数範囲・既定イメージの呼出し側による明示
+          li メモリー、レピーター、GPS、コールサイン、スキャンエッジのCSV入出力。CS-705の変換規則に基づく周波数・オフセット・トーン・座標・固定長の名前の処理
+          li クローンフレームの符号化・復号、識別応答とプロファイルの照合、読出し・書込みセッション、転送範囲の選択、パケットのチェックサムと受信範囲の検査、完了・失敗結果の取得。#[code Transport] による接続済み通信路の読み書き・時刻・待機・送信残量・再設定・切断の提供と、OSのシリアル実装・プロトコル処理の分離
+        p コアライブラリの外部依存は #[code md5] のみで、GUIやシリアルドライバーには依存しません。リバースエンジニアリングで得たデータ構造・処理順序・通信形式は #[a(href="https://github.com/mi2428/cs705-rs/blob/main/NOTES.md") NOTES.md] で公開しています。
+
+      div(lang="en")
+        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs] is a Rust library for configuration files and clone transfers on the #[a(href="https://www.icomjapan.com/lineup/products/IC-705/") Icom IC-705]. It reconstructs settings images, record encoding, edit-time corrections, document I/O and transfer sessions by reverse engineering the executable of the Windows programming software #[a(href="https://www.icomjapan.com/support/firmware_driver/4423/") CS-705 v1.30]. Its APIs operate on byte arrays and typed values rather than automating the original GUI.
+        p The scope is editing, converting and transferring configuration images, rather than live rig control. Applications can load a saved ICF, batch-update repeater frequencies and tones, reorganize groups for different operating locations, or apply consistent filter and CW preferences. File processing is independent of the transport, so edited ICF files can be generated without a connected radio.
+        ul
+          li ICF parsing and serialization, internal revision and coverage checks, and CD (MD5) verification and regeneration for canonical files. The canonical MapRev 6 parser and the reconstructed CS-705 reader are separate entry points; dedicated APIs convert images between MapRev 1–6 layouts.
+          li Channel frequencies in integer Hz, mode, DATA, FIL selection, DUP, offset, split, tone squelch, DTCS and polarity, and DV UR/RPT1/RPT2 callsigns. Group and logical-row operations are distinct from physical slots and include allocation, copying, moving, insertion and deletion, with additional operations for call memories, scan edges, band stacking and memopad records.
+          li Stored SSB, SSB-D, CW, RTTY and AM filter bandwidths, PBT, SHARP/SOFT shape, per-band preamp and ATT, and per-mode AGC. Setting APIs also cover CW pitch, key type, paddle polarity, break-in, RTTY, audio and display options, GPS, and IPv4 addresses and prefixes. These APIs edit radio configuration values; they do not process RF or audio samples.
+          li Document operations maintain the current image, comparison baseline and modified flag, and perform normalization and save-layout conversion. Individual field writes are separate from document-wide corrections, with capability context, frequency ranges and default images supplied explicitly by the caller.
+          li CSV import and export for memories, repeaters, GPS entries, callsigns and scan edges. Frequencies, offsets, tones, coordinates and fixed-width names follow CS-705 conversion rules, with explicit separator and locale inputs. Text remains byte-oriented, separating the encoding of stored data from Unicode conversion for display.
+          li Clone-frame encoding and decoding, identity/profile checks, read/write sessions, transfer-range selection, packet checksums, coverage validation and completion or failure results. A caller-supplied #[code Transport] provides reads, writes, timing, waits, pending-output counts, reconfiguration and close over an already opened connection, keeping OS serial I/O outside the protocol engine.
+        p The core library depends only on #[code md5], with no GUI toolkit or serial driver dependencies. #[a(href="https://github.com/mi2428/cs705-rs/blob/main/NOTES.md") NOTES.md] documents the data structures, operation sequences and wire formats recovered through reverse engineering.
+
+      img(src="screenshot.png" width="1626" height="1030" alt="A terminal settings interface built with cs705")
+
+      footer
+        p MIT OR Apache-2.0 · #[a(href="https://github.com/mi2428") mi2428]
