@@ -1,4 +1,4 @@
-# CS-705 v1.30 Internals
+# CS-705 Reverse Engineering Notes
 
 This document describes the settings image, record codecs, document operations, file formats, and clone protocol of the Windows application `CS705.exe`, as reconstructed from its machine code.
 
