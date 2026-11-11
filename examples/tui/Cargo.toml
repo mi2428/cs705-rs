@@ -1,0 +1,19 @@
+[package]
+name = "cs705-tui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Session-based IC-705 settings editor with a Catppuccin Mocha TUI"
+publish = false
+
+[workspace]
+
+[dependencies]
+cs705 = { path = "../.." }
+clap = { version = "=4.6.7", features = ["derive"] }
+encoding_rs = "=0.8.35"
+ratatui = { version = "=0.30.0", default-features = false, features = ["crossterm_0_29", "unstable-rendered-line-info"] }
+serialport = { version = "=4.10.1", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "=0.26.4", default-features = false, features = ["fs"] }
