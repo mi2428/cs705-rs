@@ -172,6 +172,28 @@ impl TextField {
         let at = self.at(index)?;
         Ok(&image.memory()[at..at + self.width()])
     }
+    /// Store caller-encoded TX message bytes without the native NLS grammar.
+    /// Callsign fields reject this operation. Capacity is checked before padding
+    /// and storage; the caller is responsible for encoding and text validity.
+    pub fn store_encoded_message(
+        self,
+        image: &mut Icf<'_>,
+        index: usize,
+        bytes: &[u8],
+    ) -> Result<(), Error> {
+        if self != Self::TxMessage {
+            return Err(Error::Invalid("encoded messages cannot replace callsigns"));
+        }
+        let at = self.at(index)?;
+        if bytes.len() > self.width() {
+            return Err(Error::Invalid("encoded TX message exceeds field width"));
+        }
+        let mut raw = vec![b' '; self.width()];
+        raw[..bytes.len()].copy_from_slice(bytes);
+        image
+            .patch_memory(&[(at, &raw)])
+            .map_err(|_| Error::Invalid("encoded TX message image store"))
+    }
     pub fn display(self, image: &Icf<'_>, index: usize) -> Result<Vec<u8>, Error> {
         Ok(c_prefix(self.raw(image, index)?).to_vec())
     }
@@ -443,6 +465,29 @@ pub fn reflector_view(image: &Icf<'_>, index: u32) -> Result<ReflectorView, crat
 mod tests {
     use super::*;
     use crate::icf::{Icf, settings::Selection};
+
+    #[test]
+    fn encoded_message_capacity_index_and_field_guards_precede_storage() {
+        let mut image = image();
+        let field = TextField::TxMessage;
+        let mut expected = image.memory().to_vec();
+        for (f, index, bytes) in [
+            (TextField::MyCall, 0, b"X".as_slice()),
+            (field, 5, b"X"),
+            (field, 4, &[0x82; 21]),
+        ] {
+            assert!(f.store_encoded_message(&mut image, index, bytes).is_err());
+            assert_eq!(image.memory(), expected);
+        }
+        let at = field.at(4).unwrap();
+        for bytes in [&[0x82; 20][..], b"X", b""] {
+            field.store_encoded_message(&mut image, 4, bytes).unwrap();
+            expected[at..at + 20].fill(b' ');
+            expected[at..at + bytes.len()].copy_from_slice(bytes);
+            assert_eq!(image.memory(), expected);
+        }
+    }
+
     fn image() -> Icf<'static> {
         let mut memory = vec![0xa6; 0x3c9c0];
         memory[0x355a1] = 6;

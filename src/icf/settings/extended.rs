@@ -2267,6 +2267,40 @@ impl FixedTextField {
     pub fn count(self) -> usize {
         if self == Self::Keyer { 8 } else { 1 }
     }
+    /// Exact stored bytes, without the native display handler's side effects.
+    /// In particular, displaying a keyer row can repair duplicate '*' markers;
+    /// a read-only client must not use that handler as a storage accessor.
+    pub fn raw<'a>(self, image: &'a Icf<'_>, index: usize) -> Result<&'a [u8], crate::csv::Error> {
+        let at = self.at(index)?;
+        Ok(&image.memory()[at..at + self.width()])
+    }
+    /// Explicit encoded storage for free-text fields, not native editor/NLS
+    /// processing. Protocol tokens, callsigns, keyers and credentials must use
+    /// their existing grammar. The caller owns encoding and text validity.
+    /// No clipping or replacement is performed.
+    pub fn store_encoded_text(
+        self,
+        image: &mut Icf<'_>,
+        index: usize,
+        bytes: &[u8],
+    ) -> Result<(), crate::csv::Error> {
+        if !matches!(self, Self::Comment | Self::Ssid | Self::NetworkRadioName) {
+            return Err(crate::csv::Error::Invalid(
+                "field is not an encoded free-text field",
+            ));
+        }
+        let at = self.at(index)?;
+        if bytes.len() > self.width() || (self == Self::Ssid && bytes.is_empty()) {
+            return Err(crate::csv::Error::Invalid(
+                "encoded text length outside field capacity",
+            ));
+        }
+        let mut raw = vec![b' '; self.width()];
+        raw[..bytes.len()].copy_from_slice(bytes);
+        image
+            .patch_memory(&[(at, &raw)])
+            .map_err(|_| crate::csv::Error::Invalid("encoded text image store"))
+    }
     fn at(self, index: usize) -> Result<usize, crate::csv::Error> {
         if index >= self.count() {
             return Err(crate::csv::Error::Invalid(
@@ -4232,6 +4266,45 @@ pub fn edit_program_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encoded_free_text_validates_before_storing_exact_bytes_and_padding() {
+        let mut image = image();
+        let mut expected = image.memory().to_vec();
+        for field in [
+            FixedTextField::Comment,
+            FixedTextField::Ssid,
+            FixedTextField::NetworkRadioName,
+        ] {
+            let width = field.width();
+            assert!(field.store_encoded_text(&mut image, 1, b"X").is_err());
+            assert!(
+                field
+                    .store_encoded_text(&mut image, 0, &vec![0x82; width + 1])
+                    .is_err()
+            );
+            assert_eq!(image.memory(), expected);
+            let at = field.at(0).unwrap();
+            field
+                .store_encoded_text(&mut image, 0, &vec![0x82; width])
+                .unwrap();
+            expected[at..at + width].fill(0x82);
+            assert_eq!(image.memory(), expected);
+            field.store_encoded_text(&mut image, 0, b"X").unwrap();
+            expected[at..at + width].fill(b' ');
+            expected[at] = b'X';
+            assert_eq!(image.memory(), expected);
+        }
+        for field in [
+            FixedTextField::Ssid,
+            FixedTextField::Keyer,
+            FixedTextField::ApPassword,
+            FixedTextField::GatewayCallsign,
+        ] {
+            assert!(field.store_encoded_text(&mut image, 0, b"").is_err());
+            assert_eq!(image.memory(), expected);
+        }
+    }
     #[test]
     fn readonly_number_groups_preserve_equal_profiles_and_format_only_differences() {
         let mut image = image();
