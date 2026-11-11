@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "cs705",
     version,
     about = "Native CS-705 configuration tools",
-    long_about = "Native CS-705 configuration tools. Device I/O requires an explicit clone command, --port, --allow-device-io and --acknowledge-line-risk. Writes also require --yes and never retry automatically. Indices are zero-based. Output files are never overwritten without --overwrite."
+    long_about = "Native CS-705 configuration tools.\nInspect and edit files offline, or use clone subcommands for radio transfers. Indices are zero-based."
 )]
 pub struct Cli {
     /// Explicit application preference file; no implicit home-directory state.
@@ -367,7 +367,7 @@ pub enum CloneAction {
         #[command(flatten)]
         transport: TransportArgs,
     },
-    /// Explicit port discovery; probing additionally requires --yes.
+    /// List candidate ports or probe explicitly selected ports.
     Search {
         /// List candidate ports without opening them.
         #[arg(long, conflicts_with_all = ["port", "mock"])]
@@ -378,10 +378,13 @@ pub enum CloneAction {
         /// Exercise discovery through a mock transcript, never the OS.
         #[arg(long)]
         mock: Option<String>,
+        /// Allow device I/O on the explicitly selected ports.
         #[arg(long)]
         allow_device_io: bool,
+        /// Acknowledge that opening a port may transiently assert DTR/RTS.
         #[arg(long)]
         acknowledge_line_risk: bool,
+        /// Confirm probing the explicitly selected ports.
         #[arg(long)]
         yes: bool,
     },
@@ -417,6 +420,7 @@ pub enum CloneAction {
         /// Optional regions: reference=1, WLAN=2, CI-V=4, own=8, gateway=16.
         #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=31))]
         mask: u8,
+        /// Confirm the radio write; failed or unconfirmed writes are not retried automatically.
         #[arg(long)]
         yes: bool,
         #[command(flatten)]
@@ -435,11 +439,15 @@ pub enum CloneAction {
 
 #[derive(Args)]
 pub struct TransportArgs {
+    /// Use a recorded transcript instead of opening a serial port.
     #[arg(long, conflicts_with = "port", required_unless_present = "port")]
     pub mock: Option<String>,
     /// Serial device path; never selected or opened implicitly.
+    ///
+    /// Live I/O requires --allow-device-io and --acknowledge-line-risk.
     #[arg(long, conflicts_with = "mock", required_unless_present = "mock")]
     pub port: Option<String>,
+    /// Allow device I/O on the explicitly selected serial port.
     #[arg(long)]
     pub allow_device_io: bool,
     /// OS open may transiently assert DTR/RTS despite requested inactive levels.

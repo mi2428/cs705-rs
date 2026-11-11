@@ -5,7 +5,8 @@ An example command-line application for inspecting, editing, and transferring IC
 ```console
 $ cargo run --locked -- --help
 
-Native CS-705 configuration tools. Device I/O requires an explicit clone command, --port, --allow-device-io and --acknowledge-line-risk. Writes also require --yes and never retry automatically. Indices are zero-based. Output files are never overwritten without --overwrite.
+Native CS-705 configuration tools.
+Inspect and edit files offline, or use clone subcommands for radio transfers. Indices are zero-based.
 
 Usage: cs705 [OPTIONS] <COMMAND>
 

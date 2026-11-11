@@ -81,6 +81,44 @@ fn fixture() -> Vec<u8> {
 }
 
 #[test]
+fn help_keeps_options_at_their_command_scope() {
+    let help = |args: &[&str]| {
+        let out = cli(args, b"");
+        assert!(out.status.success(), "{args:?}");
+        assert!(out.stderr.is_empty());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    for args in [&["--help"][..], &["-h"][..], &["clone", "--help"][..]] {
+        let text = help(args);
+        assert!(text.contains("--config"));
+        for option in [
+            "--port",
+            "--allow-device-io",
+            "--acknowledge-line-risk",
+            "--yes",
+            "--overwrite",
+        ] {
+            assert!(!text.contains(option), "{args:?} advertises {option}");
+        }
+    }
+    let edit = help(&["edit", "--help"]);
+    assert!(edit.contains("--overwrite"));
+    assert!(!edit.contains("--port"));
+    let query = help(&["clone", "query", "--help"]);
+    for option in ["--port", "--allow-device-io", "--acknowledge-line-risk"] {
+        assert!(query.contains(option));
+    }
+    assert!(!query.contains("--overwrite"));
+    assert!(!query.contains("--yes"));
+    for command in ["write", "raw-write"] {
+        let text = help(&["clone", command, "--help"]);
+        for option in ["--port", "--yes", "--overwrite"] {
+            assert!(text.contains(option), "{command} omits {option}");
+        }
+    }
+}
+
+#[test]
 fn help_all_commands_and_invalid_arguments_never_need_input() {
     for command in [
         "recent", "parse", "check", "show", "edit", "new", "convert", "import", "export", "group",

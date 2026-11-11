@@ -40,7 +40,8 @@ pub(crate) struct Args {
     /// Actual option word/checkbox-state JSON, passed through the native producer.
     #[arg(long)]
     option_input: Option<String>,
-    /// Explicit approval maps to clone response 1, never file Yes 6.
+    /// Confirm the radio write; failed or unconfirmed writes are not retried automatically.
+    // Explicit approval maps to clone response 1, never file Yes 6.
     #[arg(long)]
     yes: bool,
     /// Cancel before reading any native source or opening a transport.
