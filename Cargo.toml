@@ -1,9 +1,9 @@
 [package]
 name = "cs705"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.99"
-description = "Evidence-based, native IC-705 configuration tools"
+description = "Native Rust library for reading and editing IC-705 configuration files and handling clone protocols"
 publish = false
 autoexamples = false
 
