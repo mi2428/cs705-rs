@@ -251,6 +251,29 @@ impl TextField {
     }
 }
 
+/// Strict stored UR order for clients editing physical rows without rebuilding
+/// the list. Unlike C61F0's working expansion, invalid entries do not synthesize
+/// CALLSIGN records. Require a unique 0..300 prefix and an all-FFFF suffix.
+pub fn ur_physical_slots(image: &Icf<'_>) -> Result<Vec<usize>, Error> {
+    let mut slots = Vec::new();
+    let mut seen = [false; 300];
+    let mut ended = false;
+    for bytes in image.memory()[0x3c0a7..0x3c2ff].as_chunks::<2>().0 {
+        let slot = usize::from(u16::from_le_bytes(*bytes));
+        if slot == usize::from(u16::MAX) {
+            ended = true;
+        } else if ended || slot >= 300 || seen[slot] {
+            return Err(Error::Invalid(
+                "UR order requires a unique prefix and FFFF suffix",
+            ));
+        } else {
+            seen[slot] = true;
+            slots.push(slot);
+        }
+    }
+    Ok(slots)
+}
+
 fn c_prefix(bytes: &[u8]) -> &[u8] {
     bytes.split(|b| *b == 0).next().unwrap()
 }
@@ -488,6 +511,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn strict_ur_projection_preserves_physical_order_and_rejects_invalid_topology() {
+        let mut image = image();
+        image
+            .patch_memory(&[(0x3c0a7, &[0xff; 600]), (0x3c0a7, &[0x2b, 1, 7, 0])])
+            .unwrap();
+        assert_eq!(ur_physical_slots(&image).unwrap(), [299, 7]);
+        let before = image.memory().to_vec();
+        for bytes in [[0x2b, 1, 0x2b, 1], [0xff, 0xff, 7, 0], [0x2c, 1, 7, 0]] {
+            image.patch_memory(&[(0x3c0a7, &bytes)]).unwrap();
+            let invalid = image.memory().to_vec();
+            assert!(ur_physical_slots(&image).is_err());
+            assert_eq!(image.memory(), invalid);
+        }
+        image
+            .patch_memory(&[(0x3c0a7, &before[0x3c0a7..0x3c2ff])])
+            .unwrap();
+        assert_eq!(ur_physical_slots(&image).unwrap(), [299, 7]);
+    }
     fn image() -> Icf<'static> {
         let mut memory = vec![0xa6; 0x3c9c0];
         memory[0x355a1] = 6;
