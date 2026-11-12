@@ -1,15 +1,4 @@
-#![deny(unsafe_code)]
-
-#[path = "../src/owner.rs"]
-mod owner;
-
-#[path = "../src/callbacks.rs"]
-mod callbacks;
-
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-mod scoped;
-
+use crate::{callbacks, owner, scoped};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -374,10 +363,11 @@ fn detach_and_unwind_restore_without_copyback() {
 
 #[test]
 fn callbacks_preserve_exception_and_collect_holder_cycle() {
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = PyDict::new(py);
-        callbacks::register(&pyo3::types::PyModule::new(py, "checks").unwrap()).unwrap();
+        super::package(py);
         py.run(
             c"class Callable:\n    def __call__(self): return 42\ncallable = Callable()\n",
             None,

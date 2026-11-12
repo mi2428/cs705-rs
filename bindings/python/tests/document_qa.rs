@@ -1,43 +1,7 @@
-#![deny(unsafe_code)]
-
-#[path = "../src/callbacks.rs"]
-pub mod callbacks;
-#[path = "../src/clone/mod.rs"]
-pub mod clone;
-#[path = "../src/conversion.rs"]
-pub mod conversion;
-#[path = "../src/csv/mod.rs"]
-pub mod csv;
-#[path = "../src/diagnostic.rs"]
-pub mod diagnostic;
-#[path = "../src/display/mod.rs"]
-pub mod display;
-#[path = "../src/error_values.rs"]
-pub mod error_values;
-#[path = "../src/errors.rs"]
-pub mod errors;
-#[path = "../src/gps.rs"]
-pub mod gps;
-#[path = "../src/icf/mod.rs"]
-pub mod icf;
-#[path = "../src/owner.rs"]
-pub mod owner;
-#[path = "../src/presentation.rs"]
-pub mod presentation;
-#[path = "../src/printing/mod.rs"]
-pub mod printing;
-#[path = "../src/repeater/mod.rs"]
-pub mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-pub mod scoped;
-
+use crate::{display, errors, icf, scoped};
 use cs705_core::icf::document as core;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
-
-// These embedding tests install canonical module paths in one interpreter.
-static PUBLIC_MODULES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+use pyo3::types::PyDict;
 
 fn ready_document() -> (core::Document, core::Session, Vec<u8>) {
     // Synthetic source fields only; no captured image or application asset.
@@ -96,48 +60,11 @@ fn ready_document() -> (core::Document, core::Session, Vec<u8>) {
 }
 
 fn environment(py: Python<'_>) -> Bound<'_, PyDict> {
-    let root = PyModule::new(py, "cs705").unwrap();
-    errors::register(&root).unwrap();
-    conversion::register(&root).unwrap();
-    icf::register(&root).unwrap();
-    display::register(&root).unwrap();
-    csv::register(&root).unwrap();
-    gps::register(&root).unwrap();
-    repeater::register(&root).unwrap();
-    clone::register(&root).unwrap();
-    presentation::register(&root).unwrap();
-    error_values::register(&root).unwrap();
+    let root = super::package(py);
     let locals = PyDict::new(py);
     let image = root.getattr("icf").unwrap();
     let document = image.getattr("document").unwrap();
     let lifecycle = document.getattr("lifecycle").unwrap();
-    let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-    for (path, module) in [
-        ("cs705", root.clone().into_any()),
-        ("cs705.icf", image.clone()),
-        ("cs705.icf.document", document.clone()),
-        ("cs705.icf.document.lifecycle", lifecycle.clone()),
-        (
-            "cs705.icf.document.options",
-            document.getattr("options").unwrap(),
-        ),
-        (
-            "cs705.icf.document.initial",
-            document.getattr("initial").unwrap(),
-        ),
-        (
-            "cs705.icf.document.native_read",
-            document.getattr("native_read").unwrap(),
-        ),
-        ("cs705.icf.frequency", image.getattr("frequency").unwrap()),
-        ("cs705.clone", root.getattr("clone").unwrap()),
-        (
-            "cs705.csv.control",
-            root.getattr("csv").unwrap().getattr("control").unwrap(),
-        ),
-    ] {
-        modules.set_item(path, module).unwrap();
-    }
     let (doc, session, fields) = ready_document();
     locals
         .set_item("c", root.getattr("clone").unwrap())
@@ -281,7 +208,7 @@ fn shared_document_and_session_views_keep_one_borrow_authority() {
 
 #[test]
 fn document_boundary_contracts() {
-    let _modules = PUBLIC_MODULES.lock().unwrap();
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = environment(py);
@@ -497,7 +424,6 @@ assert weak() is None
 
 #[test]
 fn document_python_signatures_match_stubs() {
-    let _modules = PUBLIC_MODULES.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = environment(py);
@@ -606,10 +532,9 @@ values[0] = 7
 assert view.values[0] != 7
 view.values = (value for value in values)
 assert view.values[0] == 7
-import sys, typing
-sys.modules['cs705._native'] = sys.modules['cs705']
-facade = {'__name__': 'cs705.icf.document.lifecycle', '__package__': 'cs705.icf.document'}
-exec(compile(lifecycle_facade, 'document/lifecycle.py', 'exec'), facade)
+import typing
+ast.parse(lifecycle_facade)
+facade = vars(l)
 assert facade['SaveDialog'] is l.SaveDialog
 assert facade['Placement'] is l.Placement
 assert typing.get_type_hints(facade['Dialogs'].save_as)['return'] == l.SaveSelection | None
@@ -627,7 +552,6 @@ assert typing.get_type_hints(facade['PlacementSource'].placement)['return'] == l
 
 #[test]
 fn document_nested_callbacks_reborrow_scoped_inputs() {
-    let _modules = PUBLIC_MODULES.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = environment(py);
@@ -699,7 +623,6 @@ assert doc.pending_matches(8)
 
 #[test]
 fn document_nested_io_options_and_initial_boundaries_keep_prefixes() {
-    let _modules = PUBLIC_MODULES.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = environment(py);
@@ -823,7 +746,6 @@ options.save(d.CloneOptionButton.Ok, first)
 
 #[test]
 fn mutable_recent_loan_preserves_deduplication_before_callback_failure() {
-    let _modules = PUBLIC_MODULES.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = environment(py);
@@ -868,5 +790,65 @@ assert recent.paths() == [b'B']
                 .unwrap_err()
                 .is_instance_of::<pyo3::exceptions::PyReferenceError>(py)
         );
+    });
+}
+
+#[test]
+fn shared_ui_cycles_clear_without_unraisable_errors() {
+    let _gc = super::GC_TESTS.lock().unwrap();
+    Python::initialize();
+    Python::attach(|py| {
+        let locals = PyDict::new(py);
+        locals
+            .set_item(
+                "l",
+                super::package(py)
+                    .getattr("icf")
+                    .unwrap()
+                    .getattr("document")
+                    .unwrap()
+                    .getattr("lifecycle")
+                    .unwrap(),
+            )
+            .unwrap();
+        py.run(
+            cr#"
+import gc, sys, weakref
+errors = []
+previous = sys.unraisablehook
+sys.unraisablehook = errors.append
+try:
+    def cycle():
+        owner = l.UiState.headless()
+        class Callback:
+            def __init__(self): self.owner = owner
+            def __call__(self, context, descriptor): pass
+        callback = Callback()
+        item = l.MenuItem(l.MenuDescriptor(0, 0, 0, b'', b'', 0, 0, 0),
+                          l.MenuQuery(callback), False, False, False, True, 0, b'')
+        owner.set_menu([item])
+        return owner.share(), owner.menu[0], weakref.ref(callback)
+    for _ in range(3):
+        owner, snapshot, weak = cycle()
+        gc.collect()
+        assert weak() is not None
+        del owner
+        gc.collect()
+        assert weak() is not None
+        query = snapshot.query.clone()
+        del snapshot
+        gc.collect()
+        assert weak() is not None
+        del query
+        gc.collect()
+        assert weak() is None
+finally:
+    sys.unraisablehook = previous
+assert not errors, [type(error.exc_value).__name__ for error in errors]
+"#,
+            Some(&locals),
+            Some(&locals),
+        )
+        .unwrap();
     });
 }

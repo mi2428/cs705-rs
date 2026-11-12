@@ -1,39 +1,6 @@
-#![deny(unsafe_code)]
-
-#[path = "../src/callbacks.rs"]
-pub mod callbacks;
-#[path = "../src/clone/mod.rs"]
-pub mod clone;
-#[path = "../src/conversion.rs"]
-pub mod conversion;
-#[path = "../src/csv/mod.rs"]
-pub mod csv;
-#[path = "../src/diagnostic.rs"]
-pub mod diagnostic;
-#[path = "../src/display/mod.rs"]
-pub mod display;
-#[path = "../src/error_values.rs"]
-pub mod error_values;
-#[path = "../src/errors.rs"]
-pub mod errors;
-#[path = "../src/gps.rs"]
-pub mod gps;
-#[path = "../src/icf/mod.rs"]
-pub mod icf;
-#[path = "../src/owner.rs"]
-pub mod owner;
-#[path = "../src/presentation.rs"]
-pub mod presentation;
-#[path = "../src/printing/mod.rs"]
-pub mod printing;
-#[path = "../src/repeater/mod.rs"]
-pub mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-pub mod scoped;
-
+use crate::{display, error_values, icf, scoped};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyModule};
+use pyo3::types::{PyBytes, PyDict};
 use std::collections::VecDeque;
 
 // A bounded in-memory provider, not an OS port or a production codec oracle.
@@ -113,19 +80,8 @@ impl ProbeTransport {
 }
 
 fn runtime_module(py: Python<'_>) -> Bound<'_, PyDict> {
-    let root = PyModule::new(py, "cs705").unwrap();
-    errors::register(&root).unwrap();
-    conversion::register(&root).unwrap();
-    clone::register(&root).unwrap();
-    let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-    modules.set_item("cs705", &root).unwrap();
+    let root = super::package(py);
     let native = root.getattr("clone").unwrap();
-    modules.set_item("cs705.clone", &native).unwrap();
-    for name in ["search", "information"] {
-        modules
-            .set_item(format!("cs705.clone.{name}"), native.getattr(name).unwrap())
-            .unwrap();
-    }
     let locals = PyDict::new(py);
     locals.set_item("c", native).unwrap();
     locals
@@ -136,6 +92,7 @@ fn runtime_module(py: Python<'_>) -> Bound<'_, PyDict> {
 
 #[test]
 fn runtime_error_metadata_preserves_hostile_exception() {
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
         let locals = PyDict::new(py);
@@ -392,20 +349,7 @@ fn runtime_python_surface_matches_facades_stubs_and_native_signatures() {
     Python::initialize();
     Python::attach(|py| {
         let locals = runtime_module(py);
-        let root = py.import("cs705").unwrap();
-        diagnostic::register(&root).unwrap();
-        let bridge = PyModule::new(py, "cs705._native").unwrap();
-        bridge.add("clone", root.getattr("clone").unwrap()).unwrap();
-        bridge
-            .add("diagnostic", root.getattr("diagnostic").unwrap())
-            .unwrap();
-        py.import("sys")
-            .unwrap()
-            .getattr("modules")
-            .unwrap()
-            .set_item("cs705._native", &bridge)
-            .unwrap();
-        locals.set_item("native", bridge).unwrap();
+        locals.set_item("native", super::native(py)).unwrap();
         locals
             .set_item("IoErrorData", py.get_type::<error_values::IoErrorData>())
             .unwrap();
@@ -439,8 +383,7 @@ fn runtime_python_surface_matches_facades_stubs_and_native_signatures() {
         locals.set_item("facades", facades).unwrap();
         locals.set_item("stubs", stubs).unwrap();
         py.run(
-            c"import ast, enum, inspect, sys, types
-sys.modules['cs705'].__path__ = []
+            c"import ast, enum, importlib, inspect, sys
 native_modules = {
     'cs705.clone': native.clone,
     'cs705.clone.search': native.clone.search,
@@ -448,13 +391,8 @@ native_modules = {
     'cs705.diagnostic': native.diagnostic,
 }
 for name, source in facades.items():
-    module = types.ModuleType(name)
-    parent, _, leaf = name.rpartition('.')
-    module.__package__ = name if name == 'cs705.clone' else parent
-    if name == 'cs705.clone': module.__path__ = []
-    sys.modules[name] = module
-    setattr(sys.modules[parent], leaf, module)
-    exec(compile(source, name, 'exec'), module.__dict__)
+    ast.parse(source)
+    module = importlib.import_module(name)
     for exported in module.__all__:
         if exported in ('Transport', 'search', 'information'): continue
         assert getattr(module, exported) is getattr(native_modules[name], exported)
@@ -573,7 +511,7 @@ def readonly(child):
             invoke("edit")?;
             assert!(outer.with_ref(py, |value| Ok(value.pending_matches(7)))?);
             let error = invoke("fail").unwrap_err();
-            assert!(error.value(py).is(&locals.get_item("primary")?.unwrap()));
+            assert!(error.value(py).is(locals.get_item("primary")?.unwrap()));
             assert!(error.traceback(py).is_some());
             assert!(outer.with_ref(py, |value| Ok(value.pending_matches(8)))?);
             let callback = locals.get_item("readonly")?.unwrap().unbind();

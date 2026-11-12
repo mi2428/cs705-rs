@@ -45,6 +45,22 @@ and rustdoc with warnings rejected. Cargo commands default to
 the installed wheel. Rebuild and reinstall after changing Rust or the facade.
 Do not use `python -O`: these checks use assertions.
 
+The Rust harnesses are unit-test modules linked to the production crate, not
+standalone `--test` targets. They share one actual native initializer and facade
+tree while keeping test values separate. For a focused case, use:
+
+```sh
+PYO3_PYTHON="$PYTHON" cargo test --manifest-path bindings/python/Cargo.toml \
+  --offline --locked --lib tests::runtime_qa::runtime_receiver \
+  --target-dir bindings/python/target
+```
+
+`cargo test --lib` and `cargo test --all-targets` run the same unique unit suite
+with the default parallel test runner; old commands such as
+`cargo test --test runtime_qa` are no longer supported.
+Only tests that explicitly collect cycles or assert weakref liveness share a
+collector lock, acquired before attaching to Python. Other cases remain parallel.
+
 ## API and limits
 
 Import `cs705` and its typed submodules; `Icf` is also available as

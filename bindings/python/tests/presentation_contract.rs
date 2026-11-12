@@ -1,88 +1,12 @@
-#![deny(unsafe_code)]
-#![allow(dead_code)]
-#[path = "../src/callbacks.rs"]
-mod callbacks;
-#[path = "../src/clone/mod.rs"]
-mod clone;
-#[path = "../src/conversion.rs"]
-mod conversion;
-#[path = "../src/csv/mod.rs"]
-mod csv;
-#[path = "../src/diagnostic.rs"]
-mod diagnostic;
-#[path = "../src/display/mod.rs"]
-mod display;
-#[path = "../src/error_values.rs"]
-mod error_values;
-#[path = "../src/errors.rs"]
-mod errors;
-#[path = "../src/gps.rs"]
-mod gps;
-#[path = "../src/icf/mod.rs"]
-mod icf;
-#[path = "../src/item_help.rs"]
-mod item_help;
-#[path = "../src/owner.rs"]
-mod owner;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/printing/mod.rs"]
-mod printing;
-#[path = "../src/repeater/mod.rs"]
-mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-mod scoped;
+use crate::diagnostic;
 use pyo3::prelude::*;
 #[test]
 fn presentation_smoke() {
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
-        let root = pyo3::types::PyModule::new(py, "cs705").unwrap();
-        errors::register(&root).unwrap();
-        icf::register(&root).unwrap();
-        csv::register(&root).unwrap();
-        gps::register(&root).unwrap();
-        repeater::register(&root).unwrap();
-        presentation::register(&root).unwrap();
-        diagnostic::register(&root).unwrap();
-        item_help::register(&root).unwrap();
-        error_values::register(&root).unwrap();
+        let root = super::package(py);
         let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-        modules.set_item("cs705", &root).unwrap();
-        modules.set_item("cs705._native", &root).unwrap();
-        modules
-            .set_item("cs705.icf", root.getattr("icf").unwrap())
-            .unwrap();
-        modules
-            .set_item(
-                "cs705.icf.record",
-                root.getattr("icf").unwrap().getattr("record").unwrap(),
-            )
-            .unwrap();
-        for name in ["presentation", "diagnostic", "item_help"] {
-            modules
-                .set_item(format!("cs705.{name}"), root.getattr(name).unwrap())
-                .unwrap();
-        }
-        for (name, source) in [
-            (
-                "presentation",
-                include_str!("../python/cs705/presentation.py"),
-            ),
-            ("diagnostic", include_str!("../python/cs705/diagnostic.py")),
-            ("item_help", include_str!("../python/cs705/item_help.py")),
-        ] {
-            let module = pyo3::types::PyModule::new(py, &format!("cs705.{name}")).unwrap();
-            module.setattr("__package__", "cs705").unwrap();
-            py.run(
-                &std::ffi::CString::new(source).unwrap(),
-                Some(&module.dict()),
-                Some(&module.dict()),
-            )
-            .unwrap();
-            modules.set_item(format!("cs705.{name}"), &module).unwrap();
-        }
         let locals = pyo3::types::PyDict::new(py);
         locals
             .set_item("icf", root.getattr("icf").unwrap())
@@ -115,36 +39,7 @@ fn presentation_smoke() {
             Some(&locals),
         )
         .unwrap();
-        display::register(&root).unwrap();
-        printing::register(&root).unwrap();
         let settings = root.getattr("icf").unwrap().getattr("settings").unwrap();
-        modules.set_item("cs705.icf.settings", &settings).unwrap();
-        modules
-            .set_item(
-                "cs705.icf.settings.extended",
-                settings.getattr("extended").unwrap(),
-            )
-            .unwrap();
-        for (name, source) in [
-            (
-                "digital",
-                include_str!("../python/cs705/icf/settings/digital.py"),
-            ),
-            ("gps", include_str!("../python/cs705/icf/settings/gps.py")),
-        ] {
-            let module =
-                pyo3::types::PyModule::new(py, &format!("cs705.icf.settings.{name}")).unwrap();
-            module.setattr("__package__", "cs705.icf.settings").unwrap();
-            py.run(
-                &std::ffi::CString::new(source).unwrap(),
-                Some(&module.dict()),
-                Some(&module.dict()),
-            )
-            .unwrap();
-            modules
-                .set_item(format!("cs705.icf.settings.{name}"), &module)
-                .unwrap();
-        }
         let cases = pyo3::types::PyDict::new(py);
         for (name, module, source) in [
             (

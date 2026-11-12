@@ -1,50 +1,11 @@
-#![deny(unsafe_code)]
-#![allow(dead_code)]
-#[path = "../src/callbacks.rs"]
-mod callbacks;
-#[path = "../src/clone/mod.rs"]
-mod clone;
-#[path = "../src/conversion.rs"]
-mod conversion;
-#[path = "../src/csv/mod.rs"]
-mod csv;
-#[path = "../src/diagnostic.rs"]
-mod diagnostic;
-#[path = "../src/display/mod.rs"]
-mod display;
-#[path = "../src/error_values.rs"]
-mod error_values;
-#[path = "../src/errors.rs"]
-mod errors;
-#[path = "../src/gps.rs"]
-mod gps;
-#[path = "../src/icf/mod.rs"]
-mod icf;
-#[path = "../src/owner.rs"]
-mod owner;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/printing/mod.rs"]
-mod printing;
-#[path = "../src/repeater/mod.rs"]
-mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-mod scoped;
+use crate::diagnostic;
 use pyo3::prelude::*;
 #[test]
 fn display_smoke() {
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
-        let root = pyo3::types::PyModule::new(py, "cs705").unwrap();
-        errors::register(&root).unwrap();
-        icf::register(&root).unwrap();
-        display::register(&root).unwrap();
-        let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-        modules.set_item("cs705", &root).unwrap();
-        modules
-            .set_item("cs705.display", root.getattr("display").unwrap())
-            .unwrap();
+        let root = super::package(py);
         let locals = pyo3::types::PyDict::new(py);
         locals
             .set_item("d", root.getattr("display").unwrap())

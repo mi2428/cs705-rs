@@ -1,40 +1,4 @@
-#![deny(unsafe_code)]
-#![allow(dead_code)]
-
-#[path = "../src/callbacks.rs"]
-mod callbacks;
-#[path = "../src/clone/mod.rs"]
-mod clone;
-#[path = "../src/conversion.rs"]
-mod conversion;
-#[path = "../src/csv/mod.rs"]
-mod csv;
-#[path = "../src/diagnostic.rs"]
-mod diagnostic;
-#[path = "../src/display/mod.rs"]
-mod display;
-#[path = "../src/error_values.rs"]
-mod error_values;
-#[path = "../src/errors.rs"]
-mod errors;
-#[path = "../src/gps.rs"]
-mod gps;
-#[path = "../src/icf/mod.rs"]
-mod icf;
-#[path = "../src/item_help.rs"]
-mod item_help;
-#[path = "../src/owner.rs"]
-mod owner;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/printing/mod.rs"]
-mod printing;
-#[path = "../src/repeater/mod.rs"]
-mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-mod scoped;
-
+use crate::{conversion, icf, scoped};
 use pyo3::{prelude::*, types::PyDict};
 
 fn image() -> cs705_core::icf::Icf<'static> {
@@ -45,67 +9,11 @@ fn image() -> cs705_core::icf::Icf<'static> {
 }
 
 fn public_icf(py: Python<'_>) -> Bound<'_, PyModule> {
-    let root = PyModule::new(py, "cs705").unwrap();
-    errors::register(&root).unwrap();
-    conversion::register(&root).unwrap();
-    icf::register(&root).unwrap();
-    let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-    modules.set_item("cs705", &root).unwrap();
-    modules.set_item("cs705._native", &root).unwrap();
-    let icf = root.getattr("icf").unwrap();
-    modules.set_item("cs705.icf", &icf).unwrap();
-    for name in [
-        "context",
-        "record",
-        "record_image",
-        "frequency",
-        "normalizer",
-        "special",
-        "rows",
-    ] {
-        modules
-            .set_item(format!("cs705.icf.{name}"), icf.getattr(name).unwrap())
-            .unwrap();
-    }
-    let rows = icf.getattr("rows").unwrap();
-    let native = rows.getattr("native").unwrap();
-    modules.set_item("cs705.icf.rows.native", &native).unwrap();
-    modules
-        .set_item(
-            "cs705.icf.rows.native.call",
-            native.getattr("call").unwrap(),
-        )
-        .unwrap();
-    modules
-        .set_item("cs705.icf.rows.ur", rows.getattr("ur").unwrap())
-        .unwrap();
-    for (module, name, source) in [
-        (
-            native,
-            "cs705.icf.rows.native",
-            include_str!("../python/cs705/icf/rows/native/__init__.py"),
-        ),
-        (
-            rows.getattr("ur").unwrap(),
-            "cs705.icf.rows",
-            include_str!("../python/cs705/icf/rows/ur.py"),
-        ),
-        (
-            icf.getattr("special").unwrap(),
-            "cs705.icf",
-            include_str!("../python/cs705/icf/special.py"),
-        ),
-    ] {
-        module.setattr("__package__", name).unwrap();
-        let globals = module.cast::<PyModule>().unwrap().dict();
-        py.run(
-            &std::ffi::CString::new(source).unwrap(),
-            Some(&globals),
-            Some(&globals),
-        )
-        .unwrap();
-    }
-    icf.cast_into::<PyModule>().unwrap()
+    super::package(py)
+        .getattr("icf")
+        .unwrap()
+        .cast_into::<PyModule>()
+        .unwrap()
 }
 
 #[test]

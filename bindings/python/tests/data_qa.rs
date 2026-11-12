@@ -1,42 +1,6 @@
-#![deny(unsafe_code)]
-#![allow(dead_code)]
-
-#[path = "../src/callbacks.rs"]
-mod callbacks;
-#[path = "../src/clone/mod.rs"]
-mod clone;
-#[path = "../src/conversion.rs"]
-mod conversion;
-#[path = "../src/csv/mod.rs"]
-mod csv;
-#[path = "../src/diagnostic.rs"]
-mod diagnostic;
-#[allow(unused_imports)]
-#[path = "../src/display/mod.rs"]
-mod display;
-#[path = "../src/error_values.rs"]
-mod error_values;
-#[path = "../src/errors.rs"]
-mod errors;
-#[path = "../src/gps.rs"]
-mod gps;
-#[path = "../src/icf/mod.rs"]
-mod icf;
-#[path = "../src/owner.rs"]
-mod owner;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[allow(unused_imports)]
-#[path = "../src/printing/mod.rs"]
-mod printing;
-#[path = "../src/repeater/mod.rs"]
-mod repeater;
-#[allow(unsafe_code)]
-#[path = "../src/scoped.rs"]
-mod scoped;
-
+use crate::{csv, icf, repeater, scoped};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::PyDict;
 
 #[test]
 fn python_scoped_record_equality_checks_expiration() {
@@ -82,9 +46,7 @@ fn python_scoped_record_equality_checks_expiration() {
 fn python_dialog_equality_accepts_same_owner_projections() {
     Python::initialize();
     Python::attach(|py| {
-        let root = PyModule::new(py, "cs705").unwrap();
-        errors::register(&root).unwrap();
-        csv::register(&root).unwrap();
+        let root = super::package(py);
         let locals = PyDict::new(py);
         locals.set_item("c", root.getattr("csv").unwrap()).unwrap();
         py.run(c"coordinate = c.number.CoordinateDialog.area(bytes(4), bytes(0x396b5), None)\ndialog = c.date_input.DateDialog(coordinate, True)\neffect = c.date_input.Effect(False, None, b'', (0, 0), dialog)\nassert effect.dialog == effect.dialog\nassert effect.dialog.editor == effect.dialog.editor\n", Some(&locals), Some(&locals))
@@ -96,10 +58,7 @@ fn python_dialog_equality_accepts_same_owner_projections() {
 fn python_native_nls_producers_accept_callback_destinations() {
     Python::initialize();
     Python::attach(|py| {
-        let root = PyModule::new(py, "cs705").unwrap();
-        errors::register(&root).unwrap();
-        conversion::register(&root).unwrap();
-        csv::register(&root).unwrap();
+        let root = super::package(py);
         let locals = PyDict::new(py);
         locals.set_item("c", root.getattr("csv").unwrap()).unwrap();
         locals
@@ -159,34 +118,10 @@ fn owned_cell_cursor_preserves_every_boundary() {
 
 #[test]
 fn python_data_boundaries_and_callback_prefixes() {
+    let _gc = super::GC_TESTS.lock().unwrap();
     Python::initialize();
     Python::attach(|py| {
-        let root = PyModule::new(py, "cs705").unwrap();
-        errors::register(&root).unwrap();
-        conversion::register(&root).unwrap();
-        callbacks::register(&root).unwrap();
-        icf::register(&root).unwrap();
-        csv::register(&root).unwrap();
-        gps::register(&root).unwrap();
-        repeater::register(&root).unwrap();
-        presentation::register(&root).unwrap();
-        error_values::register(&root).unwrap();
-        root.add("Icf", root.getattr("icf").unwrap().getattr("Icf").unwrap())
-            .unwrap();
-        let modules = py.import("sys").unwrap().getattr("modules").unwrap();
-        fn install(module: &Bound<'_, PyModule>, modules: &Bound<'_, PyAny>, path: &str) {
-            modules.set_item(path, module).unwrap();
-            for (key, value) in module.dict().iter() {
-                if let Ok(child) = value.cast::<PyModule>() {
-                    install(
-                        child,
-                        modules,
-                        &format!("{path}.{}", key.extract::<String>().unwrap()),
-                    );
-                }
-            }
-        }
-        install(&root, &modules, "cs705");
+        let root = super::package(py);
         let locals = PyDict::new(py);
         locals.set_item("c", root.getattr("csv").unwrap()).unwrap();
         locals.set_item("g", root.getattr("gps").unwrap()).unwrap();
