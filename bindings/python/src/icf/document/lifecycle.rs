@@ -17,18 +17,12 @@ pub struct SaveOptions {
     pub reset: Option<Py<crate::icf::normalizer::ResetState>>,
 }
 impl SaveOptions {
-    fn parts(
-        py: Python<'_>,
-        options: &Py<Self>,
-    ) -> PyResult<(
-        Option<Vec<cs705_core::icf::document::ValidationView>>,
-        Option<Py<crate::icf::normalizer::ResetState>>,
-    )> {
+    fn snapshot(py: Python<'_>, options: &Py<Self>) -> PyResult<Self> {
         let options = options.try_borrow(py)?;
-        Ok((
-            options.validation.get().values(py)?,
-            options.reset.as_ref().map(|r| r.clone_ref(py)),
-        ))
+        Ok(Self {
+            validation: options.validation.clone_ref(py),
+            reset: options.reset.as_ref().map(|r| r.clone_ref(py)),
+        })
     }
 }
 #[pymethods]
@@ -86,20 +80,17 @@ impl Lifecycle {
         + Send,
     ) -> PyResult<R> {
         let (recent, ui) = Self::parts(slf)?;
-        let mut recent = recent.get().target.take()?;
-        let mut ui = ui.get().owner.take()?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        Ok(py.detach(move || {
-            call(
-                &mut core::Lifecycle {
-                    recent: &mut *recent,
-                    ui: &mut *ui,
-                },
-                &mut document,
-                &mut session,
-            )
-        }))
+        recent.get().with_mut(|recent| {
+            ui.get().with_mut(|ui| {
+                document.with_mut(|document| {
+                    session.with_mut(|session| {
+                        Ok(py.detach(move || {
+                            call(&mut core::Lifecycle { recent, ui }, document, session)
+                        }))
+                    })
+                })
+            })
+        })
     }
     fn finish_prompt(
         py: Python<'_>,
@@ -149,6 +140,10 @@ impl Lifecycle {
     fn set_ui(&mut self, ui: Py<super::ui::UiState>) {
         self.ui = Some(ui);
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Native Save keeps document/session owners and dialog, file, comparison sources explicit."
+    )]
     fn save(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -167,8 +162,9 @@ impl Lifecycle {
         } else {
             core::SaveMode::SaveAs
         };
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let (failures, result) = Self::run(
             slf,
             py,
@@ -211,6 +207,10 @@ impl Lifecycle {
                 .and_then(|r| Py::new(py, super::reports::SaveFlow::from_core(py, r)?)),
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The dirty gate forwards separate native save sources without an implicit publisher."
+    )]
     fn dirty_prompt(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -222,8 +222,9 @@ impl Lifecycle {
         compare: Py<PyAny>,
     ) -> PyResult<Py<super::reports::DirtyPrompt>> {
         let interpreter = crate::scoped::interpreter(py)?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let (failures, result) = Self::run(
             slf,
             py,
@@ -265,6 +266,10 @@ impl Lifecycle {
                 .and_then(|r| Py::new(py, super::reports::DirtyPrompt::from_core(py, r)?)),
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "New forwards the independent pending-save sources before replacing current."
+    )]
     fn new_file(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -276,8 +281,9 @@ impl Lifecycle {
         compare: Py<PyAny>,
     ) -> PyResult<Py<super::reports::DirtyPrompt>> {
         let interpreter = crate::scoped::interpreter(py)?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let (failures, result) = Self::run(
             slf,
             py,
@@ -319,6 +325,10 @@ impl Lifecycle {
                 .and_then(|r| Py::new(py, super::reports::DirtyPrompt::from_core(py, r)?)),
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Close preserves the mutable gate and independently fallible save and placement sources."
+    )]
     fn close_query(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -332,8 +342,9 @@ impl Lifecycle {
         placement: Py<PyAny>,
     ) -> PyResult<Option<Py<super::reports::DirtyPrompt>>> {
         let interpreter = crate::scoped::interpreter(py)?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let mut incoming = incoming.take()?;
         let (failures, result) = Self::run(
             slf,
@@ -376,6 +387,10 @@ impl Lifecycle {
         )?;
         Self::finish_prompt(py, failures, result)
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Close forwards the native gate, publication protocols, and placement producer unchanged."
+    )]
     fn close(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -389,8 +404,9 @@ impl Lifecycle {
         placement: Py<PyAny>,
     ) -> PyResult<Option<Py<super::reports::DirtyPrompt>>> {
         let interpreter = crate::scoped::interpreter(py)?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let mut incoming = incoming.take()?;
         let (failures, result) = Self::run(
             slf,
@@ -434,6 +450,10 @@ impl Lifecycle {
         Self::finish_prompt(py, failures, result)
     }
     #[pyo3(signature = (document, session, path, profile_choice, defaults, options, dialogs, files, compare))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Open keeps path, profile decision, default assets, and pending-save protocols independent."
+    )]
     fn open(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -453,8 +473,9 @@ impl Lifecycle {
         let defaults = defaults
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let (failures, result) = Self::run(
             slf,
             py,
@@ -499,6 +520,10 @@ impl Lifecycle {
         super::reports::finish_report(py, failures, result)
     }
     #[pyo3(signature = (document, session, index, profile_choice, defaults, options, dialogs, files, compare))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "MRU Open forwards the same native profile, asset, and pending-save sources."
+    )]
     fn open_recent(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -518,8 +543,9 @@ impl Lifecycle {
         let defaults = defaults
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
-        let (views, reset_owner) = SaveOptions::parts(py, &options)?;
-        let mut reset = reset_owner.as_ref().map(|r| r.get().take()).transpose()?;
+        let options = SaveOptions::snapshot(py, &options)?;
+        let views = options.validation.get().values(py)?;
+        let mut reset = options.reset.as_ref().map(|r| r.get().take()).transpose()?;
         let (failures, result) = Self::run(
             slf,
             py,
@@ -570,20 +596,7 @@ impl Lifecycle {
         session: &super::Session,
     ) -> PyResult<()> {
         let (recent, ui) = Self::parts(slf)?;
-        let mut recent = recent.get().target.take()?;
-        let mut ui = ui.get().owner.take()?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = CallbackError::scoped(py, || {
-            py.detach(move || {
-                core::Lifecycle {
-                    recent: &mut *recent,
-                    ui: &mut *ui,
-                }
-                .sync02(&mut document, &mut session)
-            })
-        })?;
-        failures.finish(py, result.map_err(errors::icf))
+        ui.get().sync02(py, document, session, recent.get())
     }
     fn initial_boundary(
         slf: &Bound<'_, Self>,
@@ -593,23 +606,25 @@ impl Lifecycle {
         session: &super::Session,
     ) -> PyResult<()> {
         let boundary = boundary.inner;
-        let (recent, ui) = Self::parts(slf)?;
-        let mut recent = recent.get().target.take()?;
-        let mut ui = ui.get().owner.take()?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = CallbackError::scoped(py, || {
-            py.detach(move || {
-                core::Lifecycle {
-                    recent: &mut *recent,
-                    ui: &mut *ui,
-                }
-                .initial_boundary(boundary, &mut document, &mut session)
-            })
-        })?;
-        failures.finish(py, result.map_err(errors::icf))
+        if boundary == cs705_core::icf::document::InitialBoundary::Sync(2) {
+            return Self::sync02(slf, py, document, session);
+        }
+        let (_, ui) = Self::parts(slf)?;
+        ui.get()
+            .with_mut(|ui| {
+                document.with_mut(|document| {
+                    session.with_mut(|session| {
+                        Ok(py.detach(|| ui.initial_boundary(boundary, document, session)))
+                    })
+                })
+            })?
+            .map_err(errors::icf)
     }
     #[pyo3(signature = (document, session, prompt, file, profile_choice, defaults, compare))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The completed prompt and acquired file/default assets are distinct native inputs."
+    )]
     fn open_after_prompt(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
@@ -636,32 +651,29 @@ impl Lifecycle {
         let defaults = defaults
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
-        let (recent, ui) = Self::parts(slf)?;
-        let mut recent = recent.get().target.take()?;
-        let mut ui = ui.get().owner.take()?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = py.detach(move || {
-            let failures = RefCell::new(CallbackError::default());
-            let result = core::Lifecycle {
-                recent: &mut *recent,
-                ui: &mut *ui,
-            }
-            .open_after_prompt(
-                &mut document,
-                &mut session,
-                prompt,
-                file,
-                profile_choice,
-                defaults.as_ref().map(super::values::DefaultSource::as_core),
-                &mut Protocol {
-                    object: compare,
-                    errors: &failures,
-                    interpreter,
-                },
-            );
-            (failures.into_inner(), result)
-        });
+        let (failures, result) = Self::run(
+            slf,
+            py,
+            document,
+            session,
+            move |life, document, session| {
+                let failures = RefCell::new(CallbackError::default());
+                let result = life.open_after_prompt(
+                    document,
+                    session,
+                    prompt,
+                    file,
+                    profile_choice,
+                    defaults.as_ref().map(super::values::DefaultSource::as_core),
+                    &mut Protocol {
+                        object: compare,
+                        errors: &failures,
+                        interpreter,
+                    },
+                );
+                (failures.into_inner(), result)
+            },
+        )?;
         let result = failures.finish(py, result.map_err(file_error))?;
         Ok((
             super::reports::DirtyPrompt::from_core(py, result.0)?,
@@ -725,19 +737,20 @@ impl RecentFiles {
     fn insert(&self, py: Python<'_>, path: &Bound<'_, PyAny>, compare: Py<PyAny>) -> PyResult<()> {
         let interpreter = crate::scoped::interpreter(py)?;
         let path = strict_bytes(path)?.to_vec();
-        let mut recent = self.target.take()?;
-        let (errors, result) = py.detach(move || {
-            let errors = RefCell::new(CallbackError::default());
-            let result = recent.insert(
-                path,
-                &mut Protocol {
-                    object: compare,
-                    errors: &errors,
-                    interpreter,
-                },
-            );
-            (errors.into_inner(), result)
-        });
+        let (errors, result) = self.with_mut(|recent| {
+            Ok(py.detach(move || {
+                let errors = RefCell::new(CallbackError::default());
+                let result = recent.insert(
+                    path,
+                    &mut Protocol {
+                        object: compare,
+                        errors: &errors,
+                        interpreter,
+                    },
+                );
+                (errors.into_inner(), result)
+            }))
+        })?;
         errors.finish(py, result.map_err(errors::icf))
     }
     #[staticmethod]
@@ -763,16 +776,17 @@ impl RecentFiles {
     }
     fn persist(&self, py: Python<'_>, store: Py<PyAny>) -> PyResult<()> {
         let interpreter = crate::scoped::interpreter(py)?;
-        let recent = self.target.take()?;
-        let (errors, result) = py.detach(move || {
-            let errors = RefCell::new(CallbackError::default());
-            let result = recent.persist(&mut Protocol {
-                object: store,
-                errors: &errors,
-                interpreter,
-            });
-            (errors.into_inner(), result)
-        });
+        let (errors, result) = self.with_ref(|recent| {
+            Ok(py.detach(move || {
+                let errors = RefCell::new(CallbackError::default());
+                let result = recent.persist(&mut Protocol {
+                    object: store,
+                    errors: &errors,
+                    interpreter,
+                });
+                (errors.into_inner(), result)
+            }))
+        })?;
         errors.finish(py, result.map_err(PyErr::from))
     }
 }

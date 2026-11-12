@@ -79,6 +79,8 @@ impl InitialState {
         })
     }
 }
+/// Live optional saved-context field. values returns a list copy; assign values
+/// to replace all twelve fields. Access fails while the parent field is absent.
 #[pyclass(frozen, module = "cs705.icf.document.initial")]
 pub struct InitialContext {
     target: super::Target<core::InitialState>,

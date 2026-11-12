@@ -9,6 +9,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use pyo3::{PyTraverseError, PyVisit};
 
+/// Opaque reader result plus normalization report. reader_called distinguishes
+/// a skipped reader from an invoked reader that returned None.
 #[pyclass(module = "cs705.icf.document")]
 pub struct ImportResult {
     #[pyo3(get)]
@@ -194,6 +196,8 @@ impl ActionEffects {
     }
 }
 
+/// Owned raw generation inputs, not a completed G image. Source selection is
+/// explicit; optional mode-pair and band-stack inputs require 120 and 108 bytes.
 #[pyclass(module = "cs705.icf.document")]
 #[derive(Clone)]
 pub struct DefaultSource {

@@ -84,6 +84,8 @@ impl CloneOptions {
     fn mask(&self) -> PyResult<u8> {
         self.with_ref(|v| Ok(v.mask()))
     }
+    /// Each getter receives a mutable options loan that expires on callback return.
+    /// A getter exception retains earlier option changes and stops later getters.
     fn save(&self, py: Python<'_>, button: &Bound<'_, PyAny>, getter: Py<PyAny>) -> PyResult<bool> {
         let interpreter = crate::scoped::interpreter(py)?;
         let button = match enum_in(button, "cs705.icf.document.options", "CloneOptionButton")? {
@@ -91,22 +93,23 @@ impl CloneOptions {
             1 => core::CloneOptionButton::Cancel,
             _ => core::CloneOptionButton::FormEvent,
         };
-        let mut options = self.target.take()?;
-        let (errors, result) = py.detach(move || {
-            let mut errors = CallbackError::default();
-            let result = options.save(button, |index, state| {
-                let result = super::adapters::attach_checked(interpreter, |py| {
-                    Frame::with_mut(py, state, |loan| {
-                        let view = Py::new(py, Self::from_loan(loan))?;
-                        strict_u32(&getter.bind(py).call1((index, view))?)
+        let (errors, result) = self.with_mut(|options| {
+            Ok(py.detach(move || {
+                let mut errors = CallbackError::default();
+                let result = options.save(button, |index, state| {
+                    let result = super::adapters::attach_checked(interpreter, |py| {
+                        Frame::with_mut(py, state, |loan| {
+                            let view = Py::new(py, Self::from_loan(loan))?;
+                            strict_u32(&getter.bind(py).call1((index, view))?)
+                        })
+                    });
+                    errors.capture(result).map_err(|_| {
+                        cs705_core::icf::Error::Operation("Python option getter failed".into())
                     })
                 });
-                errors.capture(result).map_err(|_| {
-                    cs705_core::icf::Error::Operation("Python option getter failed".into())
-                })
-            });
-            (errors, result)
-        });
+                (errors, result)
+            }))
+        })?;
         errors.finish(py, result.map_err(errors::icf))
     }
 }

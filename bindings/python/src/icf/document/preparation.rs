@@ -48,9 +48,11 @@ impl ClonePreparation {
     ) -> PyResult<()> {
         let mut reset = reset.get().take()?;
         let mut preparation = self.target.take()?;
-        let mut document = document.take()?;
-        let session = session.take()?;
-        let result = py.detach(move || preparation.prepare(&mut document, &session, &mut reset));
+        let result = document.with_mut(|document| {
+            session.with_ref(|session| {
+                Ok(py.detach(move || preparation.prepare(document, session, &mut reset)))
+            })
+        })?;
         result.map_err(errors::icf)
     }
     #[getter]

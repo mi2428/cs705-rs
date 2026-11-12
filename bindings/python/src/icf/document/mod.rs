@@ -19,7 +19,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
 use std::sync::Arc;
 
-/// Scoped closures perform native work only and must not invoke Python again.
+/// Keep each checked reservation for the complete native call. Native callbacks
+/// may reborrow only their supplied references into fresh Frames; resolving old
+/// loans to bypass an active reservation is forbidden.
 pub enum Target<T: 'static> {
     Owned(Arc<Owner<T>>),
     Scoped(crate::scoped::Loan<T>),
@@ -58,6 +60,9 @@ impl<T: 'static> Target<T> {
     }
 }
 
+/// Shared live document state; share() aliases the same borrow authority.
+/// Byte getters and current_icf() return independent copies. Paths and comments
+/// are opaque bytes. Callback failures preserve earlier live writes.
 #[pyclass(frozen, module = "cs705.icf.document")]
 #[derive(Clone)]
 pub struct Document {
@@ -99,9 +104,12 @@ impl Document {
             strict_u32(target_revision)?,
         )))
     }
+    /// Alias this owner or callback loan without copying its native state.
     fn share(&self) -> Self {
         self.clone()
     }
+    /// Supply scoped mutable document/context loans, then run the native edit tail.
+    /// A raised callback exception retains its writes and skips timer/dirty updates.
     fn finish_action(
         &self,
         py: Python<'_>,
@@ -113,30 +121,38 @@ impl Document {
         let interpreter = crate::scoped::interpreter(py)?;
         let notify = strict_bool(notify)?;
         let flags = strict_u32(flags)?;
-        let mut document = self.target.take()?;
-        let mut context = context.target.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = crate::callbacks::CallbackError::default();
-            let result =
-                document.finish_action(&mut context, notify, flags, |document, context, flags| {
-                    let result = adapters::attach_checked(interpreter, |py| {
-                        crate::scoped::Frame::with_mut(py, document, |document| {
-                            crate::scoped::Frame::with_mut(py, context, |context| {
-                                let document = Py::new(py, Self::from_loan(document))?;
-                                let context =
-                                    Py::new(py, values::ActionContext::from_loan(context))?;
-                                adapters::require_none(
-                                    callback.bind(py).call1((document, context, flags))?,
+        let (failures, result) = self.with_mut(|document| {
+            context.with_mut(|context| {
+                Ok(py.detach(move || {
+                    let mut failures = crate::callbacks::CallbackError::default();
+                    let result = document.finish_action(
+                        context,
+                        notify,
+                        flags,
+                        |document, context, flags| {
+                            let result = adapters::attach_checked(interpreter, |py| {
+                                crate::scoped::Frame::with_mut(py, document, |document| {
+                                    crate::scoped::Frame::with_mut(py, context, |context| {
+                                        let document = Py::new(py, Self::from_loan(document))?;
+                                        let context =
+                                            Py::new(py, values::ActionContext::from_loan(context))?;
+                                        adapters::require_none(
+                                            callback.bind(py).call1((document, context, flags))?,
+                                        )
+                                    })
+                                })
+                            });
+                            failures.capture(result).map_err(|_| {
+                                cs705_core::icf::Error::Operation(
+                                    "Python document action failed".into(),
                                 )
                             })
-                        })
-                    });
-                    failures.capture(result).map_err(|_| {
-                        cs705_core::icf::Error::Operation("Python document action failed".into())
-                    })
-                });
-            (failures, result)
-        });
+                        },
+                    );
+                    (failures, result)
+                }))
+            })
+        })?;
         failures.finish(
             py,
             result
@@ -162,6 +178,8 @@ impl Document {
     fn extra_data(&self) -> PyResult<u32> {
         self.with_ref(|d| Ok(d.extra_data()))
     }
+    /// Copy the storage prefix and metadata into an independent editable Icf.
+    /// Editing the result does not update this document or its working tail.
     fn current_icf(&self) -> PyResult<crate::icf::Icf> {
         self.with_ref(|d| {
             Ok(d.current_icf()
@@ -181,10 +199,11 @@ impl Document {
             .map_err(errors::icf)
     }
     fn normalize(&self, py: Python<'_>, session: &Session) -> PyResult<crate::icf::stage9::Report> {
-        let mut document = self.target.take()?;
-        let session = session.target.take()?;
-        let result = py
-            .detach(move || document.normalize(&session))
+        // Native-only work may use a callback loan; no Python runs under its reborrow.
+        let result = self
+            .with_mut(|document| {
+                session.with_ref(|session| Ok(py.detach(|| document.normalize(session))))
+            })?
             .map_err(errors::icf)?;
         crate::icf::stage9::Report::from_core(py, result)
     }
@@ -195,11 +214,16 @@ impl Document {
         state: Py<crate::icf::normalizer::ResetState>,
     ) -> PyResult<reports::ResetEffects> {
         let mut state = state.get().take()?;
-        let mut document = self.take()?;
-        let session = session.take()?;
-        let result = py.detach(move || document.reset_operating_state(&session, &mut state));
+        let result = self.with_mut(|document| {
+            session.with_ref(|session| {
+                Ok(py.detach(|| document.reset_operating_state(session, &mut state)))
+            })
+        })?;
         reports::ResetEffects::from_core(py, result.map_err(errors::icf)?)
     }
+    /// Run the reader with a mutable document loan when the native gate permits it.
+    /// Reader exceptions preserve writes and skip normalization; ordinary inner
+    /// cancellation still normalizes. File cancellation does neither.
     fn import_csv(
         &self,
         py: Python<'_>,
@@ -214,23 +238,27 @@ impl Document {
             ImportGate::InnerCancelled {} => cs705_core::csv::control::ImportGate::InnerCancelled,
             ImportGate::Header { status } => cs705_core::csv::control::ImportGate::Header(status.0),
         };
-        let mut document = self.take()?;
-        let session = session.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = crate::callbacks::CallbackError::default();
-            let result = document.import_csv(&session, gate, |document| {
-                let result = adapters::attach_checked(interpreter, |py| {
-                    crate::scoped::Frame::with_mut(py, document, |document| {
-                        let document = Py::new(py, Self::from_loan(document))?;
-                        Ok(reader.bind(py).call1((document,))?.unbind())
-                    })
-                });
-                failures.capture(result).map_err(|_| {
-                    cs705_core::icf::Error::Operation("Python document CSV reader failed".into())
-                })
-            });
-            (failures, result)
-        });
+        let (failures, result) = self.with_mut(|document| {
+            session.with_ref(|session| {
+                Ok(py.detach(move || {
+                    let mut failures = crate::callbacks::CallbackError::default();
+                    let result = document.import_csv(session, gate, |document| {
+                        let result = adapters::attach_checked(interpreter, |py| {
+                            crate::scoped::Frame::with_mut(py, document, |document| {
+                                let document = Py::new(py, Self::from_loan(document))?;
+                                Ok(reader.bind(py).call1((document,))?.unbind())
+                            })
+                        });
+                        failures.capture(result).map_err(|_| {
+                            cs705_core::icf::Error::Operation(
+                                "Python document CSV reader failed".into(),
+                            )
+                        })
+                    });
+                    (failures, result)
+                }))
+            })
+        })?;
         let (reader_result, report) = failures.finish(py, result.map_err(errors::icf))?;
         Ok(values::ImportResult {
             reader_called: reader_result.is_some(),
@@ -256,28 +284,30 @@ impl Document {
         let source = source
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
-        let mut document = self.target.take()?;
-        let mut session = session.target.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = crate::callbacks::CallbackError::default();
-            let result = document.initial_from_icf(
-                &bytes,
-                &path,
-                &mut session,
-                source.as_ref().map(values::DefaultSource::as_core),
-                |event, document, session| {
-                    initial::invoke_boundary(
-                        &boundary,
-                        &mut failures,
-                        event,
-                        document,
+        let (failures, result) = self.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(move || {
+                    let mut failures = crate::callbacks::CallbackError::default();
+                    let result = document.initial_from_icf(
+                        &bytes,
+                        &path,
                         session,
-                        interpreter,
-                    )
-                },
-            );
-            (failures, result)
-        });
+                        source.as_ref().map(values::DefaultSource::as_core),
+                        |event, document, session| {
+                            initial::invoke_boundary(
+                                &boundary,
+                                &mut failures,
+                                event,
+                                document,
+                                session,
+                                interpreter,
+                            )
+                        },
+                    );
+                    (failures, result)
+                }))
+            })
+        })?;
         failures.finish(
             py,
             result
@@ -286,6 +316,10 @@ impl Document {
         )
     }
     #[pyo3(signature = (session, state, identity, request, source, boundary))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Identity, initial request, default source, and live receiver are independent native inputs."
+    )]
     fn receive_initial_identity(
         &self,
         py: Python<'_>,
@@ -302,33 +336,40 @@ impl Document {
         let source = source
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
-        let mut document = self.target.take()?;
-        let mut session = session.target.take()?;
-        let mut state = state.target.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = crate::callbacks::CallbackError::default();
-            let result = document.receive_initial_identity(
-                &mut session,
-                &mut state,
-                &identity,
-                request,
-                source.as_ref().map(values::DefaultSource::as_core),
-                |event, document, session| {
-                    initial::invoke_boundary(
-                        &boundary,
-                        &mut failures,
-                        event,
-                        document,
-                        session,
-                        interpreter,
-                    )
-                },
-            );
-            (failures, result)
-        });
+        let (failures, result) = self.with_mut(|document| {
+            session.with_mut(|session| {
+                state.with_mut(|state| {
+                    Ok(py.detach(move || {
+                        let mut failures = crate::callbacks::CallbackError::default();
+                        let result = document.receive_initial_identity(
+                            session,
+                            state,
+                            &identity,
+                            request,
+                            source.as_ref().map(values::DefaultSource::as_core),
+                            |event, document, session| {
+                                initial::invoke_boundary(
+                                    &boundary,
+                                    &mut failures,
+                                    event,
+                                    document,
+                                    session,
+                                    interpreter,
+                                )
+                            },
+                        );
+                        (failures, result)
+                    }))
+                })
+            })
+        })?;
         failures.finish(py, result.map_err(errors::icf))
     }
     #[pyo3(signature = (session, initial_state, selector, outcome, source, validation, boundary))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The native receive callback retains distinct initial state, outcome proof, assets, and validation sources."
+    )]
     fn receive_clone_read(
         &self,
         py: Python<'_>,
@@ -348,23 +389,32 @@ impl Document {
             .map(|s| Ok::<_, PyErr>(s.try_borrow(py)?.clone()))
             .transpose()?;
         let validation = validation.values(py)?;
-        let mut document = self.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = crate::callbacks::CallbackError::default();
-            let result = document.receive_clone_read(
-                &mut session,
-                &initial_state,
-                selector,
-                &outcome,
-                source.as_ref().map(values::DefaultSource::as_core),
-                values::validation(&validation),
-                |event, d, s| {
-                    initial::invoke_boundary(&boundary, &mut failures, event, d, s, interpreter)
-                },
-            );
-            (failures, result)
-        });
+        let (failures, result) = self.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(move || {
+                    let mut failures = crate::callbacks::CallbackError::default();
+                    let result = document.receive_clone_read(
+                        session,
+                        &initial_state,
+                        selector,
+                        &outcome,
+                        source.as_ref().map(values::DefaultSource::as_core),
+                        values::validation(&validation),
+                        |event, d, s| {
+                            initial::invoke_boundary(
+                                &boundary,
+                                &mut failures,
+                                event,
+                                d,
+                                s,
+                                interpreter,
+                            )
+                        },
+                    );
+                    (failures, result)
+                }))
+            })
+        })?;
         failures.finish(
             py,
             result
@@ -400,6 +450,10 @@ impl Document {
         .map_err(errors::icf)
     }
     #[pyo3(signature = (source, path, prompt_result, profile_choice, session, default_source))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "File bytes, path, prompt/profile decisions, and default assets are separate native inputs."
+    )]
     fn read(
         &self,
         py: Python<'_>,
@@ -415,21 +469,26 @@ impl Document {
         let prompt_result = strict_i32(prompt_result)?;
         let profile_choice = profile_choice.map(strict_i32).transpose()?;
         let default_source = default_source.cloned();
-        let mut document = self.target.take()?;
-        let mut session = session.target.take()?;
-        py.detach(move || {
-            document.read(
-                source.as_deref(),
-                path,
-                prompt_result,
-                profile_choice,
-                &mut session,
-                default_source.as_ref().map(values::DefaultSource::as_core),
-            )
-        })
+        self.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(|| {
+                    document.read(
+                        source.as_deref(),
+                        path,
+                        prompt_result,
+                        profile_choice,
+                        session,
+                        default_source.as_ref().map(values::DefaultSource::as_core),
+                    )
+                }))
+            })
+        })?
         .map(|inner| values::OpenStatus { inner })
         .map_err(errors::icf)
     }
+    /// Normalize live current before writing; commit baseline/path only on success.
+    /// Output callbacks see ordinary aliases as busy. Earlier normalization and
+    /// partial output survive failure. The supplied output is not flushed or closed.
     fn save(
         &self,
         py: Python<'_>,
@@ -443,23 +502,26 @@ impl Document {
         let path = strict_bytes(path)?.to_vec();
         let target = strict_u32(target_revision)?;
         let legacy = strict_i32(legacy_choice)?;
-        let mut document = self.target.take()?;
-        let mut session = session.target.take()?;
-        let (failures, result) = py.detach(move || {
-            let failures = std::cell::RefCell::new(crate::callbacks::CallbackError::default());
-            let result = document.save(
-                &mut session,
-                path,
-                target,
-                legacy,
-                &mut adapters::BinaryWriter {
-                    object: output,
-                    errors: &failures,
-                    interpreter,
-                },
-            );
-            (failures.into_inner(), result)
-        });
+        let (failures, result) = self.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(move || {
+                    let failures =
+                        std::cell::RefCell::new(crate::callbacks::CallbackError::default());
+                    let result = document.save(
+                        session,
+                        path,
+                        target,
+                        legacy,
+                        &mut adapters::BinaryWriter {
+                            object: output,
+                            errors: &failures,
+                            interpreter,
+                        },
+                    );
+                    (failures.into_inner(), result)
+                }))
+            })
+        })?;
         let status = failures.finish(py, result.map_err(adapters::file_error))?;
         Ok(values::enum_out(
             py,
@@ -494,28 +556,31 @@ impl Document {
             )
         };
         let mut state = state.as_ref().map(|s| s.get().take()).transpose()?;
-        let mut document = self.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = py.detach(move || {
-            let failures = std::cell::RefCell::new(crate::callbacks::CallbackError::default());
-            let result = document.save_with_validation(
-                &mut session,
-                core::SaveRequest {
-                    path,
-                    target_revision,
-                    legacy_choice,
-                    warning_choice,
-                    validation: values::validation(&views),
-                },
-                state.as_deref_mut(),
-                &mut adapters::BinaryWriter {
-                    object: output,
-                    errors: &failures,
-                    interpreter,
-                },
-            );
-            (failures.into_inner(), result)
-        });
+        let (failures, result) = self.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(move || {
+                    let failures =
+                        std::cell::RefCell::new(crate::callbacks::CallbackError::default());
+                    let result = document.save_with_validation(
+                        session,
+                        core::SaveRequest {
+                            path,
+                            target_revision,
+                            legacy_choice,
+                            warning_choice,
+                            validation: values::validation(&views),
+                        },
+                        state.as_deref_mut(),
+                        &mut adapters::BinaryWriter {
+                            object: output,
+                            errors: &failures,
+                            interpreter,
+                        },
+                    );
+                    (failures.into_inner(), result)
+                }))
+            })
+        })?;
         let report = failures.finish(py, result.map_err(adapters::file_error))?;
         reports::SaveReport::from_core(py, report)
     }
@@ -626,6 +691,9 @@ impl Document {
     }
 }
 
+/// Shared Q/B/G owner, distinct from clone.Session's consuming transfer engine.
+/// context and ranges are live field views. Editing Q does not regenerate B/G;
+/// use regenerate_defaults with an explicit matching source when required.
 #[pyclass(frozen, module = "cs705.icf.document")]
 #[derive(Clone)]
 pub struct Session {
@@ -696,6 +764,9 @@ impl Session {
             Ok(())
         })
     }
+    /// Regenerate B/G from explicit source bytes against the supplied current image.
+    /// After source selection succeeds, readiness is cleared before B/G updates.
+    /// Later failure retains its mutation prefix without restoring readiness.
     fn regenerate_defaults(
         &self,
         py: Python<'_>,
@@ -704,9 +775,10 @@ impl Session {
     ) -> PyResult<crate::icf::stage9::Report> {
         let source = source.clone();
         let current = strict_bytes(current)?.to_vec();
-        let mut session = self.target.take()?;
-        let report = py
-            .detach(move || session.regenerate_defaults(source.as_core(), &current))
+        let report = self
+            .with_mut(|session| {
+                Ok(py.detach(|| session.regenerate_defaults(source.as_core(), &current)))
+            })?
             .map_err(errors::icf)?;
         crate::icf::stage9::Report::from_core(py, report)
     }

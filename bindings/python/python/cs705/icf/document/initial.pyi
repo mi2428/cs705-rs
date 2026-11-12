@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from cs705.clone import Identity, ContextFields
 from . import Session
 
@@ -16,7 +17,11 @@ class InitialState:
     @saved_context.setter
     def saved_context(self, value: ContextFields | None) -> None: ...
 class InitialContext:
-    values: list[int]
+    """Live saved-context field; values returns a list copy, not a mutable loan."""
+    @property
+    def values(self) -> list[int]: ...
+    @values.setter
+    def values(self, value: Iterable[int]) -> None: ...
     def snapshot(self) -> ContextFields: ...
 class InitialBoundary:
     Reconfigure: InitialBoundary

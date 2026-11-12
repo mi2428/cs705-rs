@@ -198,6 +198,8 @@ impl CloneReadStep {
             .transpose()
     }
 }
+/// Native read controller yielding separate consuming clone.Session engines.
+/// Phase transitions and completed prefixes are not rolled back after errors.
 #[pyclass(frozen, module = "cs705.icf.document.native_read")]
 pub struct CloneRead {
     pub target: Target<core::CloneRead>,
@@ -226,13 +228,14 @@ impl CloneRead {
         let reply = reply.to_core()?;
         let controls = controls.with_ref(|c| Ok(*c))?;
         let mut operation = self.target.take()?;
-        let session = session.take()?;
-        let step = py
-            .detach(move || operation.advance(&session, controls, reply))
+        let step = session
+            .with_ref(|session| Ok(py.detach(move || operation.advance(session, controls, reply))))?
             .map_err(clone_error)?;
         CloneReadStep::from_core(py, step)
     }
     #[pyo3(signature = (document, session, source, validation, boundary))]
+    /// Apply a pending read through scoped document/session boundary callbacks.
+    /// The pending Apply phase is consumed even if a boundary callback raises.
     fn finish_document(
         &self,
         py: Python<'_>,
@@ -248,21 +251,30 @@ impl CloneRead {
             .transpose()?;
         let validation = validation.values(py)?;
         let mut operation = self.target.take()?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        let (failures, result) = py.detach(move || {
-            let mut failures = CallbackError::default();
-            let result = operation.finish_document(
-                &mut document,
-                &mut session,
-                source.as_ref().map(DefaultSource::as_core),
-                values::validation(&validation),
-                |event, d, s| {
-                    initial::invoke_boundary(&boundary, &mut failures, event, d, s, interpreter)
-                },
-            );
-            (failures, result)
-        });
+        let (failures, result) = document.with_mut(|document| {
+            session.with_mut(|session| {
+                Ok(py.detach(move || {
+                    let mut failures = CallbackError::default();
+                    let result = operation.finish_document(
+                        document,
+                        session,
+                        source.as_ref().map(DefaultSource::as_core),
+                        values::validation(&validation),
+                        |event, d, s| {
+                            initial::invoke_boundary(
+                                &boundary,
+                                &mut failures,
+                                event,
+                                d,
+                                s,
+                                interpreter,
+                            )
+                        },
+                    );
+                    (failures, result)
+                }))
+            })
+        })?;
         let stop = failures.finish(py, result.map_err(clone_error))?;
         Ok(values::enum_out(
             py,

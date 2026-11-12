@@ -1,9 +1,17 @@
-"""Shared document/session owners and explicit file, validation, and UI inputs."""
+"""Shared document/session owners with explicit byte sources and publication.
+
+share() aliases live state; byte getters and *_snapshot methods copy out.
+Callback loans expire on callback return and reject cross-thread access. Earlier live
+writes survive an exception; ordinary aliases stay busy during the operation.
+Paths, comments, and source assets remain bytes without implicit decoding.
+Integer inputs are width-checked and reject bool.
+"""
 from ..._native import icf as _icf
 from typing import Protocol
 
 class BinaryWriter(Protocol):
-    def write(self, data: bytes) -> int: ...
+    """Return the written prefix count; save neither flushes nor closes the stream."""
+    def write(self, data: bytes, /) -> int: ...
     def flush(self) -> None: ...
 
 Document = _icf.document.Document

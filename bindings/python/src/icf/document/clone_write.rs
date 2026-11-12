@@ -244,6 +244,8 @@ impl CloneStep {
             .transpose()
     }
 }
+/// Native write controller yielding separate consuming clone.Session engines.
+/// Snapshot getters copy state; callback loans expire on callback return.
 #[pyclass(frozen, module = "cs705.icf.document")]
 pub struct CloneWrite {
     pub target: Target<core::CloneWrite>,
@@ -262,28 +264,41 @@ macro_rules! write_methods {
                 let controls = controls.with_ref(|c| Ok(*c))?;
                 let validation = validation.values(py)?;
                 let reply = reply.to_core()?;
-                let mut operation = self.target.take()?;
-                let mut document = document.take()?;
-                let session = session.take()?;
-                let step = py.detach(move || operation.advance(&mut document, &session, controls, values::validation(&validation), reply)).map_err(clone_error)?;
+                let step = self.target.with_mut(|operation| {
+                    document.with_mut(|document| {
+                        session.with_ref(|session| {
+                            Ok(py.detach(move || operation.advance(
+                                document, session, controls, values::validation(&validation), reply,
+                            )))
+                        })
+                    })
+                })?.map_err(clone_error)?;
                 CloneStep::from_core(py, step)
             }
+            /// A raised information callback retains its writes, skips mask release
+            /// and wrapper reset, and leaves this controller in a failed phase.
             fn finalize(&self, py: Python<'_>, controls: &CloneControls, request_information: Py<PyAny>) -> PyResult<Py<PyAny>> {
                 let interpreter = crate::scoped::interpreter(py)?;
-                let mut operation = self.target.take()?;
-                let mut controls = controls.target.take()?;
-                let (failures, result) = py.detach(move || {
-                    let mut failures = CallbackError::default();
-                    let result = operation.finalize(&mut controls, |operation, controls| {
-                        let result = super::adapters::attach_checked(interpreter, |py| Frame::with_mut(py, operation, |operation| Frame::with_mut(py, controls, |controls| {
-                            let operation = Py::new(py, Self { target: Target::Scoped(operation) })?;
-                            let controls = Py::new(py, CloneControls::from_loan(controls))?;
-                            super::adapters::require_none(request_information.bind(py).call1((operation, controls))?)
-                        })));
-                        failures.capture(result).map_err(|_| cs705_core::icf::Error::Operation("Python clone final callback failed".into()))
-                    });
-                    (failures, result)
-                });
+                let (failures, result) = self.target.with_mut(|operation| {
+                    controls.with_mut(|controls| {
+                        Ok(py.detach(move || {
+                            let mut failures = CallbackError::default();
+                            let result = operation.finalize(controls, |operation, controls| {
+                                let result = super::adapters::attach_checked(interpreter, |py| {
+                                    Frame::with_mut(py, operation, |operation| {
+                                        Frame::with_mut(py, controls, |controls| {
+                                            let operation = Py::new(py, Self { target: Target::Scoped(operation) })?;
+                                            let controls = Py::new(py, CloneControls::from_loan(controls))?;
+                                            super::adapters::require_none(request_information.bind(py).call1((operation, controls))?)
+                                        })
+                                    })
+                                });
+                                failures.capture(result).map_err(|_| cs705_core::icf::Error::Operation("Python clone final callback failed".into()))
+                            });
+                            (failures, result)
+                        }))
+                    })
+                })?;
                 let stop = failures.finish(py, result.map_err(clone_error))?;
                 Ok(values::enum_out(py, "cs705.icf.document", "CloneStop", stop_code(stop))?.unbind())
             }

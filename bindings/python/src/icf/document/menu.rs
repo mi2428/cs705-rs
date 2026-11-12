@@ -32,6 +32,7 @@ macro_rules! descriptor {
         #[pymethods]
         impl MenuDescriptor {
             #[new]
+            #[expect(clippy::too_many_arguments, reason = "The constructor exposes every public native MenuDescriptor field.")]
             fn new(group: &Bound<'_, PyAny>, key: &Bound<'_, PyAny>, index: &Bound<'_, PyAny>, name: &Bound<'_, PyAny>, caption: &Bound<'_, PyAny>, flags1d: &Bound<'_, PyAny>, flags1e: &Bound<'_, PyAny>, shortcut18: &Bound<'_, PyAny>) -> PyResult<Self> {
                 Ok(Self::from_core(core::MenuDescriptor { group: strict_u32(group)?, key: strict_u32(key)?, index: strict_i32(index)?, name: strict_bytes(name)?.to_vec(), caption: strict_bytes(caption)?.to_vec(), flags1d: strict_u8(flags1d)?, flags1e: strict_u8(flags1e)?, shortcut18: strict_u32(shortcut18)? }))
             }
@@ -118,6 +119,8 @@ impl NativeView {
     }
 }
 
+/// During a query, document/session are mutable loans; settings/active/recent
+/// are read-only loans. These borrowed fields expire when the callback returns.
 #[pyclass(frozen, module = "cs705.icf.document.lifecycle")]
 pub struct MenuContext {
     #[pyo3(get)]
@@ -215,6 +218,9 @@ fn invoke(
     .map_err(|_| Error::Operation("Python menu query failed".into()))
 }
 
+/// Retained synchronous callback receiving live context and a mutable descriptor.
+/// clone() retains the same callable. Returning anything but None raises TypeError;
+/// earlier descriptor/document/session writes remain after a raised exception.
 #[pyclass(module = "cs705.icf.document.lifecycle")]
 pub struct MenuQuery {
     pub inner: core::MenuQuery,
@@ -278,6 +284,7 @@ macro_rules! item_fields {
         impl MenuItem {
             #[new]
             #[pyo3(signature = (descriptor, query, property19a, property1ae, property1a1, enabled, shortcut, caption))]
+            #[expect(clippy::too_many_arguments, reason = "The constructor exposes the native MenuItem descriptor, query, and public state fields.")]
             fn new(descriptor: Option<Py<MenuDescriptor>>, query: Option<Py<MenuQuery>>, property19a: &Bound<'_, PyAny>, property1ae: &Bound<'_, PyAny>, property1a1: &Bound<'_, PyAny>, enabled: &Bound<'_, PyAny>, shortcut: &Bound<'_, PyAny>, caption: &Bound<'_, PyAny>) -> PyResult<Self> {
                 Ok(Self { descriptor, query, property19a: strict_bool(property19a)?, property1ae: strict_bool(property1ae)?, property1a1: strict_bool(property1a1)?, enabled: strict_bool(enabled)?, shortcut: strict_u32(shortcut)?, caption: strict_bytes(caption)?.to_vec() })
             }
@@ -315,31 +322,39 @@ impl MenuQuery {
         let py = slf.py();
         // Keep the exact holder alive without a PyO3 borrow during callbacks.
         let query = slf.try_borrow()?.clone_ref(py);
-        let mut document = context.document.get().take()?;
-        let mut session = context.session.get().take()?;
-        let settings = context.settings.get().target.take()?;
-        let active = context
-            .active
-            .as_ref()
-            .map(|v| v.get().target.take())
-            .transpose()?;
-        let recent = context.recent.get().target.take()?;
-        let mut descriptor = descriptor.target.take()?;
         let (failures, result) = CallbackError::scoped(py, || {
-            py.detach(move || {
-                query.inner.call(
-                    &mut core::MenuContext {
-                        document: &mut document,
-                        session: &mut session,
-                        settings: &settings,
-                        active: active.as_deref(),
-                        recent: &recent,
-                    },
-                    &mut descriptor,
-                )
+            context.document.get().with_mut(|document| {
+                context.session.get().with_mut(|session| {
+                    context.settings.get().target.with_ref(|settings| {
+                        let call = |active: Option<&core::NativeView>| {
+                            context.recent.get().with_ref(|recent| {
+                                descriptor.target.with_mut(|descriptor| {
+                                    Ok(py.detach(move || {
+                                        query.inner.call(
+                                            &mut core::MenuContext {
+                                                document,
+                                                session,
+                                                settings,
+                                                active,
+                                                recent,
+                                            },
+                                            descriptor,
+                                        )
+                                    }))
+                                })
+                            })
+                        };
+                        match &context.active {
+                            Some(active) => {
+                                active.get().target.with_ref(|active| call(Some(active)))
+                            }
+                            None => call(None),
+                        }
+                    })
+                })
             })
         })?;
-        failures.finish(py, result.map_err(errors::icf))
+        failures.finish(py, result.and_then(|result| result.map_err(errors::icf)))
     }
     fn __repr__(&self) -> &'static str {
         "MenuQuery(..)"

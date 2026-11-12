@@ -9,6 +9,8 @@ use cs705_core::icf::{context, document as core, frequency};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
+/// Live Q field. fields() and snapshot() copy values; mutation through this view
+/// changes the session without implicitly regenerating B/G.
 #[pyclass(frozen, module = "cs705.icf.document")]
 pub struct SessionContext {
     pub target: Target<core::Session>,
@@ -44,6 +46,7 @@ macro_rules! context_queries {
 }
 context_queries!(selector -> u8; effective_f -> u8; effective_u -> u8; condition_58bdc -> bool; condition_58c14 -> bool; condition_58c5c -> bool;);
 
+/// Live B field. list() copies its range values; snapshot() copies the full B.
 #[pyclass(frozen, module = "cs705.icf.document")]
 pub struct SessionRanges {
     pub target: Target<core::Session>,

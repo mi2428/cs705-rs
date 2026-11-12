@@ -1,14 +1,17 @@
 """Explicit publication and MRU protocols. Paths are raw bytes, not Unicode."""
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from ..._native import icf as _icf
 
 RecentFiles = _icf.document.lifecycle.RecentFiles
 FormState = _icf.document.lifecycle.FormState
 SaveMode = _icf.document.lifecycle.SaveMode
-SaveDialog = _icf.document.lifecycle.SaveDialog
-SaveSelection = _icf.document.lifecycle.SaveSelection
-Prompt = _icf.document.lifecycle.Prompt
-Placement = _icf.document.lifecycle.Placement
+if TYPE_CHECKING:
+    from .lifecycle import Placement, Prompt, SaveDialog, SaveSelection
+else:
+    SaveDialog = _icf.document.lifecycle.SaveDialog
+    SaveSelection = _icf.document.lifecycle.SaveSelection
+    Prompt = _icf.document.lifecycle.Prompt
+    Placement = _icf.document.lifecycle.Placement
 OpenFile = _icf.document.lifecycle.OpenFile
 MenuQuery = _icf.document.lifecycle.MenuQuery
 MenuContext = _icf.document.lifecycle.MenuContext
@@ -41,21 +44,22 @@ filter_target = _icf.document.lifecycle.filter_target
 target_filter = _icf.document.lifecycle.target_filter
 
 class PathComparison(Protocol):
-    def compare(self, left: bytes, right: bytes) -> int: ...
+    """Return a supplied native code in 0..3; only 2 denotes equality."""
+    def compare(self, left: bytes, right: bytes, /) -> int: ...
 
 class RecentStore(Protocol):
-    def read(self, index: int) -> bytes: ...
-    def write(self, index: int, path: bytes) -> None: ...
+    def read(self, index: int, /) -> bytes: ...
+    def write(self, index: int, path: bytes, /) -> None: ...
 
 class Files(Protocol):
-    def read(self, path: bytes) -> bytes: ...
-    def publish(self, path: bytes, data: bytes) -> None:
+    def read(self, path: bytes, /) -> bytes: ...
+    def publish(self, path: bytes, data: bytes, /) -> None:
         """Complete actual publication before returning; staging alone is not a save."""
         ...
 
 class Dialogs(Protocol):
-    def save_as(self, initial: SaveDialog) -> SaveSelection | None: ...
-    def choice(self, prompt: Prompt) -> int: ...
+    def save_as(self, initial: SaveDialog, /) -> SaveSelection | None: ...
+    def choice(self, prompt: Prompt, /) -> int: ...
 
 class PlacementSource(Protocol):
     def placement(self) -> Placement | None: ...

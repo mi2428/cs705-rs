@@ -82,8 +82,10 @@ impl NativeState {
     }
 }
 
+/// Shared software UI state, not an OS window. Metadata getters return immutable
+/// snapshots; replace whole fields to edit them. Menu snapshots retain their
+/// original callable holders, including after the live menu is replaced.
 #[pyclass(frozen, module = "cs705.icf.document.lifecycle")]
-/// Software UI owner. Metadata getters are read-only snapshots; replace fields whole.
 pub struct UiState {
     pub owner: Arc<Owner<core::UiState>>,
     // One explicit edge to the exact queries adopted by the native menu snapshot.
@@ -137,7 +139,9 @@ impl UiState {
     /// Read-only metadata snapshots; replace the complete field to edit it.
     #[getter]
     fn menu<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        let menu = self.with_ref(|ui| Ok(ui.menu.clone()))?;
+        // Shared aliases must read native queries and their Python owners together.
+        let ui = self.owner.take()?;
+        let menu = ui.menu.clone();
         let adopted = self.retained.bind(py).get_item(0)?;
         let queries = if adopted.is_none() { None } else { Some(adopted.cast::<PyList>()?.iter().map(|q| Ok(q.extract::<Py<super::menu::MenuQuery>>()?)).collect::<PyResult<Vec<_>>>()?) };
         if queries.as_ref().is_some_and(|q| q.len() != menu.iter().filter(|item| item.query.is_some()).count()) {
@@ -218,21 +222,25 @@ impl UiState {
         self.with_mut(|ui| document.with_mut(|d| session.with_mut(|s| Ok(ui.sync25(d, s)))))?
             .map_err(errors::icf)
     }
-    fn sync02(
+    pub(super) fn sync02(
         &self,
         py: Python<'_>,
         document: &Document,
         session: &Session,
         recent: &RecentFiles,
     ) -> PyResult<()> {
-        let mut ui = self.owner.take()?;
-        let mut document = document.target.take()?;
-        let mut session = session.target.take()?;
-        let recent = recent.target.take()?;
         let (failures, result) = CallbackError::scoped(py, || {
-            py.detach(move || ui.sync02(&mut document, &mut session, &recent))
+            self.with_mut(|ui| {
+                document.with_mut(|document| {
+                    session.with_mut(|session| {
+                        recent.with_ref(|recent| {
+                            Ok(py.detach(move || ui.sync02(document, session, recent)))
+                        })
+                    })
+                })
+            })
         })?;
-        failures.finish(py, result.map_err(errors::icf))
+        failures.finish(py, result.and_then(|result| result.map_err(errors::icf)))
     }
     fn initial_boundary(
         &self,
@@ -242,13 +250,14 @@ impl UiState {
         session: &Session,
     ) -> PyResult<()> {
         let boundary = boundary.inner;
-        let mut ui = self.owner.take()?;
-        let mut document = document.target.take()?;
-        let mut session = session.target.take()?;
-        let (failures, result) = CallbackError::scoped(py, || {
-            py.detach(move || ui.initial_boundary(boundary, &mut document, &mut session))
-        })?;
-        failures.finish(py, result.map_err(errors::icf))
+        self.with_mut(|ui| {
+            document.with_mut(|document| {
+                session.with_mut(|session| {
+                    Ok(py.detach(|| ui.initial_boundary(boundary, document, session)))
+                })
+            })
+        })?
+        .map_err(errors::icf)
     }
     fn destroy_view(&self, document: &Document) -> PyResult<()> {
         self.with_mut(|ui| {
@@ -287,15 +296,21 @@ impl UiState {
     fn from_native_resources(py: Python<'_>, asset: &Bound<'_, PyAny>, document: &Document, session: &Session, settings: &crate::display::Settings, recent: &RecentFiles) -> PyResult<Self> {
         let asset: Arc<[u8]> = strict_bytes(asset)?.into();
         let settings = settings.with_ref(|s| Ok(s.clone()))?;
-        let mut document = document.take()?;
-        let mut session = session.take()?;
-        let recent = recent.target.take()?;
-        let ui = py.detach(move || core::UiState::from_native_resources(asset, &mut document, &mut session, settings, &recent)).map_err(errors::icf)?;
+        let ui = document.with_mut(|document| {
+            session.with_mut(|session| {
+                recent.with_ref(|recent| {
+                    Ok(py.detach(move || core::UiState::from_native_resources(
+                        asset, document, session, settings, recent,
+                    )))
+                })
+            })
+        })?.map_err(errors::icf)?;
         Self::from_core(py, ui)
     }
     fn register_native_commands(&self, py: Python<'_>, resources: &crate::display::Resources, settings: &crate::display::Settings) -> PyResult<()> {
         let settings = settings.with_ref(|s| Ok(s.clone()))?;
-        let result = resources.with_core(|r| self.with_mut(|ui| Ok(ui.register_native_commands(r, settings))))?;
+        let mut ui = self.owner.take()?;
+        let result = resources.with_core(|r| Ok(ui.register_native_commands(r, settings)))?;
         // The native registration clears the old menu before any fallible work.
         self.retained.bind(py).set_item(0, py.None())?;
         result.map_err(errors::icf)
