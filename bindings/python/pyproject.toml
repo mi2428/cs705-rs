@@ -6,6 +6,8 @@ build-backend = "maturin"
 name = "cs705"
 version = "1.0.0"
 requires-python = ">=3.15"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 
 [tool.maturin]
 bindings = "pyo3"

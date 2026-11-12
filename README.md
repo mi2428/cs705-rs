@@ -10,6 +10,7 @@ Use it to build your own configuration tools without running the CS-705 Windows 
 - Refer to the [API documentation](https://docs.rs/cs705) for public interfaces and their contracts.
 - Read [`NOTES.md`](https://github.com/mi2428/cs705-rs/blob/main/NOTES.md) for technical details of the recovered formats, editing behavior, and clone protocol.
 - The [`examples/cli`](https://github.com/mi2428/cs705-rs/tree/main/examples/cli) and [`example/tui`](https://github.com/mi2428/cs705-rs/tree/main/examples/tui) folders contain separate applications built on the library.
+- The [Python bindings](bindings/python/README.md) provide an in-process CPython 3.15+ package, with source-build and test instructions.
 
 ## Features
 
@@ -120,7 +121,7 @@ fn check_clone_result(outcome: Outcome) -> Result<Outcome, Box<dyn Error>> {
 fn read_raw(transport: &mut impl Transport, profile: Profile) -> Result<Outcome, Box<dyn Error>> {
     // Query the identity, check the profile, then read the raw image.
     let session = Session::read(SessionConfig::default(), profile)?;
-    let outcome = check_clone_result(session.run(transport, || false))?;
+    let outcome = check_clone_result(session.run(transport, || Ok(false)))?;
 
     // Keep image and coverage together; the buffer can contain an unacquired tail.
     let required = clone::read_range(profile.selector())?;
@@ -145,7 +146,7 @@ fn write_raw(
         return Err("raw write was not approved".into());
     }
     let session = Session::write(SessionConfig::default(), profile, mask, image)?;
-    let outcome = check_clone_result(session.run(transport, || false))?;
+    let outcome = check_clone_result(session.run(transport, || Ok(false)))?;
 
     // Protocol acknowledgement does not verify the resulting radio settings.
     if outcome.write_disposition != WriteDisposition::Acknowledged {

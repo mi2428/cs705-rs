@@ -60,10 +60,29 @@ implementation details are not fabricated into public modules; public NLS
 entry points remain in the inventory. Ongoing concurrent API changes require
 another refresh before treating the inventory as a final snapshot.
 
-The native initializer actually declares and registers the existing `icf` and
-`gps` implementations alongside holders, errors and version; their presence
-does not mean those domains are complete. The existing `owner` implementation
-is also declared and type-checked. Missing modules are not empty stubs.
-DEV-01 remains incomplete until domain
-workers replace provisional ownership/callback decisions with actual contracts;
-DEV-06 enum/report and invocation-error integration is not claimed complete.
+The worker/status columns and development-item judgments above describe the
+extraction-time baseline, not the current initializer. See `src/lib.rs` for
+actual native registrations and `python/cs705` for facades and type annotations.
+Do not infer completion or missing implementations from these historical rows.
+
+The proposed `python_target` is not always a literal attribute path:
+
+- Domain error values use `ErrorData`; `cs705.Error` is the raised exception.
+- Rust `new` maps to Python construction, and data-variant fields belong to the
+  resulting value, not its variant constructor.
+- Enum metadata named `name` uses `native_name()` to preserve Python Enum's
+  own `name` property. Keyword variants can require `getattr`, such as `None`.
+- Rust `csv.dispatch.Dispatch.import` is exposed as `import_kind`, matching
+  its Python constructor. No legacy `import` attribute is registered.
+- `NormalMemory.native_*` operations are functions in `icf.rows.native` with
+  an explicit model argument; `WorkingUr.native_text*` live in `icf.rows.ur`.
+- Nested mutable fields can use explicit `*_snapshot()` and `set_*()` methods
+  or live owner-backed projections. A matching name alone proves neither
+  ownership semantics nor mutation behavior.
+- NLS producers `ascii_map`, `platform_map` and `platform_uppercase` accept
+  owned `MutableBytes` or writable callback-scoped `csv.nls.Bytes`. Accepting
+  both does not extend a loan's lifetime or grant write access to a readonly loan.
+
+Check constructors, fields, variants, constants, aliases and explicit
+operations against both the public `.pyi` contract and the registered native
+object. An import or an attribute inventory is not a behavioral coverage test.
