@@ -17,6 +17,7 @@ Use it to build your own configuration tools without running the CS-705 Windows 
 - ICF parsing, serialization, and explicit layout conversion. Typed editing of memories, radio settings, repeater lists, GPS memories, and callsigns.
 - Clone protocol frames and transfer sessions over caller-owned transports.
 - CS-705 CSV import and export with explicit locale and byte-string handling.
+- In-process Python 3.15+ bindings, including [small, scriptable tools](examples/python).
 
 ### Case: List Memory Channels and Rename the First One
 
@@ -160,6 +161,27 @@ fn write_raw(
 `write_raw` takes a full internal image for the selected profile; `mask` selects optional regions and does not remove permanent write exclusions.
 Raw writes skip Document validation and normalization, so use only a verified image for the intended radio and keep a fresh backup.
 Never retry a failed or unconfirmed write automatically; acknowledgement is not a readback or persistence check.
+
+### Case: List Memory Channels with Python
+
+With the [Python bindings installed](bindings/python/README.md#build-and-install-from-this-checkout), list the saved logical channels in a canonical MapRev 6 file without radio I/O.
+Names remain opaque bytes rather than being decoded with an assumed text encoding.
+
+```python
+from pathlib import Path
+from cs705 import Icf
+from cs705.icf import MemorySide
+
+image = Icf.parse(Path("settings.icf").read_bytes())
+for group, bank in enumerate(image.memory_groups()):
+    for row, slot in enumerate(bank.slots()):
+        if slot is not None:
+            hz = image.physical_memory_frequency_hz(slot, MemorySide.Main)
+            name = image.physical_memory_name_raw(slot)
+            print(f"{group:02}/{row:02} {hz} Hz {name!r}")
+```
+
+For a reusable comparison tool rather than a snippet, see [the Python memory-backup diff example](examples/python).
 
 ## License
 
