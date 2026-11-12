@@ -291,7 +291,7 @@ pub enum CoordinateEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoordinateDialog {
     pub mode: u8,
-    pub mask: &'static [u8],
+    pub mask: std::borrow::Cow<'static, [u8]>,
     pub seed: Vec<u8>,
     pub control: Vec<u8>,
     pub phase2: Option<Vec<u8>>,
@@ -407,7 +407,7 @@ impl CoordinateDialog {
             .collect();
         let mut dialog = Self {
             mode,
-            mask,
+            mask: std::borrow::Cow::Borrowed(mask),
             seed,
             control,
             phase2: None,

@@ -41,6 +41,77 @@ pub struct Context<'a> {
     pub eras: &'a [Era<'a>],
 }
 
+/// Retained era bytes, preserving absent versus present-empty names.
+#[derive(Debug, Clone)]
+pub struct OwnedEra {
+    pub name: Option<Vec<u8>>,
+    pub offset: i32,
+}
+impl Era<'_> {
+    pub fn into_owned(self) -> OwnedEra {
+        OwnedEra {
+            name: self.name.map(<[u8]>::to_vec),
+            offset: self.offset,
+        }
+    }
+}
+
+/// Owned locale data for parsers that retain a runtime context.
+#[derive(Debug, Clone)]
+pub struct OwnedContext {
+    pub short_date: Vec<u8>,
+    pub date_separator: u8,
+    pub time_separator: u8,
+    pub decimal_separator: u8,
+    pub am: Vec<u8>,
+    pub pm: Vec<u8>,
+    pub current_year: u16,
+    pub two_digit_window: u16,
+    pub primary_language: u16,
+    pub eras: Vec<OwnedEra>,
+}
+impl Context<'_> {
+    pub fn into_owned(self) -> OwnedContext {
+        OwnedContext {
+            short_date: self.short_date.to_vec(),
+            date_separator: self.date_separator,
+            time_separator: self.time_separator,
+            decimal_separator: self.decimal_separator,
+            am: self.am.to_vec(),
+            pm: self.pm.to_vec(),
+            current_year: self.current_year,
+            two_digit_window: self.two_digit_window,
+            primary_language: self.primary_language,
+            eras: self.eras.iter().copied().map(Era::into_owned).collect(),
+        }
+    }
+}
+impl OwnedContext {
+    /// Assemble references only for the native call; no self-referential storage.
+    pub fn with_context<T>(&self, call: impl FnOnce(&Context<'_>) -> T) -> T {
+        let eras: Vec<_> = self
+            .eras
+            .iter()
+            .map(|era| Era {
+                name: era.name.as_deref(),
+                offset: era.offset,
+            })
+            .collect();
+        call(&Context {
+            short_date: &self.short_date,
+            date_separator: self.date_separator,
+            time_separator: self.time_separator,
+            decimal_separator: self.decimal_separator,
+            am: &self.am,
+            pm: &self.pm,
+            current_year: self.current_year,
+            two_digit_window: self.two_digit_window,
+            primary_language: self.primary_language,
+            eras: &eras,
+        })
+    }
+}
+
 /// Leap-aware final Gregorian check (F4A44).
 pub fn valid_date(date: Date) -> bool {
     let leap = date.year.is_multiple_of(4)
@@ -89,7 +160,7 @@ fn spaces(source: &[u8], at: &mut usize) {
 pub fn parse_date_with(
     source: &[u8],
     context: &Context<'_>,
-    mut equal: impl FnMut(&[u8], &[u8]) -> bool,
+    mut equal: impl FnMut(&[u8], &[u8]) -> Result<bool, Error>,
 ) -> Result<Date, Error> {
     let source = trim(source);
     if source.len() > 4096 || context.eras.len() > 7 {
@@ -113,7 +184,7 @@ pub fn parse_date_with(
                 };
                 let mut p = 0;
                 while p + prefix.len() <= name.len() {
-                    if equal(&name[p..p + prefix.len()], prefix) {
+                    if equal(&name[p..p + prefix.len()], prefix)? {
                         offset = era.offset;
                         break 'era;
                     }
@@ -203,14 +274,14 @@ pub fn parse_date_with(
 }
 /// Exact-byte era comparison is an explicitly selected portable context.
 pub fn parse_date(source: &[u8], context: &Context<'_>) -> Result<Date, Error> {
-    parse_date_with(source, context, |a, b| a == b)
+    parse_date_with(source, context, |a, b| Ok(a == b))
 }
 
 /// F6230 finite time grammar with explicit CompareStringA(400,1)-like matching.
 pub fn parse_time_with(
     source: &[u8],
     context: &Context<'_>,
-    mut equal: impl FnMut(&[u8], &[u8]) -> bool,
+    mut equal: impl FnMut(&[u8], &[u8]) -> Result<bool, Error>,
 ) -> Result<Time, Error> {
     let mut source = trim(source);
     if source.len() > 4096 {
@@ -226,12 +297,12 @@ pub fn parse_time_with(
         if word.is_empty() {
             continue;
         }
-        if source.len() >= word.len() && equal(&source[..word.len()], word) {
+        if source.len() >= word.len() && equal(&source[..word.len()], word)? {
             marker = Some(pm);
             source = trim(&source[word.len()..]);
             break;
         }
-        if source.len() >= word.len() && equal(&source[source.len() - word.len()..], word) {
+        if source.len() >= word.len() && equal(&source[source.len() - word.len()..], word)? {
             marker = Some(pm);
             source = trim(&source[..source.len() - word.len()]);
             break;
@@ -284,7 +355,7 @@ pub fn parse_time_with(
     })
 }
 pub fn parse_time(source: &[u8], context: &Context<'_>) -> Result<Time, Error> {
-    parse_time_with(source, context, |a, b| a.eq_ignore_ascii_case(b))
+    parse_time_with(source, context, |a, b| Ok(a.eq_ignore_ascii_case(b)))
 }
 
 /// Gregorian date plus signed minutes, preserving seconds; offset is not a mask.

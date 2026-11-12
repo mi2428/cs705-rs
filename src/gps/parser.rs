@@ -91,10 +91,47 @@ impl Draft {
 pub struct Rows<'a, 'c> {
     reader: csv::Reader<'a>,
     binding: Binding,
-    options: Options<'c>,
+    locale: csv::Locale,
+    datetime: DateContext<'c>,
+    hemispheres: [u8; 2],
+    group_name_seed: [u8; 16],
     next: usize,
 }
+
+enum DateContext<'a> {
+    Borrowed(datetime::Context<'a>),
+    Owned(datetime::OwnedContext),
+}
+
+impl DateContext<'_> {
+    fn with_context<T>(&self, call: impl FnOnce(&datetime::Context<'_>) -> T) -> T {
+        match self {
+            Self::Borrowed(context) => call(context),
+            Self::Owned(context) => context.with_context(call),
+        }
+    }
+    fn into_owned(self) -> DateContext<'static> {
+        DateContext::Owned(match self {
+            Self::Borrowed(context) => context.into_owned(),
+            Self::Owned(context) => context,
+        })
+    }
+}
+
 impl<'a, 'c> Rows<'a, 'c> {
+    /// Retain the cursor, header binding and date context without advancing rows.
+    pub fn into_owned(self) -> Rows<'static, 'static> {
+        Rows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            locale: self.locale,
+            datetime: self.datetime.into_owned(),
+            hemispheres: self.hemispheres,
+            group_name_seed: self.group_name_seed,
+            next: self.next,
+        }
+    }
+
     /// Explicit ASCII CharLower context for the accepted built-in header labels.
     pub fn new(source: &'a [u8], options: Options<'c>) -> Result<Self, Error> {
         Self::with_lower(source, options, |bytes| {
@@ -134,7 +171,10 @@ impl<'a, 'c> Rows<'a, 'c> {
         Ok(Self {
             reader,
             binding,
-            options,
+            locale: options.locale,
+            datetime: DateContext::Borrowed(options.datetime),
+            hemispheres: options.hemispheres,
+            group_name_seed: options.group_name_seed,
             next: 0,
         })
     }
@@ -143,8 +183,8 @@ impl<'a, 'c> Rows<'a, 'c> {
     }
     fn parse(&self, line: &[u8]) -> Result<Draft, Error> {
         let mut raw = [0; 34];
-        raw[3] = self.options.hemispheres[0];
-        raw[7] = self.options.hemispheres[1];
+        raw[3] = self.hemispheres[0];
+        raw[7] = self.hemispheres[1];
         raw[8..14].fill(0x99);
         raw[14..18].copy_from_slice(&i32::MAX.to_le_bytes());
         raw[18..].fill(b' ');
@@ -153,7 +193,7 @@ impl<'a, 'c> Rows<'a, 'c> {
             Some(text) => csv::table::gps_group_ascii(text),
             None => u32::MAX,
         };
-        let mut group_name = self.options.group_name_seed;
+        let mut group_name = self.group_name_seed;
         let mut corrections = 0_u32;
         if let Some(text) = self.binding.cell(line, 1)? {
             let (name, changed) = csv::fixed_text::<16>(text);
@@ -166,30 +206,20 @@ impl<'a, 'c> Rows<'a, 'c> {
             corrections = corrections.wrapping_add(u32::from(changed));
         }
         let mut time = [0x99; 6];
-        datetime::import_raw(
-            &mut time,
-            self.binding.cell(line, 3)?,
-            self.binding.cell(line, 4)?,
-            &self.options.datetime,
-        );
+        let date_cell = self.binding.cell(line, 3)?;
+        let time_cell = self.binding.cell(line, 4)?;
+        self.datetime
+            .with_context(|context| datetime::import_raw(&mut time, date_cell, time_cell, context));
         raw[8..14].copy_from_slice(&time);
         if let Some(text) = self.binding.cell(line, 5)? {
-            raw[..4].copy_from_slice(&csv::number::coordinate(
-                text,
-                true,
-                self.options.locale.decimal,
-            ));
+            raw[..4].copy_from_slice(&csv::number::coordinate(text, true, self.locale.decimal));
         }
         if let Some(text) = self.binding.cell(line, 6)? {
-            raw[4..8].copy_from_slice(&csv::number::coordinate(
-                text,
-                false,
-                self.options.locale.decimal,
-            ));
+            raw[4..8].copy_from_slice(&csv::number::coordinate(text, false, self.locale.decimal));
         }
         let mut altitude_error = None;
         if let Some(text) = self.binding.cell(line, 7)? {
-            match csv::number::altitude(text, self.options.locale.decimal) {
+            match csv::number::altitude(text, self.locale.decimal) {
                 Ok(value) => raw[14..18].copy_from_slice(&value.to_le_bytes()),
                 Err(error) => altitude_error = Some(error),
             }
@@ -224,7 +254,7 @@ impl<'a, 'c> Rows<'a, 'c> {
 impl<'a, 'c> Iterator for Rows<'a, 'c> {
     type Item = Result<Draft, Error>;
     fn next(&mut self) -> Option<Self::Item> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some(self.parse(line))
     }
@@ -233,6 +263,29 @@ impl<'a, 'c> Iterator for Rows<'a, 'c> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ownership_keeps_cursor_context_and_late_finalizer_error() {
+        let source = b"Latitude;Longitude;Altitude\n1;2;0\n3;4;bad\n".to_vec();
+        let pattern = b"yyyy/mm/dd".to_vec();
+        let options = Options {
+            datetime: datetime::Context {
+                short_date: &pattern,
+                ..options().datetime
+            },
+            ..options()
+        };
+        let mut rows = Rows::new(&source, options).unwrap();
+        assert_eq!(rows.next().unwrap().unwrap().record.bytes[0], 1);
+        let mut owned = rows.into_owned();
+        drop(source);
+        drop(pattern);
+        let mut second = owned.next().unwrap().unwrap();
+        assert_eq!(second.record.bytes[0], 3);
+        assert!(second.altitude_error.is_some());
+        assert!(second.finalize(true, 0, &mut false).is_err());
+        assert!(owned.next().is_none());
+    }
     #[test]
     fn gps_finalizer_keeps_degree_bug_int_min_and_count_compression() {
         for degree in 0..=255 {

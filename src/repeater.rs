@@ -113,6 +113,13 @@ pub struct Row<'a> {
 }
 
 impl Row<'_> {
+    /// Own every current cell, retaining both untouched and edited bytes.
+    pub fn into_owned(self) -> Row<'static> {
+        Row {
+            cells: self.cells.map(|cell| Cow::Owned(cell.into_owned())),
+        }
+    }
+
     /// Return all 17 raw cells in fixed header order, including the current Name.
     pub fn cells(&self) -> [&[u8]; 17] {
         self.cells.each_ref().map(|cell| cell.as_ref())
@@ -138,6 +145,13 @@ pub struct Csv<'a> {
 }
 
 impl<'a> Csv<'a> {
+    /// Own every current row without reparsing or normalizing cell contents.
+    pub fn into_owned(self) -> Csv<'static> {
+        Csv {
+            rows: self.rows.into_iter().map(Row::into_owned).collect(),
+        }
+    }
+
     /// Parse the exact limited format described in this module without I/O.
     ///
     /// Zero to 2500 data rows are accepted. All cells, including non-ASCII bytes,
@@ -693,6 +707,20 @@ fn check_name_length(name: &[u8], line: usize) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ownership_preserves_opaque_cells_and_prior_edits() {
+        let source = coordinate_csv_literal(&[]);
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_name(0, b"Changed").unwrap();
+        let expected = csv.to_bytes();
+        let mut owned = csv.into_owned();
+        drop(source);
+        assert_eq!(owned.to_bytes(), expected);
+        owned.set_rpt1_use(1, true).unwrap();
+        assert_eq!(owned.rows()[0].name_bytes(), b"Changed");
+        assert_eq!(owned.rows()[1].cells()[12], b"YES");
+    }
 
     // Synthetic A4 examples, not copied from an original application export.
     const SAMPLE: &[u8] = concat!(

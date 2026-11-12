@@ -69,6 +69,13 @@ pub struct Row<'a> {
 }
 
 impl Row<'_> {
+    /// Own every current cell, retaining both untouched and edited bytes.
+    pub fn into_owned(self) -> Row<'static> {
+        Row {
+            cells: self.cells.map(|cell| Cow::Owned(cell.into_owned())),
+        }
+    }
+
     /// Borrow all nine current cells in exact header order.
     pub fn cells(&self) -> [&[u8]; 9] {
         self.cells.each_ref().map(|cell| cell.as_ref())
@@ -81,6 +88,13 @@ pub struct Csv<'a> {
 }
 
 impl<'a> Csv<'a> {
+    /// Own every current row without reparsing or normalizing cell contents.
+    pub fn into_owned(self) -> Csv<'static> {
+        Csv {
+            rows: self.rows.into_iter().map(Row::into_owned).collect(),
+        }
+    }
+
     /// Parse the exact header and zero to 300 nine-cell CRLF-terminated rows.
     /// Old values, encoding, name widths and Date/Time are not validated.
     /// # Errors
@@ -319,6 +333,20 @@ impl<'a> Csv<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ownership_preserves_opaque_cells_and_prior_edits() {
+        let source = literal(&[]);
+        let mut csv = Csv::parse(&source).unwrap();
+        csv.set_name(0, b"Changed").unwrap();
+        let expected = csv.to_bytes();
+        let mut owned = csv.into_owned();
+        drop(source);
+        assert_eq!(owned.to_bytes(), expected);
+        owned.set_alarm(1, true).unwrap();
+        assert_eq!(owned.rows()[0].cells()[2], b"Changed");
+        assert_eq!(owned.rows()[1].cells()[8], b"ON");
+    }
 
     fn coordinate(degrees: u8, ticks: u16, negative: bool) -> GpsCoordinate {
         GpsCoordinate {

@@ -35,6 +35,15 @@ pub struct Rows<'a> {
     next: usize,
 }
 impl<'a> Rows<'a> {
+    /// Move the existing cursor and header binding without parsing another row.
+    pub fn into_owned(self) -> Rows<'static> {
+        Rows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+        }
+    }
+
     pub fn new(source: &'a [u8], locale: csv::Locale) -> Result<Self, Error> {
         let reader = csv::Reader::new(source, locale)?;
         let labels = csv::split_cells(&super::HEADER[..super::HEADER.len() - 2], b',');
@@ -63,7 +72,7 @@ impl<'a> Rows<'a> {
         options: &Options<'_>,
         mut nls: impl FnMut(&[u8], &mut [u8]) -> Result<i32, Error>,
     ) -> Option<Result<Parsed, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             row.bytes[12] &= !1;
@@ -301,6 +310,73 @@ fn utc(source: &[u8], context: &datetime::Context<'_>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ownership_preserves_cursor_binding_and_late_nls_error() {
+        let source = b"Repeater Call Sign\nFIRST\nSECOND\n".to_vec();
+        let locale = csv::Locale::copied(b'.', b';');
+        let context = datetime::Context {
+            short_date: b"yyyy/mm/dd",
+            date_separator: b'/',
+            time_separator: b':',
+            decimal_separator: b'.',
+            am: b"AM",
+            pm: b"PM",
+            current_year: 2026,
+            two_digit_window: 50,
+            primary_language: 0x11,
+            eras: &[],
+        };
+        let default = Record {
+            bytes: Box::new(
+                *crate::repeater::working::DefaultContext {
+                    five_mhz: false,
+                    hemispheres: *b"NE",
+                }
+                .holder(0, 7)
+                .as_bytes(),
+            ),
+            frequency_class: 0,
+        };
+        let frequency = |_| {
+            Ok(FrequencyProfile {
+                identity_class: 0,
+                offset: OffsetProfile {
+                    class: 0,
+                    default_hz: 0,
+                },
+            })
+        };
+        let options = Options {
+            locale,
+            datetime: &context,
+            default: &default,
+            types: crate::repeater::editor::TYPE_SOURCE,
+            group_name_seed: [b' '; 16],
+            crt_decimal: b'.',
+            frequency: &frequency,
+        };
+        let mut rows = Rows::new(&source, locale).unwrap();
+        let first = rows
+            .next_with(default.clone(), &options, csv::nls::ascii_map)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&first.record.bytes[0x160..0x165], b"FIRST");
+        let mut owned = rows.into_owned();
+        drop(source);
+        let late = owned.next_with(default.clone(), &options, |source, _| {
+            assert_eq!(csv::trim(source), b"SECOND");
+            Err(Error::Operation("late supplied NLS failure".into()))
+        });
+        assert!(matches!(
+            late,
+            Some(Err(Error::Operation(reason))) if reason == "late supplied NLS failure"
+        ));
+        assert!(
+            owned
+                .next_with(default.clone(), &options, csv::nls::ascii_map)
+                .is_none()
+        );
+    }
     #[test]
     fn header_gate_is_cache14_callsign_not_frequency_or_export_column_ordinal() {
         let locale = csv::Locale::copied(b'.', b';');

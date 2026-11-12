@@ -505,7 +505,7 @@ pub fn run(args: Args) -> Result<u8> {
                     }),
                 }
                 .map_err(|e| AppError::invalid(e.to_string()))?;
-                let frame=dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),
+                let frame=dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(&d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),
                     "valid":d.valid(),"done":d.done,"cancel":d.cancel,"release_requested":d.release_requested,"phase2":d.phase2.as_ref().map(|b|io::bytes_value(b))}));
                 Ok((
                     json!({"feature_id":field.feature_id,"stored":effect.stored,"raw":effect.raw,"gray":effect.gray,"dialog":frame,"state_out":if begin{1}else{0}}),

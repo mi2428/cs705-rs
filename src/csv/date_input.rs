@@ -51,6 +51,50 @@ pub struct Runtime<'a> {
     pub clock: Option<Clock>,
 }
 
+/// Retained runtime whose temporary native locale writes survive failed calls.
+pub struct OwnedRuntime {
+    pub locale: datetime::OwnedContext,
+    pub time_format: Vec<u8>,
+    pub date_order: u32,
+    pub clock: Option<Clock>,
+}
+impl Runtime<'_> {
+    pub fn into_owned(self) -> OwnedRuntime {
+        OwnedRuntime {
+            locale: self.locale.into_owned(),
+            time_format: self.time_format.to_vec(),
+            date_order: self.date_order,
+            clock: self.clock,
+        }
+    }
+}
+impl OwnedRuntime {
+    /// Reassemble only for the call and retain all mutations before returning.
+    pub fn with_runtime<T>(&mut self, call: impl FnOnce(&mut Runtime<'_>) -> T) -> T {
+        let (result, locale, time_format, date_order, clock) = self.locale.with_context(|locale| {
+            let mut runtime = Runtime {
+                locale: locale.clone(),
+                time_format: &self.time_format,
+                date_order: self.date_order,
+                clock: self.clock,
+            };
+            let result = call(&mut runtime);
+            (
+                result,
+                runtime.locale.into_owned(),
+                runtime.time_format.to_vec(),
+                runtime.date_order,
+                runtime.clock,
+            )
+        });
+        self.locale = locale;
+        self.time_format = time_format;
+        self.date_order = date_order;
+        self.clock = clock;
+        result
+    }
+}
+
 fn clock(runtime: &Runtime<'_>) -> Result<(Date, Time), Error> {
     runtime
         .clock
@@ -457,6 +501,42 @@ pub fn edit_masked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_runtime_retains_exceptional_native_locale_writes() {
+        let mut runtime = Runtime {
+            locale: Context {
+                short_date: b"dd.mm.yyyy",
+                date_separator: b'.',
+                time_separator: b';',
+                decimal_separator: b'.',
+                am: b"AM",
+                pm: b"PM",
+                current_year: 2026,
+                two_digit_window: 50,
+                primary_language: 0,
+                eras: &[],
+            },
+            time_format: b"hh;nn;ss",
+            date_order: 2,
+            clock: None,
+        }
+        .into_owned();
+        let mut raw = [0x29, 0x02, 0x24, 0x23, 0x30, 0x40];
+        let error = runtime.with_runtime(|r| phase2(&mut raw, 0, 0, &[b'1'; 4097], r));
+        assert!(matches!(error, Err(Error::Limit(_))));
+        assert_eq!(raw, [0x29, 0x02, 0x24, 0x23, 0x30, 0x40]);
+        assert_eq!(runtime.locale.short_date, b"yyyy/mm/dd");
+        assert_eq!(runtime.locale.date_separator, b'/');
+        assert_eq!(runtime.time_format, b"hh;nn;ss");
+        assert_eq!(
+            runtime
+                .with_runtime(|r| datetime::parse_date(b"2024/02/29", &r.locale))
+                .unwrap()
+                .day,
+            29
+        );
+    }
 
     #[test]
     fn native_masks_phase_prefix_and_type20_clock_seed() {

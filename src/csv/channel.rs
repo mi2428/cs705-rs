@@ -146,7 +146,7 @@ impl<'a> MemoryRows<'a> {
             // 80BC0 compares all Group No cells before clear. Different numeric
             // spellings of one group are equal; invalid text is a separate key.
             let mut first = None;
-            for &line in reader.rows() {
+            for line in reader.rows() {
                 let text = binding.cell(line, 2)?.expect("present Group No header");
                 let value = memory_group(text)?;
                 let key = (
@@ -181,10 +181,19 @@ impl<'a> MemoryRows<'a> {
     pub fn sequential(&self) -> bool {
         self.sequential
     }
-    pub fn next_source(&mut self) -> Option<&'a [u8]> {
-        let line = *self.reader.rows().get(self.next)?;
+    pub fn next_source(&mut self) -> Option<&[u8]> {
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some(line)
+    }
+    pub fn into_owned(self) -> MemoryRows<'static> {
+        MemoryRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            kind: self.kind,
+            sequential: self.sequential,
+        }
     }
 }
 
@@ -800,7 +809,8 @@ pub fn import_memory(
         let mut call_cursor = base;
         let mut names: [Option<[u8; 16]>; 100] = [None; 100];
         let mut max_group = None;
-        while let Some(line) = reader.next_source() {
+        while let Some(line) = reader.reader.row(reader.next) {
+            reader.next += 1;
             out.report.rows_read += 1;
             let g = if !normal {
                 100
@@ -982,6 +992,16 @@ pub struct UserEdgeRows<'a> {
     cursor: u32,
 }
 impl<'a> UserEdgeRows<'a> {
+    pub fn into_owned(self) -> UserEdgeRows<'static> {
+        UserEdgeRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            selection: self.selection,
+            sequential: self.sequential,
+            cursor: self.cursor,
+        }
+    }
     /// 88AE4 receives whole byte from 89088. Only whole plus missing No uses
     /// sequential positions; selected import must retain its numeric No field.
     pub fn new(
@@ -1016,7 +1036,7 @@ impl<'a> UserEdgeRows<'a> {
     /// empty low exits before high; empty high clears low's already-set valid.
     /// No ordering/suitability predicate is called by this CSV finalizer.
     pub fn next_row(&mut self) -> Option<Result<EdgeRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             let position = if self.sequential {
@@ -1088,6 +1108,16 @@ pub struct ScanRows<'a> {
     cursor: u32,
 }
 impl<'a> ScanRows<'a> {
+    pub fn into_owned(self) -> ScanRows<'static> {
+        ScanRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            selection: self.selection,
+            sequential: self.sequential,
+            cursor: self.cursor,
+        }
+    }
     pub fn new(
         source: &'a [u8],
         locale: Locale,
@@ -1129,7 +1159,7 @@ impl<'a> ScanRows<'a> {
         default: &DecodedRecord,
         crt_decimal: u8,
     ) -> Option<Result<EdgeRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             if default.kind() != 0x1f {
@@ -2056,6 +2086,13 @@ pub struct CallsignRows<'a> {
     next: usize,
 }
 impl<'a> CallsignRows<'a> {
+    pub fn into_owned(self) -> CallsignRows<'static> {
+        CallsignRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+        }
+    }
     pub fn new(source: &'a [u8], locale: Locale) -> Result<Self, Error> {
         let reader = Reader::new(source, locale)?;
         let binding = Binding::builtin(
@@ -2083,7 +2120,7 @@ impl<'a> CallsignRows<'a> {
         default: &DecodedRecord,
         native: impl FnMut(&[u8], &mut [u8]) -> Result<i32, Error>,
     ) -> Option<Result<CallsignRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             let mut holder = record::reset_holder(0x0d, 0, default.binding());
@@ -2367,8 +2404,8 @@ mod tests {
         // CP932 fullwidth A/B/1 maps to the literal ASCII call on Windows.
         let source = b"CH No,Frequency,Mode,Your Call Sign,RPT1 Call Sign,RPT2 Call Sign\n0,145,DV,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50\n";
         let mut rows = MemoryRows::new(source, Kind::Memory, options.locale, false).unwrap();
-        let line = rows.next_source().unwrap();
-        let row = rows.side(line, 0, false, 0, &options);
+        let line = rows.next_source().unwrap().to_vec();
+        let row = rows.side(&line, 0, false, 0, &options);
         #[cfg(windows)]
         {
             let row = row.unwrap();
@@ -2404,8 +2441,8 @@ mod tests {
             );
             let mut reader =
                 MemoryRows::new(csv.as_bytes(), Kind::Memory, options.locale, false).unwrap();
-            let line = reader.next_source().unwrap();
-            let row = reader.side(line, 0, false, 0, &options).unwrap();
+            let line = reader.next_source().unwrap().to_vec();
+            let row = reader.side(&line, 0, false, 0, &options).unwrap();
             assert_eq!(
                 (row.corrections, row.discard),
                 (corrections, discard),
@@ -2424,8 +2461,8 @@ mod tests {
         csv.extend_from_slice(&[b'A'; 15]);
         csv.extend_from_slice(&[0x81, 0x41, b'\n']);
         let mut reader = MemoryRows::new(&csv, Kind::Memory, options.locale, false).unwrap();
-        let line = reader.next_source().unwrap();
-        let row = reader.side(line, 0, false, 0, &options).unwrap();
+        let line = reader.next_source().unwrap().to_vec();
+        let row = reader.side(&line, 0, false, 0, &options).unwrap();
         assert_eq!(row.holder.name(), b"AAAAAAAAAAAAAAA ");
         assert_eq!(row.corrections, 2);
         // Captured B selects F1DC offset; live Q+12 alone gates MTON.
@@ -2449,8 +2486,8 @@ mod tests {
             let options = memory_options(g.memory(), &ranges, &live_q);
             let source = b"CH No,Frequency,Mode,Offset,Repeater Tone,TSQL Frequency\n0,145,FM,100,150.0Hz,150.0Hz\n";
             let mut reader = MemoryRows::new(source, Kind::Memory, options.locale, false).unwrap();
-            let line = reader.next_source().unwrap();
-            let row = reader.side(line, 0, false, 0, &options).unwrap();
+            let line = reader.next_source().unwrap().to_vec();
+            let row = reader.side(&line, 0, false, 0, &options).unwrap();
             assert!(row.holder.valid());
             assert_eq!(
                 (

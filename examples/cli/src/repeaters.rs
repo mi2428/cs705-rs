@@ -165,7 +165,7 @@ fn effect(e: &lib::Effect) -> Value {
     "helper_accepted":e.helper_accepted,"candidate":e.candidate,"shared_input":io::bytes_value(&e.shared_input),
     "group_label":e.group_label.as_ref().map(|(node,text)|json!({"node":node,"text":io::bytes_value(text),"delivery":"request-only"})),
     "refresh_if_binding_matches":e.refresh_if_binding_matches,
-    "coordinate_dialog":e.coordinate_dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),"valid":d.valid(),"phase2":d.phase2.as_ref().map(|text|io::bytes_value(text)),"cancel":d.cancel,"done":d.done,"release_requested":d.release_requested,"delivery":"request-only"})),
+    "coordinate_dialog":e.coordinate_dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(&d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),"valid":d.valid(),"phase2":d.phase2.as_ref().map(|text|io::bytes_value(text)),"cancel":d.cancel,"done":d.done,"release_requested":d.release_requested,"delivery":"request-only"})),
     "notifications":e.notifications.iter().map(|&(id,synchronous)|json!({"id":id,"synchronous":synchronous,"delivery":"request-only"})).collect::<Vec<_>>()})
 }
 
