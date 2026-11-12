@@ -176,9 +176,23 @@ impl Setting {
         }
     }
 
-    fn read_storage(&self, image: &Icf<'_>, index: usize) -> Result<i64, Error> {
+    fn storage_at(&self, index: usize) -> Result<usize, Error> {
         self.check_index(index)?;
-        let at = self.offset + self.stride * index;
+        storage_address(self.offset, self.stride, self.width, index)
+    }
+
+    fn check_selector(&self) -> Result<(), Error> {
+        // The selected-event bypass writes one raw byte, without sign or bias conversion.
+        if self.kind != Kind::Selector || self.width != 1 || self.signed || self.bias != 0 {
+            return Err(invalid(
+                "simple selector requires unbiased unsigned byte storage",
+            ));
+        }
+        Ok(())
+    }
+
+    fn read_storage(&self, image: &Icf<'_>, index: usize) -> Result<i64, Error> {
+        let at = self.storage_at(index)?;
         let mut bytes = [0; 8];
         bytes[..self.width].copy_from_slice(&image.memory[at..at + self.width]);
         if self.signed && bytes[self.width - 1] & 0x80 != 0 {
@@ -214,8 +228,7 @@ impl Setting {
         if !matches!(self.kind, Kind::Integer(_)) {
             return Err(invalid("raw numeric store requires Integer descriptor"));
         }
-        self.check_index(index)?;
-        let at = self.offset + self.stride * index;
+        let at = self.storage_at(index)?;
         image.memory[at..at + self.width].copy_from_slice(&raw.to_le_bytes()[..self.width]);
         Ok(())
     }
@@ -225,14 +238,23 @@ impl Setting {
     /// All validation precedes the bounded field store. This is an atomic API, not
     /// the original raw selected-event bypass or a document-save pipeline.
     pub fn write(&self, image: &mut Icf<'_>, index: usize, value: &Value) -> Result<(), Error> {
-        self.check_index(index)?;
+        let at = self.storage_at(index)?;
         let Value::Number(value) = *value;
         let Domain { min, max, step } = self.domain;
-        if !(min..=max).contains(&value) || (value - min) % step != 0 {
+        if step <= 0
+            || !(min..=max).contains(&value)
+            || (i128::from(value) - i128::from(min)) % i128::from(step) != 0
+        {
             return Err(invalid("setting value outside semantic domain"));
         }
-        let at = self.offset + self.stride * index;
-        let raw = (value - self.bias).to_le_bytes();
+        // Public domains cannot enlarge the private storage width or change its bias.
+        let raw = i128::from(value) - i128::from(self.bias);
+        let bits = self.width * 8 - usize::from(self.signed);
+        let limit = 1_i128 << bits;
+        if raw < (if self.signed { -limit } else { 0 }) || raw >= limit {
+            return Err(invalid("setting value outside storage width"));
+        }
+        let raw = (raw as i64).to_le_bytes();
         if !self.control_state(image, index, false)?.helper_enabled {
             return Err(invalid(
                 "setting editor is disabled by its actual case guard",
@@ -260,18 +282,13 @@ impl Setting {
         index: usize,
         event: Selection,
     ) -> Result<Effect, Error> {
-        self.check_index(index)?;
-        if self.kind != Kind::Selector {
-            return Err(invalid(
-                "numeric editor requires its own operation contract",
-            ));
-        }
+        let at = self.storage_at(index)?;
+        self.check_selector()?;
         let stored = event.accepted
             && event.key == self.selection_key
             && event.phase == 2
             && self.control_state(image, index, false)?.helper_enabled;
         if stored {
-            let at = self.offset + self.stride * index;
             image.memory[at] = event.candidate as u8;
             self.after_store(image, event.candidate as u8);
         }
@@ -299,8 +316,11 @@ impl Setting {
         }
         let Value::Number(current) = self.read(image, index)?;
         let choices = self.choices(image, index)?;
+        let first = *choices
+            .first()
+            .ok_or_else(|| invalid("setting has no available selector choices"))?;
         let candidate = match choices.iter().position(|&value| value == current) {
-            None => choices[0],
+            None => first,
             Some(at) => {
                 choices[match step {
                     Step::Next => (at + 1) % choices.len(),
@@ -320,15 +340,18 @@ impl Setting {
         )
     }
 
-    /// Actual contiguous selector choices after the current USB assignment filter.
+    /// Selector choices at the descriptor's step after the current USB assignment filter.
     /// Existing conflicting current values remain in the list, as 9A6C4 does.
     pub fn choices(&self, image: &Icf<'_>, index: usize) -> Result<Vec<i64>, Error> {
-        if self.kind != Kind::Selector {
-            return Err(invalid("numeric editor has no simple selector list"));
+        self.check_selector()?;
+        let Domain { min, max, step } = self.domain;
+        if step <= 0 || min > max || min < 0 || max > i64::from(u8::MAX) {
+            return Err(invalid("selector domain outside byte storage"));
         }
         let Value::Number(current) = self.read(image, index)?;
         let send = i64::from(image.memory[0x39346]);
-        Ok((self.domain.min..=self.domain.max)
+        Ok((min..=max)
+            .filter(|&value| (value - min) % step == 0)
             .filter(|&value| {
                 !matches!(self.key, 0x2fc | 0x2fd)
                     || value == current
@@ -377,6 +400,24 @@ impl Setting {
             }
         }
     }
+}
+
+// Icf images have one fixed extent. Mutable metadata must not bypass that
+// boundary, even when the caller enlarges a descriptor's public count.
+fn storage_address(
+    offset: usize,
+    stride: usize,
+    width: usize,
+    index: usize,
+) -> Result<usize, Error> {
+    stride
+        .checked_mul(index)
+        .and_then(|delta| offset.checked_add(delta))
+        .filter(|&at| {
+            at.checked_add(width)
+                .is_some_and(|end| end <= super::IMAGE_BYTES)
+        })
+        .ok_or_else(|| invalid("setting storage outside image"))
 }
 
 fn invalid(reason: &'static str) -> Error {
@@ -798,6 +839,82 @@ fn numeric_catalog() -> Vec<Setting> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutable_descriptor_domains_fail_without_panics_or_truncation() {
+        let mut image = image();
+        let before = image.memory().to_vec();
+        let mut field = find("lcd_backlight_raw").unwrap().clone();
+        for domain in [
+            Domain {
+                min: 0,
+                max: 255,
+                step: 0,
+            },
+            Domain {
+                min: 0,
+                max: 255,
+                step: -1,
+            },
+        ] {
+            field.domain = domain;
+            assert!(
+                field
+                    .write(&mut image, 0, &Value::Number(i64::MAX))
+                    .is_err()
+            );
+            assert!(field.write(&mut image, 0, &Value::Number(1)).is_err());
+            assert_eq!(image.memory(), before);
+        }
+        field.domain = Domain {
+            min: i64::MIN,
+            max: i64::MAX,
+            step: 1,
+        };
+        assert!(
+            field
+                .write(&mut image, 0, &Value::Number(i64::MAX))
+                .is_err()
+        );
+        field.write(&mut image, 0, &Value::Number(0xe7)).unwrap();
+        field.domain = Domain {
+            min: 0,
+            max: 511,
+            step: 1,
+        };
+        assert!(field.write(&mut image, 0, &Value::Number(256)).is_err());
+        field.kind = Kind::Selector;
+        field.domain = Domain {
+            min: 1,
+            max: 5,
+            step: 2,
+        };
+        assert_eq!(field.choices(&image, 0).unwrap(), [1, 3, 5]);
+        field.domain = Domain {
+            min: 2,
+            max: 1,
+            step: 1,
+        };
+        assert!(field.cycle(&mut image, 0, Step::Next).is_err());
+        field.domain = Domain {
+            min: i64::MIN,
+            max: i64::MAX,
+            step: 1,
+        };
+        assert!(field.choices(&image, 0).is_err());
+        assert_eq!(image.memory(), before);
+        field.key = 0x2fc;
+        field.domain = Domain {
+            min: 1,
+            max: 1,
+            step: 1,
+        };
+        image.memory[0x39346] = 1;
+        let before = image.memory().to_vec();
+        assert!(field.choices(&image, 0).unwrap().is_empty());
+        assert!(field.cycle(&mut image, 0, Step::Next).is_err());
+        assert_eq!(image.memory(), before);
+    }
 
     #[test]
     fn owned_metadata_clone_preserves_private_storage() {

@@ -1184,7 +1184,7 @@ impl SymbolField {
         if index >= self.count {
             return Err(invalid("GPS symbol index outside native axis"));
         }
-        Ok(self.at + 2 * index)
+        super::storage_address(self.at, 2, 2, index)
     }
     pub fn read(&self, image: &Icf<'_>, index: usize) -> Result<[u8; 2], Error> {
         let at = self.address(index)?;
@@ -1756,7 +1756,7 @@ impl TextField {
         if index >= self.count {
             return Err(invalid("GPS text index outside native axis"));
         }
-        Ok(self.at + self.width * index)
+        super::storage_address(self.at, self.width, self.width, index)
     }
     pub fn read(&self, image: &Icf<'_>, index: usize) -> Result<Vec<u8>, Error> {
         let at = self.address(index)?;
@@ -1841,6 +1841,49 @@ impl TextField {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutable_descriptor_counts_reject_overflow_and_outside_image_before_callbacks() {
+        use super::super::extended::FixedTextInput;
+        let mut image = image();
+        let before = image.memory().to_vec();
+        let mut symbol = SYMBOLS[0].clone();
+        let mut text = TEXT[0].clone();
+        symbol.count = usize::MAX;
+        text.count = usize::MAX;
+        for index in [usize::MAX - 1, 0x3c9c0] {
+            assert!(symbol.read(&image, index).is_err());
+            assert!(text.read(&image, index).is_err());
+            let mut source = *b"abc";
+            assert!(
+                symbol
+                    .edit_with_nls(
+                        &mut image,
+                        index,
+                        FixedTextInput::Text {
+                            source: &mut source,
+                            phase: 1
+                        },
+                        |_, _| panic!("invalid symbol index reached callback"),
+                    )
+                    .is_err()
+            );
+            assert!(
+                text.edit_with_nls(
+                    &mut image,
+                    index,
+                    FixedTextInput::Text {
+                        source: &mut source,
+                        phase: 1
+                    },
+                    |_, _| panic!("invalid text index reached callback"),
+                )
+                .is_err()
+            );
+            assert_eq!(&source, b"abc");
+            assert_eq!(image.memory(), before);
+        }
+    }
 
     #[test]
     fn owned_descriptor_names_preserve_private_coordinates() {

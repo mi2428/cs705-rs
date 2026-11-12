@@ -1974,6 +1974,7 @@ impl ChoiceField {
         self.check(index).is_ok()
     }
     fn check(&self, index: usize) -> Result<(), Error> {
+        self.storage.check_index(index)?;
         if index < self.first_index || index - self.first_index >= self.count {
             return Err(invalid("choice index outside original native axis"));
         }
