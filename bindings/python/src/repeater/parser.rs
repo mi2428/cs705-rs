@@ -167,6 +167,10 @@ pub struct Options {
 #[pymethods]
 impl Options {
     #[new]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Exposes every native repeater parser Options field, including the frequency callback."
+    )]
     fn new(
         py: Python<'_>,
         locale: &Locale,
@@ -320,6 +324,7 @@ impl Parsed {
         Ok(())
     }
 }
+/// Owned lazy cursor. A failing callback consumes that row, not the caller's Record.
 #[pyclass(module = "cs705.repeater.parser", frozen)]
 pub struct Rows {
     pub(crate) inner: Owner<core::Rows<'static>>,

@@ -101,6 +101,7 @@ impl Options {
     }
 }
 
+/// Owned lazy cursor; into_owned() returns the same cursor without advancing it.
 #[pyclass(module = "cs705.gps.parser", frozen)]
 pub struct Rows {
     inner: Owner<core::Rows<'static, 'static>>,

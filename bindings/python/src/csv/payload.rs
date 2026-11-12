@@ -167,6 +167,10 @@ impl Context {
         Ok(())
     }
     #[new]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Exposes every native payload Context field without an opaque options argument."
+    )]
     fn new(
         separator: &Bound<'_, PyAny>,
         decimal: &Bound<'_, PyAny>,

@@ -32,6 +32,8 @@ fn byte_index(index: &Bound<'_, PyAny>, length: usize) -> PyResult<ByteIndex> {
     Ok(ByteIndex::One(index as usize))
 }
 
+/// Callback-scoped bytes; permissions follow the native loan.
+/// Views expire on return and reject cross-thread access. Writes cannot resize.
 #[pyclass(module = "cs705.csv.nls", frozen)]
 pub struct Bytes {
     loan: Loan<[u8]>,
@@ -135,6 +137,17 @@ pub(crate) fn upper_call(
         strict_u32(&native.call1((Bytes::from_loan(loan),))?)
     })
 }
+// Only leaf native producers run while the destination is borrowed.
+fn with_output<T>(
+    output: &Bound<'_, PyAny>,
+    call: impl FnOnce(&mut [u8]) -> PyResult<T>,
+) -> PyResult<T> {
+    if let Ok(view) = output.extract::<PyRef<'_, Bytes>>() {
+        view.loan.with_mut(output.py(), call)
+    } else {
+        output.extract::<PyRef<'_, MutableBytes>>()?.with_mut(call)
+    }
+}
 #[pyfunction]
 fn sanitize(bytes: &MutableBytes, replacement: &Bound<'_, PyAny>) -> PyResult<bool> {
     let replacement = strict_u8(replacement)?;
@@ -171,20 +184,30 @@ fn fold_callsign(raw: &MutableBytes) -> PyResult<bool> {
     })
 }
 #[pyfunction]
-fn ascii_map(source: &Bound<'_, PyAny>, destination: &MutableBytes) -> PyResult<i32> {
+/// Copy into owned or writable callback storage; reject non-ASCII input.
+fn ascii_map(source: &Bound<'_, PyAny>, destination: &Bound<'_, PyAny>) -> PyResult<i32> {
     let source = strict_bytes(source)?;
-    destination.with_mut(|d| n::ascii_map(source, d).map_err(crate::errors::csv))
+    with_output(destination, |d| {
+        n::ascii_map(source, d).map_err(crate::errors::csv)
+    })
 }
 #[pyfunction]
-fn platform_map(source: &Bound<'_, PyAny>, destination: &MutableBytes) -> PyResult<i32> {
+/// Use explicit platform ANSI mapping into owned or writable callback storage.
+fn platform_map(source: &Bound<'_, PyAny>, destination: &Bound<'_, PyAny>) -> PyResult<i32> {
     let source = strict_bytes(source)?;
-    destination.with_mut(|d| n::platform_map(source, d).map_err(crate::errors::csv))
+    with_output(destination, |d| {
+        n::platform_map(source, d).map_err(crate::errors::csv)
+    })
 }
 #[pyfunction]
-fn platform_uppercase(bytes: &MutableBytes) -> PyResult<u32> {
-    bytes.with_mut(|bytes| n::platform_uppercase(bytes).map_err(crate::errors::csv))
+/// Uppercase owned or writable callback storage in place; no Unicode decoding.
+fn platform_uppercase(bytes: &Bound<'_, PyAny>) -> PyResult<u32> {
+    with_output(bytes, |bytes| {
+        n::platform_uppercase(bytes).map_err(crate::errors::csv)
+    })
 }
 #[pyfunction]
+/// Map through 2n-byte buffers; the return count does not gate copy-back.
 fn map_copy_back(
     py: Python<'_>,
     shared: Py<MutableBytes>,

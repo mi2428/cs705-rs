@@ -286,6 +286,10 @@ fn choice(
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native number editor arguments, mutable effects and explicit NLS callbacks."
+)]
 fn number(
     py: Python<'_>,
     w: &Working,
@@ -314,6 +318,10 @@ fn number(
     errors.into_inner().finish(py, native)
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native text editor arguments, mutable effects and explicit NLS callbacks."
+)]
 fn text(
     py: Python<'_>,
     w: &Working,
@@ -365,6 +373,10 @@ fn coordinate(
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native coordinate input arguments and the ordered modal event sequence."
+)]
 fn coordinate_input(
     py: Python<'_>,
     w: &Working,

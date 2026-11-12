@@ -246,7 +246,7 @@ def main() -> None:
     else:
         raise AssertionError('row conversion failure swallowed')
     assert next(lazy_rows).holder.valid()
-    typed_error = csv.ErrorData.Invalid('runtime 理由\0é')
+    typed_error = csv.ErrorData.Invalid('runtime \u7406\u7531\0\u00e9')
     typed_failure = channel.Failure.Text(typed_error)
     assert typed_failure.error.native == typed_error
     constructor_report.failure = typed_failure
@@ -257,7 +257,8 @@ def main() -> None:
                                (channel.Failure.Image, typed_error),
                                (channel.Failure.Text, {'diagnostic': typed_error.diagnostic})):
         try:
-            constructor(wrong)
+            # These cases deliberately violate the constructor's input domain.
+            constructor(wrong)  # pyright: ignore[reportArgumentType]
         except TypeError:
             pass
         else:
@@ -302,8 +303,10 @@ def main() -> None:
     literal_dialog = date_input.DateDialog(coordinate_dialog, True)
     literal_effect = date_input.Effect(False, None, b'', (0, 0), literal_dialog)
     dialog_view = literal_effect.dialog
+    assert dialog_view is not None
     editor_view = dialog_view.editor
     editor_view.control = b'live control'
+    assert literal_effect.dialog is not None
     assert literal_effect.dialog.editor.control == b'live control'
     dialog_view.enabled = False
     assert not literal_effect.dialog.enabled
@@ -315,6 +318,7 @@ def main() -> None:
     else:
         raise AssertionError('replaced editor view remained live')
     latest_dialog = literal_effect.dialog
+    assert latest_dialog is not None
     literal_effect.dialog = None
     try:
         latest_dialog.enabled
@@ -346,7 +350,7 @@ def main() -> None:
         (control.WriteResult(1, 0), 'bool_value bytes_written'),
         (control.ScanRow(0, False, 0, 0), 'position valid c2_delta c3_delta'),
         (control.ScanRange(0, 0, False), 'base last stop_on_excess'),
-        (dispatch_value, 'slot export import skip_invalid_export'),
+        (dispatch_value, 'slot export import_kind skip_invalid_export'),
         (binding, 'positions accepted separator'),
         (date, 'year month day'),
         (dt.Time(1, 2, 3, 4), 'hour minute second millisecond'),

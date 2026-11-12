@@ -223,6 +223,10 @@ impl Era {
             Ok(())
         })
     }
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "Python owns the wrapper; the retained era is copied into an independent owner."
+    )]
     fn into_owned(&self) -> PyResult<Self> {
         Ok(Self {
             target: EraTarget::Owned(Handle::new(self.native()?)),
@@ -233,6 +237,8 @@ enum ContextTarget {
     Owned(Handle<d::OwnedContext>),
     Scoped(Loan<d::OwnedContext>),
 }
+/// Byte locale with live era views. into_owned() detaches a copy;
+/// with_context() lends a read-only view that expires when the callback returns.
 #[pyclass(module = "cs705.csv.datetime", frozen)]
 pub struct Context {
     target: ContextTarget,
@@ -268,6 +274,10 @@ impl Context {
 #[pymethods]
 impl Context {
     #[new]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Exposes every native datetime Context field without an opaque options argument."
+    )]
     fn new(
         short_date: &Bound<'_, PyAny>,
         date_separator: &Bound<'_, PyAny>,
@@ -444,6 +454,10 @@ impl Context {
             }),
         }
     }
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "Python owns the wrapper; the retained context is copied into an independent owner."
+    )]
     fn into_owned(&self) -> PyResult<Self> {
         Ok(Self::from_core(self.to_core()?))
     }

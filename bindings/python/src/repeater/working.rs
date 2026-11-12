@@ -105,6 +105,8 @@ impl UseRange {
         self.inner == other.inner
     }
 }
+/// Expanded repeater state, separate from stored ICF bytes.
+/// Callback views expire on return; completed writes survive callback failures.
 #[pyclass(module = "cs705.repeater.working", frozen)]
 pub struct Working {
     pub(crate) inner: WorkingState,
@@ -183,6 +185,11 @@ impl Working {
     fn working<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         self.inner.with_ref(|w| Ok(PyBytes::new(py, w.working())))
     }
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "Python owns the wrapper; this method consumes its checked native working owner."
+    )]
+    /// Consume the owned image; later access fails. Callback views cannot be consumed.
     fn into_working<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let WorkingState::Owned(owner) = &self.inner else {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -301,6 +308,10 @@ impl Working {
             })
         })
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserves native carry bounds, direction, seed and reference-reset callback."
+    )]
     fn carry(
         &self,
         py: Python<'_>,
@@ -389,6 +400,7 @@ impl Working {
             )
         })
     }
+    /// Read live B/Q per reached predicate, not once per row; retain saved rows on failure.
     fn bulk_use(
         &self,
         py: Python<'_>,

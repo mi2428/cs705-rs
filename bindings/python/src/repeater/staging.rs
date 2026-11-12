@@ -87,7 +87,7 @@ impl Record {
     }
     fn __eq__(&self, other: &Self) -> PyResult<bool> {
         if std::ptr::eq(self, other) {
-            return Ok(true);
+            return self.inner.with_ref(|_| Ok(true));
         }
         self.inner
             .with_ref(|a| other.inner.with_ref(|b| Ok(a == b)))
@@ -168,6 +168,7 @@ impl Staging {
     ) -> PyResult<Self> {
         Self::preload(py, rows, names, old_reference)
     }
+    /// Return independent records, not mutable views into staging storage.
     fn rows(&self) -> PyResult<Vec<Record>> {
         self.inner
             .with_ref(|s| Ok(s.rows().cloned().map(Record::from_core).collect()))
@@ -307,6 +308,7 @@ impl Staging {
         error.finish(py, native)
     }
 }
+/// Commit request; callback-supplied Insert.record is read-only and expires on return.
 #[pyclass(module = "cs705.repeater.staging")]
 pub struct Commit {
     #[pyo3(get)]

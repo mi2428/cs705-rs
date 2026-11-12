@@ -50,6 +50,10 @@ fn call_notify(
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native GPS insert arguments and explicit seed and notification callbacks."
+)]
 fn insert(
     py: Python<'_>,
     image: &Icf,
@@ -111,6 +115,10 @@ fn clock_value(value: &Bound<'_, PyAny>) -> PyResult<cs705_core::csv::date_input
 }
 #[pyfunction]
 #[pyo3(signature=(image,group,row,requested,selection,q,system_langid,clock,notify))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native initialized insertion with explicit Q, language, clock and notification inputs."
+)]
 fn insert_initialized(
     py: Python<'_>,
     image: &Icf,

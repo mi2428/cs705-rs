@@ -380,14 +380,15 @@ fn import_with_gate<'py>(
     gate: &ImportGate,
     rows: &Bound<'py, PyAny>,
     stage9: &Bound<'py, PyAny>,
-) -> PyResult<(Option<Bound<'py, PyAny>>, Option<Bound<'py, PyAny>>)> {
+) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
     let mut state = state.clone();
-    c::import_with_gate(
+    let results = c::import_with_gate(
         &mut state,
         gate.native(),
         |s| rows.call1((&*s,)),
         |s| stage9.call1((&*s,)),
-    )
+    )?;
+    results.into_pyobject(state.py())
 }
 pub fn register(root: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(root.py(), "control")?;

@@ -290,7 +290,7 @@ fn tone_ascii(
             callback(
                 &mut errors,
                 crt.call1((PyBytes::new(py, v),))
-                    .and_then(|v| Ok(v.cast::<pyo3::types::PyFloat>()?.extract::<f64>()?)),
+                    .and_then(|v| v.cast::<pyo3::types::PyFloat>()?.extract::<f64>()),
             )
         },
     );

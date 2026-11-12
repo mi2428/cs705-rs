@@ -320,6 +320,10 @@ fn select<'py>(
     crate::icf::enum_result(py, "cs705.repeater.fields", "Outcome", out as i64)
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserves native offset selection inputs and distinct style and save callbacks."
+)]
 fn select_offset<'py>(
     py: Python<'py>,
     row: &Record,

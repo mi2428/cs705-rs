@@ -299,6 +299,7 @@ impl Export {
     }
 }
 #[pyfunction]
+/// Callback failure raises the same exception with the partial Export in its context.
 fn export_csv(
     py: Python<'_>,
     image: &Icf,
@@ -391,6 +392,7 @@ fn import_csv(
     })
 }
 #[pyfunction]
+/// Clear the target before requesting the first row; iterator failure retains applied rows.
 fn import_decoded(
     py: Python<'_>,
     image: &Icf,

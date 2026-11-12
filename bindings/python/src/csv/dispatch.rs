@@ -280,7 +280,7 @@ impl Dispatch {
         self.inner.export = super::payload::kind(value)?;
         Ok(())
     }
-    #[setter("import")]
+    #[setter]
     fn set_import_kind(&mut self, value: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
         self.inner.import = value.map(import_kind).transpose()?;
         Ok(())
@@ -301,7 +301,7 @@ impl Dispatch {
     fn export<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         enum_result(py, "cs705.csv.payload", "Kind", self.inner.export as usize)
     }
-    #[getter("import")]
+    #[getter]
     fn import_kind<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         self.inner
             .import

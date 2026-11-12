@@ -132,10 +132,8 @@ impl CoordinateDialog {
         })
     }
     fn __eq__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
-        if std::ptr::eq(self, other) {
-            return self.with_ref(py, |_| Ok(true));
-        }
-        self.with_ref(py, |a| other.with_ref(py, |b| Ok(a == b)))
+        let value = self.with_ref(py, |d| Ok(d.clone()))?;
+        other.with_ref(py, |other| Ok(value == *other))
     }
     #[new]
     fn new(
