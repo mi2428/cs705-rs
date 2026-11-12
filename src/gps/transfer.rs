@@ -76,7 +76,7 @@ pub fn export_csv(
             && g >= 27
         {
             return Err(Failure::Text(csv::Error::Invalid(
-                "GPS export group outside 0..27",
+                "GPS export group outside 0..27".into(),
             )));
         }
         let groups = image.gps_groups()?;
@@ -88,11 +88,13 @@ pub fn export_csv(
                     continue;
                 }
                 let raw = image.physical_gps_record_raw(p)?.ok_or(Failure::Text(
-                    csv::Error::SourceUnavailable("GPS exported physical record disappeared"),
+                    csv::Error::SourceUnavailable(
+                        "GPS exported physical record disappeared".into(),
+                    ),
                 ))?;
                 let raw: &[u8; 34] = raw.try_into().map_err(|_| {
                     Failure::Text(csv::Error::Invalid(
-                        "GPS physical record must have 34 bytes",
+                        "GPS physical record must have 34 bytes".into(),
                     ))
                 })?;
                 let mut h = DecodedRecord::from_bytes([0; 616]);
@@ -162,7 +164,7 @@ pub fn export_csv_formatted(
         let raw: [u8; 6] = r
             .source
             .try_into()
-            .map_err(|_| csv::Error::Invalid("GPS datetime source width"))?;
+            .map_err(|_| csv::Error::Invalid("GPS datetime source width".into()))?;
         match r.adapter {
             payload::Adapter::GpsDate => csv::datetime::gps_date(
                 raw,
@@ -174,7 +176,9 @@ pub fn export_csv_formatted(
             payload::Adapter::GpsTime => {
                 csv::datetime::gps_time(raw, r.utc_offset_minutes, context, failed_time)
             }
-            _ => Err(csv::Error::Invalid("unexpected GPS formatter request")),
+            _ => Err(csv::Error::Invalid(
+                "unexpected GPS formatter request".into(),
+            )),
         }
     })
 }
@@ -268,7 +272,7 @@ fn import_rows(
             Scope::Group(g) if g < 27 => vec![g],
             _ => {
                 return Err(Failure::Text(csv::Error::Invalid(
-                    "GPS import group outside 0..27",
+                    "GPS import group outside 0..27".into(),
                 )));
             }
         };
@@ -309,7 +313,7 @@ fn import_rows(
             }
             if !operations::allocate(image, g, count)? {
                 return Err(Failure::Text(csv::Error::Operation(
-                    "GPS capacity changed before insert",
+                    "GPS capacity changed before insert".into(),
                 )));
             }
             operations::save(image, start + count, row.record)?;
@@ -426,7 +430,7 @@ mod tests {
             Scope::Whole,
             [
                 Ok(parsed(b'C')),
-                Err(csv::Error::Conversion("injected parser error")),
+                Err(csv::Error::Conversion("injected parser error".into())),
             ],
             false,
         );
@@ -455,7 +459,7 @@ mod tests {
         let out = export_csv(&i, Scope::Whole, csv::Locale::copied(b'.', b','), |r| {
             calls += 1;
             if calls == 3 {
-                return Err(csv::Error::Operation("injected formatter failure"));
+                return Err(csv::Error::Operation("injected formatter failure".into()));
             }
             assert!(matches!(
                 r.adapter,

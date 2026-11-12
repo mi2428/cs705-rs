@@ -541,7 +541,7 @@ fn text(args: TextArgs) -> Result<u8> {
             |_, destination| {
                 if stage.get() != 0 || destination.len() != outputs.map.bytes.len() {
                     return Err(cs705::csv::Error::Invalid(
-                        "LCMap output stage/width mismatch",
+                        "LCMap output stage/width mismatch".into(),
                     ));
                 }
                 destination.copy_from_slice(&outputs.map.bytes);
@@ -553,11 +553,11 @@ fn text(args: TextArgs) -> Result<u8> {
                     .upper
                     .as_ref()
                     .ok_or(cs705::csv::Error::SourceUnavailable(
-                        "explicit CharUpperBuffA output required",
+                        "explicit CharUpperBuffA output required".into(),
                     ))?;
                 if stage.get() != 1 || destination.len() != upper.bytes.len() {
                     return Err(cs705::csv::Error::Invalid(
-                        "uppercase output stage/width mismatch",
+                        "uppercase output stage/width mismatch".into(),
                     ));
                 }
                 destination.copy_from_slice(&upper.bytes);

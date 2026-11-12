@@ -349,23 +349,27 @@ impl NlsSource {
             return Ok(None);
         };
         let e = events.pop_front().ok_or(csv::Error::SourceUnavailable(
-            "captured NLS event exhausted",
+            "captured NLS event exhausted".into(),
         ))?;
         self.used += 1;
         if e["api"] != api {
-            return Err(csv::Error::Invalid("captured NLS API order mismatch"));
+            return Err(csv::Error::Invalid(
+                "captured NLS API order mismatch".into(),
+            ));
         }
         let decode = |key| {
             io::decode_hex(e[key].as_str().expect("validated source"))
-                .map_err(|_| csv::Error::Invalid("captured NLS hex"))
+                .map_err(|_| csv::Error::Invalid("captured NLS hex".into()))
         };
         if decode("input_hex")? != input {
-            return Err(csv::Error::Invalid("captured NLS actual input mismatch"));
+            return Err(csv::Error::Invalid(
+                "captured NLS actual input mismatch".into(),
+            ));
         }
         let written = decode("written_hex")?;
         if written.len() > out.len() {
             return Err(csv::Error::Invalid(
-                "captured NLS output exceeds actual capacity",
+                "captured NLS output exceeds actual capacity".into(),
             ));
         }
         out[..written.len()].copy_from_slice(&written);
@@ -374,7 +378,7 @@ impl NlsSource {
     fn map(&mut self, input: &[u8], out: &mut [u8]) -> std::result::Result<i32, csv::Error> {
         match self.captured("lcmap", input, out)? {
             Some(n) => {
-                i32::try_from(n).map_err(|_| csv::Error::Invalid("LCMap return outside i32"))
+                i32::try_from(n).map_err(|_| csv::Error::Invalid("LCMap return outside i32".into()))
             }
             None => csv::nls::ascii_map(input, out),
         }
@@ -382,13 +386,12 @@ impl NlsSource {
     fn upper(&mut self, out: &mut [u8]) -> std::result::Result<u32, csv::Error> {
         let input = out.to_vec();
         match self.captured("upper", &input, out)? {
-            Some(n) => {
-                u32::try_from(n).map_err(|_| csv::Error::Invalid("CharUpper return outside u32"))
-            }
+            Some(n) => u32::try_from(n)
+                .map_err(|_| csv::Error::Invalid("CharUpper return outside u32".into())),
             None => {
                 if !out.is_ascii() {
                     return Err(csv::Error::SourceUnavailable(
-                        "actual non-ASCII CharUpper source unavailable",
+                        "actual non-ASCII CharUpper source unavailable".into(),
                     ));
                 }
                 out.make_ascii_uppercase();

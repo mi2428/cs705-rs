@@ -36,21 +36,21 @@ pub mod payload;
 #[path = "csv/table.rs"]
 pub mod table;
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 /// A checked safe-API boundary. No diagnostic contains configuration bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// A bounded input or output exceeds the supported storage limit.
-    Limit(&'static str),
+    Limit(Cow<'static, str>),
     /// A required field, index or structural invariant is invalid.
-    Invalid(&'static str),
+    Invalid(Cow<'static, str>),
     /// The original conversion fails rather than returning a silent default.
-    Conversion(&'static str),
+    Conversion(Cow<'static, str>),
     /// Native execution would read unavailable or unwritten memory.
-    SourceUnavailable(&'static str),
+    SourceUnavailable(Cow<'static, str>),
     /// An explicitly supplied native operation failed after prior mutations.
-    Operation(&'static str),
+    Operation(Cow<'static, str>),
 }
 
 impl fmt::Display for Error {
@@ -194,10 +194,10 @@ impl<'a> Reader<'a> {
     /// had no corresponding limits. Empty physical rows do not allocate entries.
     pub fn new(source: &'a [u8], locale: Locale) -> Result<Self, Error> {
         if source.len() > 16 * 1024 * 1024 {
-            return Err(Error::Limit("input exceeds 16 MiB"));
+            return Err(Error::Limit("input exceeds 16 MiB".into()));
         }
         if locale != Locale::copied(locale.decimal, locale.list) {
-            return Err(Error::Invalid("uncopied CSV locale"));
+            return Err(Error::Invalid("uncopied CSV locale".into()));
         }
         let source = source.split(|b| *b == 0).next().unwrap_or(b"");
         let mut header = None;
@@ -207,7 +207,7 @@ impl<'a> Reader<'a> {
                 header = Some(line);
             } else if !line.is_empty() {
                 if rows.len() == 100000 {
-                    return Err(Error::Limit("more than 100000 nonempty CSV rows"));
+                    return Err(Error::Limit("more than 100000 nonempty CSV rows".into()));
                 }
                 rows.push(line);
             }
@@ -229,7 +229,7 @@ impl<'a> Reader<'a> {
         if start < source.len() {
             push_line(&source[start..])?;
         }
-        let header = header.ok_or(Error::Invalid("missing header"))?;
+        let header = header.ok_or(Error::Invalid("missing header".into()))?;
         Ok(Self {
             header,
             rows,
@@ -316,10 +316,10 @@ pub fn join(cells: &[Vec<u8>], separator: u8, crlf: bool) -> Result<Vec<u8>, Err
     for cell in cells {
         len = len
             .checked_add(cell.len())
-            .ok_or(Error::Limit("row size overflow"))?;
+            .ok_or(Error::Limit("row size overflow".into()))?;
     }
     if len > 16 * 1024 * 1024 {
-        return Err(Error::Limit("row exceeds 16 MiB"));
+        return Err(Error::Limit("row exceeds 16 MiB".into()));
     }
     let mut output = Vec::with_capacity(len);
     for (at, cell) in cells.iter().enumerate() {

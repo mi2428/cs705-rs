@@ -21,7 +21,9 @@ pub fn convert_image(
     seed: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
     if source.len() != IMAGE_CAPACITY {
-        return Err(Error::Invalid("conversion requires internal image length"));
+        return Err(Error::Invalid(
+            "conversion requires internal image length".into(),
+        ));
     }
     let mut image = source.to_vec();
     let mut selector = source_profile.selector();
@@ -34,7 +36,7 @@ pub fn convert_image(
         let needs_seed = matches!((selector, next), (1, 2) | (2, 1) | (3, 4) | (4, 5));
         let g = if needs_seed {
             seed.filter(|g| g.len() == IMAGE_CAPACITY)
-                .ok_or(Error::Invalid("conversion requires current G image"))?
+                .ok_or(Error::Invalid("conversion requires current G image".into()))?
         } else {
             &[]
         };

@@ -9,7 +9,10 @@ use crate::{
 };
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 /// Native 610C/type 20 reads current 396FF, subtracts that signed-minute offset

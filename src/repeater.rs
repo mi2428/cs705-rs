@@ -65,7 +65,7 @@ pub(crate) const REPEATER_TONES: [u16; 50] = [
 /// Invalid or unsupported CSV structure or editing input.
 ///
 /// Physical line numbers are one-based; data-row indices are zero-based.
-/// Reasons are static diagnostics and never include configuration contents.
+/// Native reasons are borrowed diagnostics; runtime reasons may be owned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// A required structural bound or cell count is violated.
@@ -73,14 +73,14 @@ pub enum Error {
         /// The physical line containing the invalid input.
         line: usize,
         /// The structural violation.
-        reason: &'static str,
+        reason: Cow<'static, str>,
     },
     /// Input or an edit lies outside this deliberately limited format.
     Unsupported {
         /// The physical line containing the unsupported input or edit.
         line: usize,
         /// The unsupported property.
-        reason: &'static str,
+        reason: Cow<'static, str>,
     },
     /// The requested zero-based data-row index does not exist.
     RowIndexOutOfBounds {
@@ -152,12 +152,12 @@ impl<'a> Csv<'a> {
         let mut lines = source.split_inclusive(|byte| *byte == b'\n');
         let header = lines.next().ok_or(Error::Invalid {
             line: 1,
-            reason: "missing header",
+            reason: "missing header".into(),
         })?;
         if header != HEADER {
             return Err(Error::Unsupported {
                 line: 1,
-                reason: "expected the exact 17-column header and CRLF",
+                reason: "expected the exact 17-column header and CRLF".into(),
             });
         }
 
@@ -167,12 +167,12 @@ impl<'a> Csv<'a> {
             if rows.len() == MAX_ROWS {
                 return Err(Error::Invalid {
                     line,
-                    reason: "more than 2500 data rows",
+                    reason: "more than 2500 data rows".into(),
                 });
             }
             let text = physical.strip_suffix(b"\r\n").ok_or(Error::Unsupported {
                 line,
-                reason: "every physical line must end in CRLF",
+                reason: "every physical line must end in CRLF".into(),
             })?;
             if text
                 .iter()
@@ -180,7 +180,7 @@ impl<'a> Csv<'a> {
             {
                 return Err(Error::Unsupported {
                     line,
-                    reason: "quote, semicolon or control byte",
+                    reason: "quote, semicolon or control byte".into(),
                 });
             }
             let mut cells = [b"".as_slice(); 17];
@@ -188,13 +188,13 @@ impl<'a> Csv<'a> {
             for cell in &mut cells {
                 *cell = parts.next().ok_or(Error::Invalid {
                     line,
-                    reason: "expected exactly 17 cells",
+                    reason: "expected exactly 17 cells".into(),
                 })?;
             }
             if parts.next().is_some() {
                 return Err(Error::Invalid {
                     line,
-                    reason: "expected exactly 17 cells",
+                    reason: "expected exactly 17 cells".into(),
                 });
             }
             check_name_length(cells[NAME], line)?;
@@ -243,7 +243,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line,
-                reason: "edited names require safe ASCII without trailing spaces",
+                reason: "edited names require safe ASCII without trailing spaces".into(),
             });
         }
         row.cells[NAME] = Cow::Owned(name.to_vec());
@@ -269,7 +269,7 @@ impl<'a> Csv<'a> {
         if name.len() > 8 {
             return Err(Error::Unsupported {
                 line,
-                reason: "Sub Name exceeds 8 bytes",
+                reason: "Sub Name exceeds 8 bytes".into(),
             });
         }
         if name
@@ -279,7 +279,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line,
-                reason: "edited sub names require safe ASCII without trailing spaces",
+                reason: "edited sub names require safe ASCII without trailing spaces".into(),
             });
         }
         row.cells[SUB_NAME] = Cow::Owned(name.to_vec());
@@ -303,7 +303,7 @@ impl<'a> Csv<'a> {
         if !(30_000..=1_399_999_999).contains(&hz) {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "Frequency requires 30000..=1399999999 integer Hz",
+                reason: "Frequency requires 30000..=1399999999 integer Hz".into(),
             });
         }
         row.cells[6] = Cow::Owned(crate::csv::number::frequency_text(hz, b'.'));
@@ -326,7 +326,7 @@ impl<'a> Csv<'a> {
         if hz > 9_999_900 || !hz.is_multiple_of(100) {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "Offset requires 0..=9999900 integer Hz in steps of 100",
+                reason: "Offset requires 0..=9999900 integer Hz in steps of 100".into(),
             });
         }
         row.cells[8] = Cow::Owned(crate::csv::number::frequency_text(hz, b'.'));
@@ -348,7 +348,7 @@ impl<'a> Csv<'a> {
             _ => {
                 return Err(Error::Unsupported {
                     line: index + 2,
-                    reason: "CSV Mode edits support FM or DV only",
+                    reason: "CSV Mode edits support FM or DV only".into(),
                 });
             }
         };
@@ -372,7 +372,7 @@ impl<'a> Csv<'a> {
             RepeaterDuplex::Rps => {
                 return Err(Error::Unsupported {
                     line: index + 2,
-                    reason: "CSV Dup edits do not support RPS",
+                    reason: "CSV Dup edits do not support RPS".into(),
                 });
             }
         };
@@ -415,7 +415,7 @@ impl<'a> Csv<'a> {
             .get(usize::from(tone_index))
             .ok_or(Error::Unsupported {
                 line: index + 2,
-                reason: "CSV Repeater Tone requires a saved index in 0..=49",
+                reason: "CSV Repeater Tone requires a saved index in 0..=49".into(),
             })?;
         row.cells[11] = Cow::Owned(format!("{}.{}Hz", tone / 10, tone % 10).into_bytes());
         Ok(())
@@ -466,7 +466,7 @@ impl<'a> Csv<'a> {
         if !(-840..=840).contains(&minutes) || minutes % 5 != 0 {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "CSV UTC Offset requires -840..=840 minutes in steps of 5",
+                reason: "CSV UTC Offset requires -840..=840 minutes in steps of 5".into(),
             });
         }
         let magnitude = minutes.unsigned_abs();
@@ -504,7 +504,8 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "Group Name requires at most 16 safe ASCII bytes without trailing spaces",
+                reason: "Group Name requires at most 16 safe ASCII bytes without trailing spaces"
+                    .into(),
             });
         }
         row.cells[1] = Cow::Owned(name.to_vec());
@@ -532,7 +533,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "Repeater Call Sign requires at most 8 canonical ASCII bytes without trailing spaces",
+                reason: "Repeater Call Sign requires at most 8 canonical ASCII bytes without trailing spaces".into(),
             });
         }
         row.cells[4] = Cow::Owned(value.to_vec());
@@ -560,7 +561,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "Gateway Call Sign requires at most 8 canonical ASCII bytes without trailing spaces",
+                reason: "Gateway Call Sign requires at most 8 canonical ASCII bytes without trailing spaces".into(),
             });
         }
         row.cells[5] = Cow::Owned(value.to_vec());
@@ -580,7 +581,7 @@ impl<'a> Csv<'a> {
         if !(1..=50).contains(&number) {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "CSV Group No requires 1..=50",
+                reason: "CSV Group No requires 1..=50".into(),
             });
         }
         row.cells[0] = Cow::Owned(number.to_string().into_bytes());
@@ -607,7 +608,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "CSV Latitude outside degree/tick domain",
+                reason: "CSV Latitude outside degree/tick domain".into(),
             });
         }
         let ticks = value.thousandths_of_minute.to_be_bytes();
@@ -643,7 +644,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "CSV Longitude outside degree/tick domain",
+                reason: "CSV Longitude outside degree/tick domain".into(),
             });
         }
         let ticks = value.thousandths_of_minute.to_be_bytes();
@@ -683,7 +684,7 @@ fn check_name_length(name: &[u8], line: usize) -> Result<(), Error> {
     if name.len() > 16 {
         return Err(Error::Unsupported {
             line,
-            reason: "Name exceeds 16 bytes",
+            reason: "Name exceeds 16 bytes".into(),
         });
     }
     Ok(())

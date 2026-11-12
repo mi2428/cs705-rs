@@ -255,17 +255,20 @@ impl GpsGroup<'_> {
 fn unsupported(at: usize, reason: &'static str) -> Error {
     Error::Unsupported {
         line: 5 + at / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 fn invalid(at: usize, reason: &'static str) -> Error {
     Error::Invalid {
         line: 5 + at / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 fn argument(reason: &'static str) -> Error {
-    Error::Unsupported { line: 5, reason }
+    Error::Unsupported {
+        line: 5,
+        reason: reason.into(),
+    }
 }
 fn le16(memory: &[u8], at: usize) -> usize {
     usize::from(u16::from_le_bytes([memory[at], memory[at + 1]]))

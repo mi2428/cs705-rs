@@ -608,11 +608,11 @@ fn gps_record(image: &mut Icf<'_>, frame: &InlineFrame, runtime: &Runtime) -> Re
             |image| {
                 let q = runtime.display_context().map_err(|_| icf::Error::Invalid {
                     line: 0,
-                    reason: "native GPS initializer Q source unavailable",
+                    reason: "native GPS initializer Q source unavailable".into(),
                 })?;
                 let clock = runtime.inline_clock().map_err(|_| icf::Error::Invalid {
                     line: 0,
-                    reason: "native GPS initializer clock source unavailable",
+                    reason: "native GPS initializer clock source unavailable".into(),
                 })?;
                 record::gps_initial::seed(image, q, runtime.display_system_langid(), clock)
             },
@@ -621,7 +621,7 @@ fn gps_record(image: &mut Icf<'_>, frame: &InlineFrame, runtime: &Runtime) -> Re
                     .inline_notification(event.id, event.synchronous)
                     .map_err(|_| icf::Error::Invalid {
                         line: 0,
-                        reason: "GPS initial notification request failed",
+                        reason: "GPS initial notification request failed".into(),
                     })
             },
         )?;

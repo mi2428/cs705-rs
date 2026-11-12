@@ -1165,7 +1165,10 @@ pub fn normalize_name(shared: &mut [u8], width: usize) -> Vec<u8> {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 #[cfg(test)]

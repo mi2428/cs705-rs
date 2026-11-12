@@ -2167,7 +2167,10 @@ pub fn edit_rtty(
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 /// Mode 0 text invocations retain the shared source buffer's observable prefix
@@ -2286,25 +2289,25 @@ impl FixedTextField {
     ) -> Result<(), crate::csv::Error> {
         if !matches!(self, Self::Comment | Self::Ssid | Self::NetworkRadioName) {
             return Err(crate::csv::Error::Invalid(
-                "field is not an encoded free-text field",
+                "field is not an encoded free-text field".into(),
             ));
         }
         let at = self.at(index)?;
         if bytes.len() > self.width() || (self == Self::Ssid && bytes.is_empty()) {
             return Err(crate::csv::Error::Invalid(
-                "encoded text length outside field capacity",
+                "encoded text length outside field capacity".into(),
             ));
         }
         let mut raw = vec![b' '; self.width()];
         raw[..bytes.len()].copy_from_slice(bytes);
         image
             .patch_memory(&[(at, &raw)])
-            .map_err(|_| crate::csv::Error::Invalid("encoded text image store"))
+            .map_err(|_| crate::csv::Error::Invalid("encoded text image store".into()))
     }
     fn at(self, index: usize) -> Result<usize, crate::csv::Error> {
         if index >= self.count() {
             return Err(crate::csv::Error::Invalid(
-                "fixed text index outside native axis",
+                "fixed text index outside native axis".into(),
             ));
         }
         Ok(match self {
@@ -2419,7 +2422,9 @@ pub fn edit_fixed_text_with_nls(
     let mut candidate = old;
     if let FixedTextInput::Text { source, phase } = input {
         if !matches!(phase, 1 | 2) {
-            return Err(crate::csv::Error::Invalid("fixed text requires phase1 or2"));
+            return Err(crate::csv::Error::Invalid(
+                "fixed text requires phase1 or2".into(),
+            ));
         }
         candidate = nls::whole_text(source, field.profile(), map, upper)?;
         stored = field != FixedTextField::Ssid || !candidate.is_empty();
@@ -2480,7 +2485,7 @@ pub fn edit_fixed_text_with_nls(
         raw[..candidate.len()].copy_from_slice(&candidate);
         image
             .patch_memory(&[(at, &raw)])
-            .map_err(|_| crate::csv::Error::Invalid("fixed text image store"))?;
+            .map_err(|_| crate::csv::Error::Invalid("fixed text image store".into()))?;
     }
     let marked =
         field == FixedTextField::PictureRecipient && candidate == [b' '; 8] && state_out != 2;
@@ -2507,9 +2512,11 @@ pub fn edit_fixed_text_with_nls(
         },
         warning_bits: if field == FixedTextField::ApPassword
             && super::find("CL_Common_Network_WLAN")
-                .map_err(|_| crate::csv::Error::Invalid("compiled WLAN descriptor unavailable"))?
+                .map_err(|_| {
+                    crate::csv::Error::Invalid("compiled WLAN descriptor unavailable".into())
+                })?
                 .control_state(image, 0, false)
-                .map_err(|_| crate::csv::Error::Invalid("WLAN control-state read"))?
+                .map_err(|_| crate::csv::Error::Invalid("WLAN control-state read".into()))?
                 .marked
         {
             2
@@ -5621,16 +5628,14 @@ mod tests {
                 0,
                 |_, _| {
                     Err(crate::csv::Error::SourceUnavailable(
-                        "synthetic user map failure",
+                        "synthetic user map failure".into(),
                     ))
                 },
                 |_| unreachable!(),
             );
             assert!(matches!(
                 out,
-                Err(crate::csv::Error::SourceUnavailable(
-                    "synthetic user map failure"
-                ))
+                Err(crate::csv::Error::SourceUnavailable(reason)) if reason == "synthetic user map failure"
             ));
             assert_eq!(source, *b"AB ");
             assert_eq!(image.memory(), before);
@@ -5700,7 +5705,7 @@ mod tests {
             0,
             |_, _| {
                 Err(crate::csv::Error::SourceUnavailable(
-                    "synthetic native failure",
+                    "synthetic native failure".into(),
                 ))
             },
             |_| unreachable!(),
@@ -5724,7 +5729,7 @@ mod tests {
             },
             |_| {
                 Err(crate::csv::Error::SourceUnavailable(
-                    "synthetic upper failure",
+                    "synthetic upper failure".into(),
                 ))
             },
         );

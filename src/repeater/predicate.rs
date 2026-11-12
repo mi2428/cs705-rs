@@ -26,7 +26,7 @@ pub fn callsign_bad(image: &[u8], holder: &DecodedRecord, ranges: &Ranges) -> Re
         let at = 0xaa0f + 52 * usize::from(index) + 10;
         let flags = *image.get(at).ok_or(Error::Invalid {
             line: 0,
-            reason: "repeater callsign search outside image",
+            reason: "repeater callsign search outside image".into(),
         })?;
         let eligible = match mode {
             2 => flags >> 6 == 0,

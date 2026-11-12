@@ -127,7 +127,9 @@ impl<'a, 'c> Rows<'a, 'c> {
             lower,
         )?;
         if !binding.accepted {
-            return Err(Error::Invalid("GPS header requires Latitude and Longitude"));
+            return Err(Error::Invalid(
+                "GPS header requires Latitude and Longitude".into(),
+            ));
         }
         Ok(Self {
             reader,

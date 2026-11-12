@@ -28,7 +28,10 @@ use crate::icf::record::{
 use std::ops::Range;
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 5, reason }
+    Error::Invalid {
+        line: 5,
+        reason: reason.into(),
+    }
 }
 fn window(bytes: &[u8], at: usize, n: usize) -> Result<&[u8], Error> {
     bytes
@@ -3159,9 +3162,9 @@ mod tests {
         assert!(matches!(
             error,
             Error::Invalid {
-                reason: "special image window outside supplied image",
+                reason,
                 ..
-            }
+            } if reason == "special image window outside supplied image"
         ));
         assert_eq!(image.memory(), expected);
     }

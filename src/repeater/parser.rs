@@ -46,7 +46,7 @@ impl<'a> Rows<'a> {
         )?;
         if !binding.accepted {
             return Err(Error::Invalid(
-                "repeater header requires Repeater Call Sign",
+                "repeater header requires Repeater Call Sign".into(),
             ));
         }
         Ok(Self {
@@ -85,7 +85,7 @@ impl<'a> Rows<'a> {
                     }
                     Ok(_) => {
                         return Err(Error::SourceUnavailable(
-                            "repeater group signed64 conversion overflow",
+                            "repeater group signed64 conversion overflow".into(),
                         ));
                     }
                     Err(Error::Conversion(_)) => u32::MAX,

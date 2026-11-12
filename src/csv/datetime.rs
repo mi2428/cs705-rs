@@ -93,7 +93,7 @@ pub fn parse_date_with(
 ) -> Result<Date, Error> {
     let source = trim(source);
     if source.len() > 4096 || context.eras.len() > 7 {
-        return Err(Error::Limit("date input or era table"));
+        return Err(Error::Limit("date input or era table".into()));
     }
     let mut offset = 0_i32;
     let mut at = 0;
@@ -128,7 +128,8 @@ pub fn parse_date_with(
     let mut counts = [0_u8; 3];
     let mut n = 0;
     for i in 0..3 {
-        let (value, count) = scan(source, &mut at).ok_or(Error::Conversion("date number"))?;
+        let (value, count) =
+            scan(source, &mut at).ok_or(Error::Conversion("date number".into()))?;
         values[i] = value;
         counts[i] = count;
         n += 1;
@@ -144,7 +145,7 @@ pub fn parse_date_with(
     }
     spaces(source, &mut at);
     if at != source.len() || n < 2 {
-        return Err(Error::Conversion("date tail"));
+        return Err(Error::Conversion("date tail".into()));
     }
     let order = context
         .short_date
@@ -192,11 +193,11 @@ pub fn parse_date_with(
     }
     let date = Date {
         year: year as u16,
-        month: u8::try_from(month).map_err(|_| Error::Conversion("date month"))?,
-        day: u8::try_from(day).map_err(|_| Error::Conversion("date day"))?,
+        month: u8::try_from(month).map_err(|_| Error::Conversion("date month".into()))?,
+        day: u8::try_from(day).map_err(|_| Error::Conversion("date day".into()))?,
     };
     if !valid_date(date) {
-        return Err(Error::Conversion("Gregorian date"));
+        return Err(Error::Conversion("Gregorian date".into()));
     }
     Ok(date)
 }
@@ -213,7 +214,7 @@ pub fn parse_time_with(
 ) -> Result<Time, Error> {
     let mut source = trim(source);
     if source.len() > 4096 {
-        return Err(Error::Limit("time input"));
+        return Err(Error::Limit("time input".into()));
     }
     let mut marker = None;
     for (word, pm) in [
@@ -241,7 +242,7 @@ pub fn parse_time_with(
     let mut fields = 0;
     for (i, part) in parts[..3].iter_mut().enumerate() {
         *part = scan(source, &mut at)
-            .ok_or(Error::Conversion("time number"))?
+            .ok_or(Error::Conversion("time number".into()))?
             .0;
         fields += 1;
         spaces(source, &mut at);
@@ -255,25 +256,25 @@ pub fn parse_time_with(
         // Count parsed fields, not matching bytes: a live separator may itself
         // be a digit consumed by scan. Only a third field admits milliseconds.
         if fields != 3 {
-            return Err(Error::Conversion("time fraction position"));
+            return Err(Error::Conversion("time fraction position".into()));
         }
         at += 1;
         parts[3] = scan(source, &mut at)
-            .ok_or(Error::Conversion("time milliseconds"))?
+            .ok_or(Error::Conversion("time milliseconds".into()))?
             .0;
     }
     spaces(source, &mut at);
     if at != source.len() {
-        return Err(Error::Conversion("time tail"));
+        return Err(Error::Conversion("time tail".into()));
     }
     if let Some(pm) = marker {
         if !(1..=12).contains(&parts[0]) {
-            return Err(Error::Conversion("AM/PM hour"));
+            return Err(Error::Conversion("AM/PM hour".into()));
         }
         parts[0] = parts[0] % 12 + if pm { 12 } else { 0 };
     }
     if parts[0] >= 24 || parts[1] >= 60 || parts[2] >= 60 || parts[3] >= 1000 {
-        return Err(Error::Conversion("time range"));
+        return Err(Error::Conversion("time range".into()));
     }
     Ok(Time {
         hour: parts[0] as u8,
@@ -289,7 +290,7 @@ pub fn parse_time(source: &[u8], context: &Context<'_>) -> Result<Time, Error> {
 /// Gregorian date plus signed minutes, preserving seconds; offset is not a mask.
 pub fn shift_minutes(mut date: Date, time: Time, minutes: i16) -> Result<(Date, Time), Error> {
     if !valid_date(date) || !valid_time(time) {
-        return Err(Error::Conversion("offset source datetime"));
+        return Err(Error::Conversion("offset source datetime".into()));
     }
     let total = i32::from(time.hour) * 60 + i32::from(time.minute) + i32::from(minutes);
     let mut days = total.div_euclid(1440);
@@ -319,7 +320,7 @@ pub fn shift_minutes(mut date: Date, time: Time, minutes: i16) -> Result<(Date, 
                 date.year = date
                     .year
                     .checked_sub(1)
-                    .ok_or(Error::Conversion("offset year"))?;
+                    .ok_or(Error::Conversion("offset year".into()))?;
             } else {
                 date.month -= 1;
             }
@@ -331,7 +332,7 @@ pub fn shift_minutes(mut date: Date, time: Time, minutes: i16) -> Result<(Date, 
         days += 1;
     }
     if !valid_date(date) {
-        return Err(Error::Conversion("offset date range"));
+        return Err(Error::Conversion("offset date range".into()));
     }
     let total = total.rem_euclid(1440);
     Ok((
@@ -426,7 +427,7 @@ pub fn effective_offset(minutes: i16) -> Result<i16, Error> {
     let n = i32::from(minutes).unsigned_abs();
     let hour = (n / 60) & 255;
     if hour >= 24 {
-        return Err(Error::Conversion("offset EncodeTime hour"));
+        return Err(Error::Conversion("offset EncodeTime hour".into()));
     }
     let effective = (hour * 60 + n % 60) as i16;
     Ok(if minutes < 0 { -effective } else { effective })
@@ -529,7 +530,7 @@ pub fn format_date(
         depth: usize,
     ) -> Result<Vec<u8>, Error> {
         if format.len() > 4096 || depth > 8 {
-            return Err(Error::Limit("date format length or recursion"));
+            return Err(Error::Limit("date format length or recursion".into()));
         }
         let mut out = Vec::new();
         let mut at = 0;
@@ -582,13 +583,13 @@ pub fn format_date(
                 at += 1;
             }
             if out.len() > 65536 {
-                return Err(Error::Limit("date formatted output exceeds 64 KiB"));
+                return Err(Error::Limit("date formatted output exceeds 64 KiB".into()));
             }
         }
         Ok(out)
     }
     if !valid_date(date) {
-        return Err(Error::Conversion("date formatter input"));
+        return Err(Error::Conversion("date formatter input".into()));
     }
     render(date, format, context, &mut native, 0)
 }
@@ -871,7 +872,7 @@ mod tests {
         invalid[0] = 0xff;
         assert!(
             gps_date(invalid, 0, &native_context, zero, |_| Err(
-                Error::Operation("injected native date failure")
+                Error::Operation("injected native date failure".into())
             ))
             .is_err()
         );

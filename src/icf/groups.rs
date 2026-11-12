@@ -23,9 +23,9 @@ impl Icf<'_> {
     pub fn canonicalize_memory_layout(&mut self) -> Result<(), Error> {
         const FREE_HEAD: usize = 0x36629;
         const FREE_TAIL: usize = 0x3662b;
-        let unsupported = |at: usize, reason| Error::Unsupported {
+        let unsupported = |at: usize, reason: &'static str| Error::Unsupported {
             line: 5 + at / RECORD_BYTES,
-            reason,
+            reason: reason.into(),
         };
         let word = |at: usize| u16::from_le_bytes([self.memory[at], self.memory[at + 1]]);
         let order = self.raw_memory_group_order()?;
@@ -187,7 +187,7 @@ impl Icf<'_> {
             if slot != u16::MAX && usize::from(slot) >= MEMORY_CHANNEL_COUNT {
                 return Err(Error::Unsupported {
                     line: 5 + link / RECORD_BYTES,
-                    reason: "raw memory group head outside physical slots or FFFF",
+                    reason: "raw memory group head outside physical slots or FFFF".into(),
                 });
             }
             let mut slots = [None; 100];
@@ -201,13 +201,13 @@ impl Icf<'_> {
                 if seen[physical] {
                     return Err(Error::Unsupported {
                         line: 5 + link / RECORD_BYTES,
-                        reason: "logical memory groups repeat a physical slot",
+                        reason: "logical memory groups repeat a physical slot".into(),
                     });
                 }
                 if self.memory[MEMORY_EMPTY_FLAGS + physical] & 1 != 0 {
                     return Err(Error::Unsupported {
                         line: 5 + (MEMORY_EMPTY_FLAGS + physical) / RECORD_BYTES,
-                        reason: "logical memory slot has empty physical flag",
+                        reason: "logical memory slot has empty physical flag".into(),
                     });
                 }
                 seen[physical] = true;
@@ -217,14 +217,14 @@ impl Icf<'_> {
                 if slot != u16::MAX && usize::from(slot) >= MEMORY_CHANNEL_COUNT {
                     return Err(Error::Unsupported {
                         line: 5 + link / RECORD_BYTES,
-                        reason: "logical memory next outside physical slots or FFFF",
+                        reason: "logical memory next outside physical slots or FFFF".into(),
                     });
                 }
             }
             if slot != u16::MAX {
                 return Err(Error::Unsupported {
                     line: 5 + link / RECORD_BYTES,
-                    reason: "logical memory link remains after 100 rows",
+                    reason: "logical memory link remains after 100 rows".into(),
                 });
             }
             groups.push(MemoryGroup {

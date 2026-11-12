@@ -175,7 +175,7 @@ impl RepeaterGroup<'_> {
 fn unsupported(offset: usize, reason: &'static str) -> Error {
     Error::Unsupported {
         line: 5 + offset / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 
@@ -211,7 +211,7 @@ impl Icf<'_> {
         if !(30_000..=1_399_999_999).contains(&hz) {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "repeater frequency outside 30000..=1399999999 Hz",
+                reason: "repeater frequency outside 30000..=1399999999 Hz".into(),
             });
         }
         self.memory[at..at + 4].copy_from_slice(&hz.to_le_bytes());
@@ -297,9 +297,9 @@ impl Icf<'_> {
         }
         let at = RECORDS + RECORD_SIZE * slot;
         let gateway = self.repeater_gateway_offset(at)?;
-        let invalid = |offset, reason| Error::Invalid {
+        let invalid = |offset, reason: &'static str| Error::Invalid {
             line: 5 + (at + offset) / RECORD_BYTES,
-            reason,
+            reason: reason.into(),
         };
         if !matches!(value.mode, RepeaterMode::Fm | RepeaterMode::Dv)
             || value.duplex == RepeaterDuplex::Rps
@@ -481,7 +481,7 @@ impl Icf<'_> {
         if slot >= COUNT {
             return Err(Error::Unsupported {
                 line: 5,
-                reason: "physical repeater slot outside 0..2500",
+                reason: "physical repeater slot outside 0..2500".into(),
             });
         }
         Ok(self.repeater_raw_order()?.contains(&slot))
@@ -551,7 +551,7 @@ impl Icf<'_> {
         if group >= GROUP_COUNT {
             return Err(Error::Unsupported {
                 line: 5,
-                reason: "repeater group outside 0..50",
+                reason: "repeater group outside 0..50".into(),
             });
         }
         let at = NAMES + 16 * group;
@@ -559,7 +559,7 @@ impl Icf<'_> {
         if bytes.len() > 16 || !bytes.iter().all(|b| (0x20..=0x7e).contains(b)) {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "repeater group name requires 0..=16 printable ASCII bytes",
+                reason: "repeater group name requires 0..=16 printable ASCII bytes".into(),
             });
         }
         let mut field = [b' '; 16];

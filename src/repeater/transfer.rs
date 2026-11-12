@@ -224,9 +224,10 @@ fn replace_csv(
                 |_| Ok(default.clone()),
                 |_, which| Ok(options.reset_words[which]),
             )? {
-                return Err(
-                    csv::Error::Operation("repeater capacity changed during replacement").into(),
-                );
+                return Err(csv::Error::Operation(
+                    "repeater capacity changed during replacement".into(),
+                )
+                .into());
             }
             image.save(absolute, &DecodedRecord::from_bytes(*row.record.bytes))?;
             out.applied += 1;
@@ -258,7 +259,7 @@ fn replace_csv(
                 holder.set_header(0x0c, (start + ordinal) as u32, holder.binding());
                 image.save_reload(&mut holder).map_err(|error| {
                     save_error = Some(Failure::Image(error));
-                    csv::Error::Operation("preserved USE typed save failed")
+                    csv::Error::Operation("preserved USE typed save failed".into())
                 })
             };
             let result = if old_count != 0 {
@@ -274,7 +275,7 @@ fn replace_csv(
                     |_, index| {
                         read_record(&old, index as usize, parser).map_err(|error| {
                             read_error = Some(error);
-                            csv::Error::Operation("preserved USE snapshot read failed")
+                            csv::Error::Operation("preserved USE snapshot read failed".into())
                         })
                     },
                     &mut save,
@@ -284,7 +285,7 @@ fn replace_csv(
                     .unwritten
                     .as_mut()
                     .ok_or(csv::Error::SourceUnavailable(
-                        "mode1 oldCount0 requires actual unwritten three-word source",
+                        "mode1 oldCount0 requires actual unwritten three-word source".into(),
                     ))?;
                 staging::restore_use(
                     &mut rows,
@@ -421,7 +422,7 @@ pub fn import_csv_merge(
                         |_, which| Ok(reset[which]),
                     )? {
                         return Err(csv::Error::Operation(
-                            "repeater capacity changed during flush",
+                            "repeater capacity changed during flush".into(),
                         )
                         .into());
                     }
@@ -482,7 +483,7 @@ pub fn export_working_csv(image: &Working, scope: Scope, locale: csv::Locale) ->
             let group = live.group_of(index as i32);
             if group >= 50 {
                 return Err(csv::Error::SourceUnavailable(
-                    "export group-name source outside working groups",
+                    "export group-name source outside working groups".into(),
                 )
                 .into());
             }
@@ -509,7 +510,7 @@ pub fn export_working_csv(image: &Working, scope: Scope, locale: csv::Locale) ->
                 context,
                 |_| {
                     Err(csv::Error::SourceUnavailable(
-                        "unexpected repeater runtime label",
+                        "unexpected repeater runtime label".into(),
                     ))
                 },
             )?;
@@ -788,7 +789,9 @@ mod tests {
             if calls == 1 {
                 Ok(old.clone())
             } else {
-                Err(csv::Error::Operation("injected second heap read failure"))
+                Err(csv::Error::Operation(
+                    "injected second heap read failure".into(),
+                ))
             }
         };
         let mut image = super::tests::image();
@@ -1118,7 +1121,9 @@ mod tests {
         let time = datetime();
         let frequency = |hz| {
             if hz == 433_000_000 {
-                Err(csv::Error::SourceUnavailable("injected frequency source"))
+                Err(csv::Error::SourceUnavailable(
+                    "injected frequency source".into(),
+                ))
             } else {
                 profile(hz)
             }
@@ -1142,7 +1147,7 @@ mod tests {
             assert_eq!(
                 out.failure,
                 Some(Failure::Text(csv::Error::SourceUnavailable(
-                    "injected frequency source"
+                    "injected frequency source".into()
                 )))
             );
             assert_eq!(

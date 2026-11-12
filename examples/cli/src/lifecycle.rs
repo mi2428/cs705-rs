@@ -96,7 +96,10 @@ enum Action {
 }
 
 fn image_error(reason: &'static str) -> icf::Error {
-    icf::Error::Invalid { line: 0, reason }
+    icf::Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn file_error(error: FileError) -> AppError {
     match error {

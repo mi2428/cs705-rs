@@ -320,7 +320,7 @@ fn logic_phase_option_producer_and_saved_q_are_live_not_numeric_snapshots() {
         if index == 2 {
             return Err(icf::Error::Invalid {
                 line: 0,
-                reason: "synthetic checkbox failure",
+                reason: "synthetic checkbox failure".into(),
             });
         }
         if index == 1 {
@@ -459,7 +459,7 @@ fn logic_phase_read_mismatch_saves_then_reprobes_and_keeps_callback_failure_pref
             if event == InitialBoundary::Title {
                 return Err(icf::Error::Invalid {
                     line: 0,
-                    reason: "synthetic title failure",
+                    reason: "synthetic title failure".into(),
                 });
             }
             Ok(())
@@ -1195,7 +1195,7 @@ fn logic_phase_write_final_callback_releases_live_mask_only_after_normal_return(
             if mode == 1 {
                 return Err(icf::Error::Invalid {
                     line: 0,
-                    reason: "synthetic information failure",
+                    reason: "synthetic information failure".into(),
                 });
             }
             op.active_mask = Some(std::iter::once(7..9).collect());

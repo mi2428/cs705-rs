@@ -19,7 +19,10 @@ const ORDER: usize = 0x3c385;
 const RECORDS: usize = 0x32c19;
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 /// A real Flex0 selector entry. Group uses the alarm wire ordinal 1..27, not
@@ -225,7 +228,7 @@ pub fn group_name(
     input: TextInput<'_>,
 ) -> Result<GroupNameEffect, csv::Error> {
     if !(1..=26).contains(&group) {
-        return Err(csv::Error::Invalid("GPS named group outside1..26"));
+        return Err(csv::Error::Invalid("GPS named group outside1..26".into()));
     }
     let at = NAMES + 16 * (group - 1);
     let mut effect = GroupNameEffect {
@@ -252,7 +255,7 @@ pub fn group_name(
             let mut name = csv::nls::name_candidate(&mut effect.shared_input, 16)?;
             name.resize(16, b' ');
             super::operations::rename_group_raw(image, group, name.as_slice().try_into().unwrap())
-                .map_err(|_| csv::Error::Operation("GPS group name store failed"))?;
+                .map_err(|_| csv::Error::Operation("GPS group name store failed".into()))?;
             let mut label = vec![b'A' + group as u8 - 1, b':', b' '];
             label.extend_from_slice(&name);
             effect.stored = true;

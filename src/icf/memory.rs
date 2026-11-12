@@ -82,12 +82,15 @@ memory_enum!(MemoryDigitalSquelch, "Stored DV digital-squelch selection.", {Off=
 fn unsupported(offset: usize, reason: &'static str) -> Error {
     Error::Unsupported {
         line: 5 + offset / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 5, reason }
+    Error::Invalid {
+        line: 5,
+        reason: reason.into(),
+    }
 }
 
 pub(super) fn unpack_callsign(bytes: &[u8]) -> [u8; 8] {
@@ -216,7 +219,7 @@ impl Icf<'_> {
         if slot >= MEMORY_CHANNEL_COUNT {
             return Err(Error::Unsupported {
                 line: 5,
-                reason: "normal physical memory slot outside 0..500",
+                reason: "normal physical memory slot outside 0..500".into(),
             });
         }
         if self.memory[MEMORY_EMPTY_FLAGS + slot] & 1 != 0 {
@@ -524,7 +527,7 @@ impl Icf<'_> {
         if callsigns[2] != [b' '; 8] && callsigns[1][7] == b'G' {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "physical memory nonblank RPT2 conflicts with RPT1 ending in G",
+                reason: "physical memory nonblank RPT2 conflicts with RPT1 ending in G".into(),
             });
         }
         self.memory[at..at + 7].copy_from_slice(&pack_callsign(&value));

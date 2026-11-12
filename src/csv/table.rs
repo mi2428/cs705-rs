@@ -137,7 +137,7 @@ pub fn portable_label(
     use super::payload::Adapter as A;
     if request.adapter == A::Symbol {
         if request.source.len() != 2 {
-            return Err(Error::Invalid("Rx symbol requires raw2"));
+            return Err(Error::Invalid("Rx symbol requires raw2".into()));
         }
         // Raw resource bytes belong to history's bounded PE source lookup.
         return Ok(None);
@@ -175,7 +175,7 @@ pub fn portable_label(
         [n] => u32::from(*n),
         [a, b] => u32::from(u16::from_le_bytes([*a, *b])),
         [a, b, c, d] => u32::from_le_bytes([*a, *b, *c, *d]),
-        _ => return Err(Error::Invalid("CSV scalar label width")),
+        _ => return Err(Error::Invalid("CSV scalar label width".into())),
     };
     let missing = b"NOT_FOUND".as_slice();
     let label: &[u8] = match request.adapter {
@@ -229,10 +229,10 @@ fn rx_label(request: &super::payload::Request<'_>) -> Result<Vec<u8>, Error> {
         (A::DataType, [3]) => b"Killed Item",
         (_, [_]) => {
             return Err(Error::SourceUnavailable(
-                "Rx label outside normal source profile",
+                "Rx label outside normal source profile".into(),
             ));
         }
-        _ => return Err(Error::Invalid("Rx scalar label requires raw1")),
+        _ => return Err(Error::Invalid("Rx scalar label requires raw1".into())),
     };
     Ok(label.to_vec())
 }
@@ -309,7 +309,7 @@ pub fn portable_import(
             | A::Position
     ) {
         return Err(Error::SourceUnavailable(
-            "portable import adapter has no enum reader",
+            "portable import adapter has no enum reader".into(),
         ));
     }
     if let Some(value) = builtin_import_ascii(Kind::Memory, adapter, source) {
@@ -508,7 +508,7 @@ pub fn tone_ascii(
     mut crt: impl FnMut(&[u8]) -> Result<f64, Error>,
 ) -> Result<u32, Error> {
     if source.len() > 4096 {
-        return Err(Error::Limit("CSV tone source exceeds 4096 bytes"));
+        return Err(Error::Limit("CSV tone source exceeds 4096 bytes".into()));
     }
     let normalized: Vec<_> = source
         .iter()

@@ -33,7 +33,7 @@ impl Kind {
             13 => Ok(Self::Callsign),
             21 => Ok(Self::UserEdge),
             _ => Err(Error::Invalid(
-                "channel CSV runtime context is not registered",
+                "channel CSV runtime context is not registered".into(),
             )),
         }
     }
@@ -116,7 +116,7 @@ impl<'a> MemoryRows<'a> {
             Kind::FixedPair => ImportKind::FixedPair,
             _ => {
                 return Err(Error::Invalid(
-                    "memory reader requires normal or Call context",
+                    "memory reader requires normal or Call context".into(),
                 ));
             }
         };
@@ -139,7 +139,7 @@ impl<'a> MemoryRows<'a> {
             import,
         )?;
         if !binding.accepted {
-            return Err(Error::Invalid("memory CSV requires Frequency"));
+            return Err(Error::Invalid("memory CSV requires Frequency".into()));
         }
         let mut sequential = binding.positions[0].is_none();
         if !sequential && whole && kind == Kind::Memory && binding.positions[2].is_some() {
@@ -208,7 +208,9 @@ pub fn memory_default(
     system_langid: Option<u16>,
 ) -> Result<DecodedRecord, Failure> {
     if !ranges.is_complete() {
-        return Err(Error::SourceUnavailable("805B0 actual completed B source unavailable").into());
+        return Err(
+            Error::SourceUnavailable("805B0 actual completed B source unavailable".into()).into(),
+        );
     }
     let mut holder = record::reset_holder(0x1d, 0, 0);
     match kind {
@@ -223,15 +225,16 @@ pub fn memory_default(
         Kind::FixedPair => {
             let index = position
                 .ok_or(Error::SourceUnavailable(
-                    "Call lower parser-local No is unwritten",
+                    "Call lower parser-local No is unwritten".into(),
                 ))?
                 .wrapping_sub(1);
             record_image::load_into(generation, 3, index, &mut holder)?;
         }
         _ => {
-            return Err(
-                Error::Invalid("memory initializer requires normal or Call context").into(),
-            );
+            return Err(Error::Invalid(
+                "memory initializer requires normal or Call context".into(),
+            )
+            .into());
         }
     }
     if matches!(holder.mode(), 0 | 1) {
@@ -253,7 +256,7 @@ impl MemoryOptions<'_> {
         self.ranges
             .filter(|ranges| ranges.is_complete())
             .ok_or(Error::SourceUnavailable(
-                "CSV actual completed B range source unavailable",
+                "CSV actual completed B range source unavailable".into(),
             ))
     }
 }
@@ -360,7 +363,7 @@ impl MemoryRows<'_> {
                 default
                     .as_ref()
                     .ok_or(Error::SourceUnavailable(
-                        "mode repair lacks actual frequency initializer",
+                        "mode repair lacks actual frequency initializer".into(),
                     ))?
                     .mode(),
             );
@@ -384,7 +387,7 @@ impl MemoryRows<'_> {
                 default
                     .as_ref()
                     .ok_or(Error::SourceUnavailable(
-                        "DATA repair lacks actual frequency initializer",
+                        "DATA repair lacks actual frequency initializer".into(),
                     ))?
                     .data(),
             );
@@ -666,12 +669,12 @@ fn memory_put(image: &mut [u8], at: usize, bytes: &[u8]) -> Result<(), icf::Erro
         .get_mut(
             at..at.checked_add(bytes.len()).ok_or(icf::Error::Invalid {
                 line: 0,
-                reason: "CSV parent metadata overflow",
+                reason: "CSV parent metadata overflow".into(),
             })?,
         )
         .ok_or(icf::Error::Invalid {
             line: 0,
-            reason: "CSV parent metadata unavailable",
+            reason: "CSV parent metadata unavailable".into(),
         })?
         .copy_from_slice(bytes);
     Ok(())
@@ -706,13 +709,13 @@ pub fn import_memory(
             Kind::FixedPair if group.is_none() => (4, 1),
             _ => {
                 return Err(Error::Invalid(
-                    "memory import requires normal or ungrouped Call context",
+                    "memory import requires normal or ungrouped Call context".into(),
                 )
                 .into());
             }
         };
         if normal && group.is_none() && selection.is_some() {
-            return Err(Error::Invalid("selected normal CSV rows require a group").into());
+            return Err(Error::Invalid("selected normal CSV rows require a group".into()).into());
         }
         let selection = selection.unwrap_or(Selection {
             first: 0,
@@ -720,7 +723,9 @@ pub fn import_memory(
             number_base: base,
         });
         if selection.number_base != base {
-            return Err(Error::Invalid("memory CSV number base differs from runtime kind").into());
+            return Err(
+                Error::Invalid("memory CSV number base differs from runtime kind".into()).into(),
+            );
         }
         edge_selection(selection, limit)?;
         let whole = normal && group.is_none();
@@ -739,7 +744,7 @@ pub fn import_memory(
             let groups = match group {
                 Some(g) if g < 100 => g..g + 1,
                 None => 0..count,
-                _ => return Err(Error::Invalid("normal group outside0..100").into()),
+                _ => return Err(Error::Invalid("normal group outside0..100".into()).into()),
             };
             (expanded, groups)
         } else {
@@ -994,7 +999,7 @@ impl<'a> UserEdgeRows<'a> {
         )?;
         if !binding.accepted {
             return Err(Error::Invalid(
-                "user-edge CSV requires Frequency Low and Frequency High",
+                "user-edge CSV requires Frequency Low and Frequency High".into(),
             ));
         }
         let sequential = whole && binding.positions[0].is_none();
@@ -1106,7 +1111,7 @@ impl<'a> ScanRows<'a> {
         )?;
         if !binding.accepted {
             return Err(Error::Invalid(
-                "scan CSV requires Frequency Low and Frequency High",
+                "scan CSV requires Frequency Low and Frequency High".into(),
             ));
         }
         let sequential = whole && binding.positions[0].is_none();
@@ -1129,7 +1134,7 @@ impl<'a> ScanRows<'a> {
         Some((|| {
             if default.kind() != 0x1f {
                 return Err(Error::Invalid(
-                    "scan parser requires the actual type1F initializer",
+                    "scan parser requires the actual type1F initializer".into(),
                 ));
             }
             let position = if self.sequential {
@@ -1375,7 +1380,7 @@ pub fn import_scan(
 
 fn edge_selection(selection: Selection, limit: u32) -> Result<(), Error> {
     if selection.first > selection.last || selection.last >= limit {
-        return Err(Error::Invalid("edge selection outside dataset"));
+        return Err(Error::Invalid("edge selection outside dataset".into()));
     }
     Ok(())
 }
@@ -1486,13 +1491,16 @@ pub fn export_memory(
             Kind::Memory => (2, 200, 0),
             Kind::FixedPair if group.is_none() => (3, 8, 1),
             _ => {
-                return Err(
-                    Error::Invalid("memory CSV requires normal or ungrouped Call source").into(),
-                );
+                return Err(Error::Invalid(
+                    "memory CSV requires normal or ungrouped Call source".into(),
+                )
+                .into());
             }
         };
         if kind == Kind::Memory && group.is_none() && selection.is_some() {
-            return Err(Error::Invalid("selected normal sides require an explicit group").into());
+            return Err(
+                Error::Invalid("selected normal sides require an explicit group".into()).into(),
+            );
         }
         let selection = selection.unwrap_or(Selection {
             first: 0,
@@ -1511,7 +1519,7 @@ pub fn export_memory(
             let groups = match group {
                 Some(g) if g < 100 => g..g + 1,
                 None => 0..normal.group_count(),
-                _ => return Err(Error::Invalid("memory group outside0..100").into()),
+                _ => return Err(Error::Invalid("memory group outside0..100".into()).into()),
             };
             for group in groups {
                 if normal.group_used_slots(group)? != 0 {
@@ -1543,7 +1551,7 @@ pub fn export_memory(
                 let mut holder = record::reset_holder(code, index, 0);
                 if let Err(error) = record_image::load_into(source, code, index, &mut holder) {
                     load_failure = Some(error);
-                    return Err(Error::Operation("memory typed source load failed"));
+                    return Err(Error::Operation("memory typed source load failed".into()));
                 }
                 if !holder.valid() {
                     return Ok(None);
@@ -1567,7 +1575,7 @@ pub fn export_memory(
                     context,
                     |_| {
                         Err(Error::SourceUnavailable(
-                            "unexpected memory runtime formatter",
+                            "unexpected memory runtime formatter".into(),
                         ))
                     },
                 )?;
@@ -1667,7 +1675,7 @@ fn export_edges(image: &Icf<'_>, selection: Selection, locale: Locale, scan: boo
                 context,
                 |_| {
                     Err(Error::SourceUnavailable(
-                        "unexpected edge runtime formatter",
+                        "unexpected edge runtime formatter".into(),
                     ))
                 },
             )?;
@@ -1703,12 +1711,20 @@ pub fn export_history(
                 &[b"Call Sign", b"Name", b"Frequency", b"Dup", b"Offset"],
             ),
             0x12 => (20, &[b"Call Sign", b"Name"]),
-            _ => return Err(Error::Invalid("history CSV root requires FromDV/FromFM/ToDV").into()),
+            _ => {
+                return Err(
+                    Error::Invalid("history CSV root requires FromDV/FromFM/ToDV".into()).into(),
+                );
+            }
         };
         let range = match selection {
             None => 0..limit,
             Some(s) if s.first <= s.last && s.last < limit => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("history CSV selected range outside dataset").into()),
+            _ => {
+                return Err(
+                    Error::Invalid("history CSV selected range outside dataset".into()).into(),
+                );
+            }
         };
         let repeaters = crate::repeater::working::Working::from_icf(image, defaults)?;
         let ur = icf::rows::WorkingUr::from_icf(image)?;
@@ -1752,7 +1768,7 @@ pub fn export_history(
                 context,
                 |_| {
                     Err(Error::SourceUnavailable(
-                        "unexpected From/To runtime formatter",
+                        "unexpected From/To runtime formatter".into(),
                     ))
                 },
             )?);
@@ -1776,7 +1792,9 @@ pub fn export_receive_history(
     datetime: &super::datetime::Context<'_>,
 ) -> Export {
     export_receive_history_with_date(image, selection, locale, datetime, |_| {
-        Err(Error::SourceUnavailable("Rx native calendar token output"))
+        Err(Error::SourceUnavailable(
+            "Rx native calendar token output".into(),
+        ))
     })
 }
 
@@ -1797,7 +1815,7 @@ pub fn export_receive_history_with_date(
         let range = match selection {
             None => 0..50,
             Some(s) if s.first <= s.last && s.last < 50 => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("Rx CSV rank range outside0..50").into()),
+            _ => return Err(Error::Invalid("Rx CSV rank range outside0..50".into()).into()),
         };
         let labels: [&[u8]; 37] = [
             b"Type",
@@ -1874,7 +1892,7 @@ fn receive_row(
         image
             .get(0x396ff..0x39701)
             .ok_or(Error::SourceUnavailable(
-                "Rx live UTC offset word unavailable",
+                "Rx live UTC offset word unavailable".into(),
             ))?
             .try_into()
             .expect("checked UTC word"),
@@ -1929,7 +1947,9 @@ pub fn import_callsign(
             Some(s) if s.first <= s.last && (s.last as usize) < count => {
                 (s.last - s.first + 1) as usize
             }
-            _ => return Err(Error::Invalid("UR selected range outside current rows").into()),
+            _ => {
+                return Err(Error::Invalid("UR selected range outside current rows".into()).into());
+            }
         };
         // Keep the reconstructed prefix even if a later per-field NLS fails.
         let operation = (|| -> Result<(), Failure> {
@@ -1950,7 +1970,9 @@ pub fn import_callsign(
                     break;
                 }
                 if !working.insert_one(cursor, defaults)? {
-                    return Err(Error::Operation("UR capacity changed during typed insert").into());
+                    return Err(
+                        Error::Operation("UR capacity changed during typed insert".into()).into(),
+                    );
                 }
                 working.save(cursor, &row.holder)?;
                 cursor += 1;
@@ -1984,7 +2006,7 @@ pub fn export_callsign(image: &Icf<'_>, selection: Option<Selection>, locale: Lo
         let range = match selection {
             None => 0..count as u32,
             Some(s) if s.first <= s.last && s.last < 300 => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("UR export range outside 0..300").into()),
+            _ => return Err(Error::Invalid("UR export range outside 0..300".into()).into()),
         };
         out.bytes = super::join(
             &[b"No".to_vec(), b"Name".to_vec(), b"Call Sign".to_vec()],
@@ -2043,7 +2065,7 @@ impl<'a> CallsignRows<'a> {
             ImportKind::Callsign,
         )?;
         if !binding.accepted {
-            return Err(Error::Invalid("UR CSV requires Call Sign"));
+            return Err(Error::Invalid("UR CSV requires Call Sign".into()));
         }
         Ok(Self {
             reader,
@@ -3145,7 +3167,7 @@ mod tests {
             |_| {
                 seen += 1;
                 if seen > 6 {
-                    Err(Error::Operation("late native DateToken failure"))
+                    Err(Error::Operation("late native DateToken failure".into()))
                 } else {
                     Ok(b"TOKEN".to_vec())
                 }

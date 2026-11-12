@@ -8,7 +8,10 @@ use super::{
 use crate::icf::{Error, Icf};
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1234,7 +1237,7 @@ impl SymbolField {
         use crate::csv::{Error, nls};
         let at = self
             .address(index)
-            .map_err(|_| Error::Invalid("GPS symbol index outside native axis"))?;
+            .map_err(|_| Error::Invalid("GPS symbol index outside native axis".into()))?;
         let mut stored = false;
         let state_out = if matches!(input, FixedTextInput::Begin) {
             2
@@ -1243,7 +1246,7 @@ impl SymbolField {
         };
         if let FixedTextInput::Text { source, phase } = input {
             if !matches!(phase, 1 | 2) {
-                return Err(Error::Invalid("GPS symbol text phase must be1or2"));
+                return Err(Error::Invalid("GPS symbol text phase must be1or2".into()));
             }
             let candidate = nls::whole_text(
                 source,
@@ -1264,7 +1267,7 @@ impl SymbolField {
                 {
                     image
                         .patch_memory(&[(at, &[first, candidate[1]])])
-                        .map_err(|_| Error::Operation("GPS symbol direct store"))?;
+                        .map_err(|_| Error::Operation("GPS symbol direct store".into()))?;
                     stored = true;
                 }
             }
@@ -1409,7 +1412,7 @@ impl CoordinateField {
             let word = u16::from_be_bytes([temporary[1], temporary[2]]);
             image
                 .patch_memory(&[(self.at, &word.to_le_bytes())])
-                .map_err(|_| crate::csv::Error::Operation("GPS area word store"))?;
+                .map_err(|_| crate::csv::Error::Operation("GPS area word store".into()))?;
         } else {
             crate::csv::number::coordinate_native_phase2(
                 (&mut image.memory[self.at..self.at + 4])
@@ -1788,7 +1791,7 @@ impl TextField {
         use crate::csv::{self, nls};
         let at = self
             .address(index)
-            .map_err(|_| csv::Error::Invalid("GPS text index outside native axis"))?;
+            .map_err(|_| csv::Error::Invalid("GPS text index outside native axis".into()))?;
         let mut stored = false;
         let state_out = if matches!(input, super::extended::FixedTextInput::Begin) {
             2
@@ -1797,7 +1800,9 @@ impl TextField {
         };
         if let super::extended::FixedTextInput::Text { source, phase } = input {
             if !matches!(phase, 1 | 2) {
-                return Err(csv::Error::Invalid("GPS fixed text phase must be1or2"));
+                return Err(csv::Error::Invalid(
+                    "GPS fixed text phase must be1or2".into(),
+                ));
             }
             let profile = nls::Profile {
                 uppercase: false,
@@ -1813,7 +1818,7 @@ impl TextField {
             bytes[..candidate.len()].copy_from_slice(&candidate);
             image
                 .patch_memory(&[(at, &bytes)])
-                .map_err(|_| csv::Error::Operation("GPS fixed text store"))?;
+                .map_err(|_| csv::Error::Operation("GPS fixed text store".into()))?;
             stored = true;
         }
         Ok(super::extended::TextEffect {
@@ -1822,7 +1827,7 @@ impl TextField {
             notify_flags: 0,
             display: self
                 .read(image, index)
-                .map_err(|_| csv::Error::Operation("GPS fixed text read"))?,
+                .map_err(|_| csv::Error::Operation("GPS fixed text read".into()))?,
         })
     }
 }
@@ -2231,7 +2236,7 @@ mod tests {
                         phase: 1
                     },
                     |_, _| Err(crate::csv::Error::SourceUnavailable(
-                        "actual LCMap output missing"
+                        "actual LCMap output missing".into()
                     ))
                 )
                 .is_err()

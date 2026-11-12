@@ -30,15 +30,15 @@ pub enum Error {
     Invalid {
         /// One-based physical line.
         line: usize,
-        /// Static diagnostic.
-        reason: &'static str,
+        /// Borrowed native or owned runtime diagnostic.
+        reason: Cow<'static, str>,
     },
     /// Syntax or a new value is outside the limited subset.
     Unsupported {
         /// One-based physical line.
         line: usize,
-        /// Static diagnostic.
-        reason: &'static str,
+        /// Borrowed native or owned runtime diagnostic.
+        reason: Cow<'static, str>,
     },
     /// The requested data row does not exist.
     RowIndexOutOfBounds {
@@ -89,12 +89,12 @@ impl<'a> Csv<'a> {
         let mut lines = source.split_inclusive(|byte| *byte == b'\n');
         let header = lines.next().ok_or(Error::Invalid {
             line: 1,
-            reason: "missing header",
+            reason: "missing header".into(),
         })?;
         if header != HEADER {
             return Err(Error::Unsupported {
                 line: 1,
-                reason: "expected the exact GPS nine-column header and CRLF",
+                reason: "expected the exact GPS nine-column header and CRLF".into(),
             });
         }
         let mut rows = Vec::new();
@@ -103,12 +103,12 @@ impl<'a> Csv<'a> {
             if rows.len() == 300 {
                 return Err(Error::Invalid {
                     line,
-                    reason: "more than 300 GPS data rows",
+                    reason: "more than 300 GPS data rows".into(),
                 });
             }
             let text = physical.strip_suffix(b"\r\n").ok_or(Error::Unsupported {
                 line,
-                reason: "every physical line must end in CRLF",
+                reason: "every physical line must end in CRLF".into(),
             })?;
             if text
                 .iter()
@@ -116,7 +116,7 @@ impl<'a> Csv<'a> {
             {
                 return Err(Error::Unsupported {
                     line,
-                    reason: "quote, semicolon or control byte",
+                    reason: "quote, semicolon or control byte".into(),
                 });
             }
             let mut cells = [b"".as_slice(); 9];
@@ -124,13 +124,13 @@ impl<'a> Csv<'a> {
             for cell in &mut cells {
                 *cell = parts.next().ok_or(Error::Invalid {
                     line,
-                    reason: "expected exactly nine GPS cells",
+                    reason: "expected exactly nine GPS cells".into(),
                 })?;
             }
             if parts.next().is_some() {
                 return Err(Error::Invalid {
                     line,
-                    reason: "expected exactly nine GPS cells",
+                    reason: "expected exactly nine GPS cells".into(),
                 });
             }
             rows.push(Row {
@@ -160,7 +160,7 @@ impl<'a> Csv<'a> {
             _ => {
                 return Err(Error::Unsupported {
                     line: index + 2,
-                    reason: "GPS Group requires 0..=26",
+                    reason: "GPS Group requires 0..=26".into(),
                 });
             }
         };
@@ -198,7 +198,8 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "GPS names require at most 16 safe ASCII bytes without trailing spaces",
+                reason: "GPS names require at most 16 safe ASCII bytes without trailing spaces"
+                    .into(),
             });
         }
         row.cells[column] = Cow::Owned(value.to_vec());
@@ -240,7 +241,7 @@ impl<'a> Csv<'a> {
         {
             return Err(Error::Unsupported {
                 line: index + 2,
-                reason: "GPS coordinate outside degree/tick domain",
+                reason: "GPS coordinate outside degree/tick domain".into(),
             });
         }
         let ticks = value.thousandths_of_minute.to_be_bytes();
@@ -275,7 +276,7 @@ impl<'a> Csv<'a> {
             _ => {
                 return Err(Error::Unsupported {
                     line: index + 2,
-                    reason: "GPS altitude outside tenths-foot domain",
+                    reason: "GPS altitude outside tenths-foot domain".into(),
                 });
             }
         };
@@ -445,7 +446,7 @@ mod tests {
         assert_eq!(
             Error::Invalid {
                 line: 2,
-                reason: "test"
+                reason: "test".into()
             }
             .to_string(),
             "invalid GPS CSV at line 2: test"
@@ -453,7 +454,7 @@ mod tests {
         assert_eq!(
             Error::Unsupported {
                 line: 3,
-                reason: "test"
+                reason: "test".into()
             }
             .to_string(),
             "unsupported GPS CSV at line 3: test"

@@ -876,7 +876,10 @@ pub struct FrequencyContext<'a> {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn hit(ranges: &[FrequencyRange], frequency: u32) -> bool {
     ranges

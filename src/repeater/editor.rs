@@ -98,7 +98,7 @@ pub fn group_name(
     effect: &mut Effect,
 ) -> Result<(), Error> {
     if group >= 50 {
-        return Err(Error::Invalid("repeater named group outside 0..50"));
+        return Err(Error::Invalid("repeater named group outside 0..50".into()));
     }
     let names = crate::repeater::groups::NAMES;
     let old = &image.memory()[names + 16 * group..names + 16 * (group + 1)];
@@ -121,7 +121,7 @@ pub fn group_name(
                 group,
                 candidate.as_slice().try_into().expect("group name width"),
             )
-            .map_err(|_| Error::Operation("repeater group name store failed"))?;
+            .map_err(|_| Error::Operation("repeater group name store failed".into()))?;
             effect.native.save_returned = true;
             effect.native.changed = true;
             let mut label = format!("{:02}: ", group + 1).into_bytes();
@@ -164,7 +164,7 @@ fn scaled_input(
                 i64::from(max),
                 1,
             )
-            .map_err(|_| Error::Conversion("native scaled numeric text"))?;
+            .map_err(|_| Error::Conversion("native scaled numeric text".into()))?;
             Ok((value as u32, accepted))
         }
         _ => Ok((old, false)),
@@ -246,7 +246,7 @@ pub(crate) fn tone_crt(source: &[u8], point: u8) -> Result<f64, Error> {
         .unwrap_or(prefix.len())..];
     if text.starts_with(b"+NAN") || text.starts_with(b"-NAN") {
         return Err(Error::Operation(
-            "native tone NaN comparison raises invalid under normal unmasked x87 CW",
+            "native tone NaN comparison raises invalid under normal unmasked x87 CW".into(),
         ));
     }
     if text.starts_with(b"+INF") {
@@ -289,9 +289,9 @@ pub(crate) fn tone_crt(source: &[u8], point: u8) -> Result<f64, Error> {
                 .position(|b| !matches!(*b, 9..=13 | 32))
                 .unwrap_or(normalized.len());
             std::str::from_utf8(&normalized[start..])
-                .map_err(|_| Error::Conversion("native CRT exponent bytes"))?
+                .map_err(|_| Error::Conversion("native CRT exponent bytes".into()))?
                 .parse::<f64>()
-                .map_err(|_| Error::Conversion("native CRT exponent"))
+                .map_err(|_| Error::Conversion("native CRT exponent".into()))
         }
         Err(error) => Err(error),
     }
@@ -332,7 +332,9 @@ pub fn number(
                             icf::frequency::f20c(r.ranges, r.system_langid, new_class).map_err(
                                 |e| {
                                     effect.source_error = Some(e.to_string());
-                                    Error::SourceUnavailable("actual F20C source unavailable")
+                                    Error::SourceUnavailable(
+                                        "actual F20C source unavailable".into(),
+                                    )
                                 },
                             )?
                         } else {
@@ -606,11 +608,11 @@ fn snapshot(holder: &DecodedRecord, r: &Runtime<'_>) -> Record {
 fn save(w: &mut Working, row: &mut Record) -> Result<(), Error> {
     let mut h = DecodedRecord::from_bytes(*row.bytes);
     w.save_reload(&mut h).map_err(|error| match error {
-        icf::Error::Invalid { reason, .. } | icf::Error::Unsupported { reason, .. } => {
-            Error::Operation(reason)
-        }
+        icf::Error::Invalid { reason, .. }
+        | icf::Error::Unsupported { reason, .. }
+        | icf::Error::Operation(reason) => Error::Operation(reason),
         icf::Error::ChecksumMismatch { .. } => {
-            Error::Operation("repeater typed save/reload checksum mismatch")
+            Error::Operation("repeater typed save/reload checksum mismatch".into())
         }
     })?;
     row.bytes.copy_from_slice(h.as_bytes());
@@ -664,14 +666,14 @@ pub fn begin_type(
 ) -> Result<(), Error> {
     let before = w
         .groups()
-        .map_err(|_| Error::Operation("repeater group source unavailable"))?;
+        .map_err(|_| Error::Operation("repeater group source unavailable".into()))?;
     if before.total() >= 2500 {
         effect.blocked = true;
         return Ok(());
     }
     let absolute = before
         .start(group)
-        .map_err(|_| Error::Invalid("repeater group outside native axis"))?
+        .map_err(|_| Error::Invalid("repeater group outside native axis".into()))?
         as usize
         + relative;
     let seed = record::reset_holder(0x0c, absolute as u32, holder.binding());
@@ -691,7 +693,7 @@ pub fn begin_type(
             record::repeater_reset_word(
                 r.generation.ok_or(icf::Error::Invalid {
                     line: 0,
-                    reason: "actual G source unavailable",
+                    reason: "actual G source unavailable".into(),
                 })?,
                 which,
             )
@@ -699,16 +701,16 @@ pub fn begin_type(
     );
     effect.inserted = w
         .groups()
-        .map_err(|_| Error::Operation("repeater post-insert group source unavailable"))?
+        .map_err(|_| Error::Operation("repeater post-insert group source unavailable".into()))?
         .total()
         != before.total();
     result.map_err(|e| {
         effect.source_error = Some(e.to_string());
-        Error::SourceUnavailable("native repeater insertion source failed")
+        Error::SourceUnavailable("native repeater insertion source failed".into())
     })?;
     effect.notifications.extend([(0x40, true), (0x39, true)]);
     w.load_into(absolute, holder)
-        .map_err(|_| Error::Operation("repeater inserted row reload failed"))?;
+        .map_err(|_| Error::Operation("repeater inserted row reload failed".into()))?;
     holder.set_valid(false);
     Ok(())
 }
@@ -788,7 +790,9 @@ pub fn choice(
                         })
                         .map_err(|e| {
                             effect.source_error = Some(e.to_string());
-                            Error::SourceUnavailable("actual type22 Q/LANGID source unavailable")
+                            Error::SourceUnavailable(
+                                "actual type22 Q/LANGID source unavailable".into(),
+                            )
                         })
                 },
                 |row| save(w, row),
@@ -968,7 +972,9 @@ pub fn text(
                 &DecodedRecord::from_bytes(*row.bytes),
                 r.ranges,
             )
-            .map_err(|_| Error::Operation("repeater callsign predicate source read failed"))?
+            .map_err(|_| {
+                Error::Operation("repeater callsign predicate source read failed".into())
+            })?
         {
             effect.native.warning_flags |= 4;
         }
@@ -1081,7 +1087,9 @@ mod tests {
                     map: &mut |_, _| panic!("tone never reaches LCMap"),
                     upper: &mut |bytes| {
                         bytes[0] = b'X';
-                        Err(Error::SourceUnavailable("captured Upper late failure"))
+                        Err(Error::SourceUnavailable(
+                            "captured Upper late failure".into(),
+                        ))
                     }
                 }
             )
@@ -1117,7 +1125,7 @@ mod tests {
                 upper: &mut |bytes| {
                     if !bytes.is_ascii() {
                         return Err(Error::SourceUnavailable(
-                            "test requires captured upper output",
+                            "test requires captured upper output".into(),
                         ));
                     }
                     bytes.make_ascii_uppercase();
@@ -1660,7 +1668,9 @@ mod tests {
                 &r,
                 &mut e,
                 &mut Nls {
-                    map: &mut |_, _| Err(Error::SourceUnavailable("test LCMap source failure")),
+                    map: &mut |_, _| Err(Error::SourceUnavailable(
+                        "test LCMap source failure".into()
+                    )),
                     upper: &mut |_| panic!()
                 }
             )

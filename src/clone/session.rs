@@ -141,7 +141,7 @@ impl SessionConfig {
             || self.settings.extra_preamble > 512
             || self.settings.data_preamble > 512
         {
-            return Err(Error::Invalid("session configuration bounds"));
+            return Err(Error::Invalid("session configuration bounds".into()));
         }
         Ok(())
     }
@@ -359,7 +359,7 @@ impl Session {
 
     fn adopt_query(&mut self, query: &Outcome) -> Result<(), Error> {
         let (identity, echo) = query.completed_query.as_ref().ok_or(Error::Invalid(
-            "post-probe transfer requires a completed query",
+            "post-probe transfer requires a completed query".into(),
         ))?;
         if query.operation != Operation::Query
             || query.failure.is_some()
@@ -370,7 +370,9 @@ impl Session {
             || *echo == Echo::Auto
             || Some(identity.validate()?) != self.profile
         {
-            return Err(Error::Invalid("post-probe query state or profile mismatch"));
+            return Err(Error::Invalid(
+                "post-probe query state or profile mismatch".into(),
+            ));
         }
         let mut gate = IdentityGate::default();
         if gate.apply(
@@ -381,7 +383,7 @@ impl Session {
         )? != 0
             || query.identity_gate != gate
         {
-            return Err(Error::Invalid("post-probe identity gate mismatch"));
+            return Err(Error::Invalid("post-probe identity gate mismatch".into()));
         }
         self.out.identity = Some(identity.clone());
         self.out.identity_gate = gate;
@@ -397,7 +399,7 @@ impl Session {
         image: &[u8],
     ) -> Result<Self, Error> {
         if image.len() != IMAGE_CAPACITY {
-            return Err(Error::Invalid("write image length"));
+            return Err(Error::Invalid("write image length".into()));
         }
         Self::new(config, Operation::Write, Some(profile), image, mask)
     }
@@ -629,14 +631,14 @@ impl Session {
 
     fn query_response(&mut self, p: &[u8]) -> Result<(), Failure> {
         if p.len() < 8 || p[0] != 0xfe {
-            return Err(Failure::Protocol(Error::Invalid("query response")));
+            return Err(Failure::Protocol(Error::Invalid("query response".into())));
         }
         if self.out.echo == Echo::None && p[1..4] == [0xee, 0xef, 0xe0] {
             return Err(Failure::Identity(5));
         }
         if p[1..4] != [0xef, 0xee, 0xe1] {
             return Err(Failure::Protocol(Error::Invalid(
-                "query direction or command",
+                "query direction or command".into(),
             )));
         }
         // 16D29/16D57/16D7A -> 16D87: raw BE stores/tail first, result 0
@@ -673,7 +675,7 @@ impl Session {
         // Original state 9 17EBC length gate; it differs from pure Frame decode.
         if !(12..=0x20a).contains(&p.len()) || p[..3] != [0xfe, 0xef, 0xee] {
             return Err(Failure::Protocol(Error::Invalid(
-                "read response header or length",
+                "read response header or length".into(),
             )));
         }
         if p[3] == 0xe5 {
@@ -681,7 +683,7 @@ impl Session {
             // NOT [5:] (the second wire FE has already been collapsed).
             let payload = &p[4..];
             if !payload.starts_with(b"Icom Inc.") {
-                return Err(Failure::Protocol(Error::Invalid("end brand")));
+                return Err(Failure::Protocol(Error::Invalid("end brand".into())));
             }
             let expected = if self.config.counted_end {
                 format!("Icom Inc.{:02X}", self.out.blocks as u8).into_bytes()
@@ -689,7 +691,7 @@ impl Session {
                 b"Icom Inc.".to_vec()
             };
             if payload.len() != expected.len() {
-                return Err(Failure::Protocol(Error::Invalid("end length")));
+                return Err(Failure::Protocol(Error::Invalid("end length".into())));
             }
             if payload != expected {
                 return Err(Failure::EndCount);
@@ -701,7 +703,7 @@ impl Session {
             return Ok(true);
         }
         if p[3] != 0xe4 {
-            return Err(Failure::Protocol(Error::Invalid("read command")));
+            return Err(Failure::Protocol(Error::Invalid("read command".into())));
         }
         let Frame::Data { address, payload } =
             super::decode_data_body(&p[4..]).map_err(|e| match e {
@@ -710,7 +712,7 @@ impl Session {
                 e => Failure::Protocol(e),
             })?
         else {
-            return Err(Failure::Protocol(Error::Invalid("read data")));
+            return Err(Failure::Protocol(Error::Invalid("read data".into())));
         };
         let start = address as usize;
         let end = start
@@ -839,7 +841,7 @@ impl Session {
                                     self.read_partial.push(b);
                                     if self.read_partial.len() > 0x209 {
                                         return Err(Failure::Protocol(Error::Invalid(
-                                            "read frame overflow",
+                                            "read frame overflow".into(),
                                         )));
                                     }
                                 }

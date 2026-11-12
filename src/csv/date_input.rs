@@ -21,7 +21,8 @@ pub struct Clock {
 impl Clock {
     pub fn datetime(self) -> Result<(Date, Time), Error> {
         let narrow = |n| {
-            u8::try_from(n).map_err(|_| Error::Conversion("local clock WORD outside byte field"))
+            u8::try_from(n)
+                .map_err(|_| Error::Conversion("local clock WORD outside byte field".into()))
         };
         let date = Date {
             year: self.year,
@@ -35,7 +36,7 @@ impl Clock {
             millisecond: self.millisecond,
         };
         if !datetime::valid_date(date) || !datetime::valid_time(time) {
-            return Err(Error::Conversion("local clock calendar/time fields"));
+            return Err(Error::Conversion("local clock calendar/time fields".into()));
         }
         Ok((date, time))
     }
@@ -54,13 +55,13 @@ fn clock(runtime: &Runtime<'_>) -> Result<(Date, Time), Error> {
     runtime
         .clock
         .ok_or(Error::SourceUnavailable(
-            "native datetime edit requires GetLocalTime fields",
+            "native datetime edit requires GetLocalTime fields".into(),
         ))?
         .datetime()
 }
 fn mode(mode: u8) -> Result<(), Error> {
     if mode > 3 {
-        Err(Error::Invalid("native datetime mode outside0..3"))
+        Err(Error::Invalid("native datetime mode outside0..3".into()))
     } else {
         Ok(())
     }

@@ -660,7 +660,10 @@ pub fn callsign_bad(image: &[u8], holder: &DecodedRecord) -> Result<bool, Error>
     Ok(first != holder.index())
 }
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 /// Native 16-byte view used by 61F20; count is the entry gate, not a new loop cap.

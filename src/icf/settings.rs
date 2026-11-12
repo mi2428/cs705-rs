@@ -380,7 +380,10 @@ impl Setting {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 // Stored integer codecs reuse one width/sign/bias path. This is project schema,

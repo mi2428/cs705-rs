@@ -16,7 +16,7 @@
 //! reader in [`text`] deliberately accepts a wider grammar and ignores CD; its
 //! successful read still needs [`mod@format`]'s signature and exact-coverage gates.
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 pub mod callsign_dialog;
 mod common;
@@ -123,20 +123,22 @@ pub enum Error {
         /// Location of the invalid input.
         line: usize,
         /// Diagnostic context; never contains configuration contents.
-        reason: &'static str,
+        reason: Cow<'static, str>,
     },
     /// The format or setting is outside the independently established subset.
     Unsupported {
         /// Location of the unsupported input.
         line: usize,
         /// The unsupported format property.
-        reason: &'static str,
+        reason: Cow<'static, str>,
     },
     /// The recorded checksum does not match the decoded records.
     ChecksumMismatch {
         /// Location of the checksum field.
         line: usize,
     },
+    /// An explicitly supplied operation failed; preceding changes remain stored.
+    Operation(Cow<'static, str>),
 }
 
 impl fmt::Display for Error {
@@ -147,6 +149,7 @@ impl fmt::Display for Error {
                 write!(f, "unsupported ICF at line {line}: {reason}")
             }
             Self::ChecksumMismatch { line } => write!(f, "ICF checksum mismatch at line {line}"),
+            Self::Operation(reason) => write!(f, "ICF operation failed: {reason}"),
         }
     }
 }
@@ -244,7 +247,7 @@ impl<'a> Icf<'a> {
         if lines.next().map(|(_, line)| line) != Some(b"40750001".as_slice()) {
             return Err(Error::Unsupported {
                 line: 1,
-                reason: "model or file revision",
+                reason: "model or file revision".into(),
             });
         }
 
@@ -256,32 +259,32 @@ impl<'a> Icf<'a> {
             let number = index + 2;
             let (_, text) = lines.next().ok_or(Error::Invalid {
                 line: number,
-                reason: "missing metadata",
+                reason: "missing metadata".into(),
             })?;
             metadata[index] = text.strip_prefix(prefix).ok_or(Error::Invalid {
                 line: number,
-                reason: "unexpected metadata field or order",
+                reason: "unexpected metadata field or order".into(),
             })?;
         }
         if metadata[1] != [b'0' + revision] {
             return Err(Error::Unsupported {
                 line: 3,
                 reason: if revision == 5 {
-                    "MapRev other than 5"
+                    "MapRev other than 5".into()
                 } else {
-                    "MapRev other than 6"
+                    "MapRev other than 6".into()
                 },
             });
         }
         if metadata[0].iter().any(|byte| matches!(byte, 0 | b'\r')) {
             return Err(Error::Unsupported {
                 line: 2,
-                reason: "NUL or embedded carriage return in comment",
+                reason: "NUL or embedded carriage return in comment".into(),
             });
         }
         let extra_data = u32::from_be_bytes(hex::<4>(metadata[2]).ok_or(Error::Invalid {
             line: 4,
-            reason: "EtcData must contain eight hexadecimal characters",
+            reason: "EtcData must contain eight hexadecimal characters".into(),
         })?);
         // EtcData callback RVA 0x25AA4 -> 0x56680: bits 0, 3 and 6 encode
         // the population count of the other 29 bits modulo eight, low bit first.
@@ -289,7 +292,7 @@ impl<'a> Icf<'a> {
         if check != (extra_data & !0x49).count_ones() % 8 {
             return Err(Error::Invalid {
                 line: 4,
-                reason: "EtcData integrity bits",
+                reason: "EtcData integrity bits".into(),
             });
         }
 
@@ -300,12 +303,12 @@ impl<'a> Icf<'a> {
             if let Some(checksum) = text.strip_prefix(b"#CD=") {
                 let expected = hex::<16>(checksum).ok_or(Error::Invalid {
                     line: number,
-                    reason: "CD must contain 32 hexadecimal characters",
+                    reason: "CD must contain 32 hexadecimal characters".into(),
                 })?;
                 if memory.len() != IMAGE_BYTES {
                     return Err(Error::Invalid {
                         line: number,
-                        reason: "incomplete image",
+                        reason: "incomplete image".into(),
                     });
                 }
                 if digest.finalize().0 != expected {
@@ -314,13 +317,13 @@ impl<'a> Icf<'a> {
                 if lines.next().is_some() {
                     return Err(Error::Invalid {
                         line: number + 1,
-                        reason: "data after checksum",
+                        reason: "data after checksum".into(),
                     });
                 }
                 if &memory[IMAGE_BYTES - IMAGE_SIGNATURE.len()..] != IMAGE_SIGNATURE {
                     return Err(Error::Invalid {
                         line: 5 + (IMAGE_BYTES - IMAGE_SIGNATURE.len()) / RECORD_BYTES,
-                        reason: "image signature",
+                        reason: "image signature".into(),
                     });
                 }
                 // The original reader allows internal revisions 1..6, not
@@ -330,9 +333,9 @@ impl<'a> Icf<'a> {
                     return Err(Error::Unsupported {
                         line: 5 + INTERNAL_MAP_REV / RECORD_BYTES,
                         reason: if revision == 5 {
-                            "internal MapRev other than 5"
+                            "internal MapRev other than 5".into()
                         } else {
-                            "internal MapRev other than 6"
+                            "internal MapRev other than 6".into()
                         },
                     });
                 }
@@ -340,30 +343,30 @@ impl<'a> Icf<'a> {
             }
             let header = text.get(..10).and_then(hex::<5>).ok_or(Error::Invalid {
                 line: number,
-                reason: "invalid record header",
+                reason: "invalid record header".into(),
             })?;
             let count = usize::from(header[4]);
             if text.len() != 10 + count * 2 {
                 return Err(Error::Invalid {
                     line: number,
-                    reason: "record length mismatch",
+                    reason: "record length mismatch".into(),
                 });
             }
             if count != RECORD_BYTES {
                 return Err(Error::Unsupported {
                     line: number,
-                    reason: "record size other than 32",
+                    reason: "record size other than 32".into(),
                 });
             }
             let record = hex::<37>(text).ok_or(Error::Invalid {
                 line: number,
-                reason: "invalid hexadecimal payload",
+                reason: "invalid hexadecimal payload".into(),
             })?;
             let address = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
             if memory.len() >= IMAGE_BYTES || address != memory.len() as u32 {
                 return Err(Error::Invalid {
                     line: number,
-                    reason: "address gap, overlap or excess data",
+                    reason: "address gap, overlap or excess data".into(),
                 });
             }
             digest.consume(record);
@@ -371,7 +374,7 @@ impl<'a> Icf<'a> {
         }
         Err(Error::Invalid {
             line: source.split(|byte| *byte == b'\n').count(),
-            reason: "missing checksum",
+            reason: "missing checksum".into(),
         })
     }
 
@@ -428,7 +431,7 @@ impl<'a> Icf<'a> {
         if slot >= MEMORY_CHANNEL_COUNT {
             return Err(Error::Unsupported {
                 line: 5,
-                reason: "normal physical memory slot outside 0..500",
+                reason: "normal physical memory slot outside 0..500".into(),
             });
         }
         if self.memory[MEMORY_EMPTY_FLAGS + slot] & 1 != 0 {
@@ -452,7 +455,7 @@ impl<'a> Icf<'a> {
         if self.physical_memory_name_raw(slot)?.is_none() {
             return Err(Error::Unsupported {
                 line: 5 + (MEMORY_EMPTY_FLAGS + slot) / RECORD_BYTES,
-                reason: "physical memory slot is empty",
+                reason: "physical memory slot is empty".into(),
             });
         }
         let Some(input) = input else {
@@ -499,7 +502,7 @@ impl<'a> Icf<'a> {
         if self.physical_memory_name_raw(slot)?.is_none() {
             return Err(Error::Unsupported {
                 line: 5 + (MEMORY_EMPTY_FLAGS + slot) / RECORD_BYTES,
-                reason: "cannot rename an empty physical memory slot",
+                reason: "cannot rename an empty physical memory slot".into(),
             });
         }
         let offset = slot * MEMORY_CHANNEL_BYTES + MEMORY_NAME_OFFSET;
@@ -511,7 +514,7 @@ impl<'a> Icf<'a> {
         {
             return Err(Error::Unsupported {
                 line: 5 + offset / RECORD_BYTES,
-                reason: "memory name requires 1..=16 bytes in A-Z, 0-9, _ or -",
+                reason: "memory name requires 1..=16 bytes in A-Z, 0-9, _ or -".into(),
             });
         }
         let mut bytes = [b' '; MEMORY_NAME_BYTES];
@@ -544,7 +547,7 @@ impl<'a> Icf<'a> {
         if descriptor >= RAW_MEMORY_GROUP_COUNT {
             return Err(Error::Unsupported {
                 line: 5,
-                reason: "raw memory group descriptor outside 0..100",
+                reason: "raw memory group descriptor outside 0..100".into(),
             });
         }
         self.raw_memory_group_order()?;
@@ -553,7 +556,7 @@ impl<'a> Icf<'a> {
         if head != u16::MAX && usize::from(head) >= MEMORY_CHANNEL_COUNT {
             return Err(Error::Unsupported {
                 line: 5 + (base + 1) / RECORD_BYTES,
-                reason: "raw memory group head outside physical slots or FFFF",
+                reason: "raw memory group head outside physical slots or FFFF".into(),
             });
         }
         let name = &self.memory[base + 3..base + 3 + RAW_MEMORY_GROUP_NAME_BYTES];
@@ -575,7 +578,7 @@ impl<'a> Icf<'a> {
             if next >= RAW_MEMORY_GROUP_COUNT || seen[next] {
                 return Err(Error::Unsupported {
                     line: 5 + link / RECORD_BYTES,
-                    reason: "raw memory group order must visit all 100 descriptors once",
+                    reason: "raw memory group order must visit all 100 descriptors once".into(),
                 });
             }
             seen[next] = true;
@@ -585,7 +588,7 @@ impl<'a> Icf<'a> {
         if self.memory[link] != 0xff {
             return Err(Error::Unsupported {
                 line: 5 + link / RECORD_BYTES,
-                reason: "raw memory group order must end with FF after 100 descriptors",
+                reason: "raw memory group order must end with FF after 100 descriptors".into(),
             });
         }
         Ok(order)
@@ -619,7 +622,7 @@ impl<'a> Icf<'a> {
         if !exists {
             return Err(Error::Unsupported {
                 line: 5 + offset / RECORD_BYTES,
-                reason: "cannot rename an empty raw memory group descriptor",
+                reason: "cannot rename an empty raw memory group descriptor".into(),
             });
         }
         if name.is_empty()
@@ -630,7 +633,7 @@ impl<'a> Icf<'a> {
         {
             return Err(Error::Unsupported {
                 line: 5 + offset / RECORD_BYTES,
-                reason: "raw memory group name requires 1..=16 bytes in A-Z, 0-9, _ or -",
+                reason: "raw memory group name requires 1..=16 bytes in A-Z, 0-9, _ or -".into(),
             });
         }
         let mut bytes = [b' '; RAW_MEMORY_GROUP_NAME_BYTES];

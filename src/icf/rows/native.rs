@@ -3912,7 +3912,7 @@ mod tests {
         let before = h.clone();
         let mut upper = |s: &mut [u8]| {
             s[0] = b'X';
-            Err(crate::csv::Error::Operation("actual upper failure"))
+            Err(crate::csv::Error::Operation("actual upper failure".into()))
         };
         assert!(
             channel_tone_input(

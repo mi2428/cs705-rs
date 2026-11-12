@@ -261,14 +261,16 @@ impl Context {
             .0
             .get("native_date_tokens")
             .ok_or(data::Error::SourceUnavailable(
-                "native DateToken source unavailable",
+                "native DateToken source unavailable".into(),
             ))?
             .as_array()
-            .ok_or(data::Error::Invalid("native_date_tokens requires an array"))?;
+            .ok_or(data::Error::Invalid(
+                "native_date_tokens requires an array".into(),
+            ))?;
         let entry = captures
             .get(*cursor)
             .ok_or(data::Error::SourceUnavailable(
-                "native DateToken capture exhausted",
+                "native DateToken capture exhausted".into(),
             ))?
             .as_object()
             .filter(|entry| {
@@ -278,27 +280,29 @@ impl Context {
                         .all(|key| ["date", "letter", "count", "output"].contains(&key.as_str()))
             })
             .ok_or(data::Error::Invalid(
-                "native DateToken requires date/letter/count/output only",
+                "native DateToken requires date/letter/count/output only".into(),
             ))?;
         if entry["date"] != json!([request.date.year, request.date.month, request.date.day])
             || entry["letter"] != json!(char::from(request.letter))
             || entry["count"] != json!(request.count)
         {
-            return Err(data::Error::Invalid("native DateToken request mismatch"));
+            return Err(data::Error::Invalid(
+                "native DateToken request mismatch".into(),
+            ));
         }
         let output = match &entry["output"] {
             Value::String(hex) => io::decode_hex(hex)
-                .map_err(|_| data::Error::Invalid("native DateToken output hex"))?,
+                .map_err(|_| data::Error::Invalid("native DateToken output hex".into()))?,
             Value::Array(bytes) => bytes
                 .iter()
                 .map(|byte| {
                     u8::parse(byte)
-                        .map_err(|_| data::Error::Invalid("native DateToken output byte"))
+                        .map_err(|_| data::Error::Invalid("native DateToken output byte".into()))
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()?,
             _ => {
                 return Err(data::Error::Invalid(
-                    "native DateToken output requires hex or byte array",
+                    "native DateToken output requires hex or byte array".into(),
                 ));
             }
         };
@@ -491,7 +495,7 @@ fn import_repeater(
     let frequency = |hz| -> std::result::Result<repeater::parser::FrequencyProfile, data::Error> {
         let class = ranges.edf0(12, hz);
         let default_hz = icf::frequency::f20c(&ranges, langid, class).map_err(|_| {
-            data::Error::SourceUnavailable("F20C captured B/class source unavailable")
+            data::Error::SourceUnavailable("F20C captured B/class source unavailable".into())
         })?;
         Ok(repeater::parser::FrequencyProfile {
             identity_class: ranges.f094(hz),
@@ -518,27 +522,27 @@ fn import_repeater(
     let mut captured_memory = None;
     let mut read_unwritten = |raw: u32, index: u32| {
         let source = unwritten.ok_or(data::Error::SourceUnavailable(
-            "unwritten repeater byte source unavailable",
+            "unwritten repeater byte source unavailable".into(),
         ))?;
         let number = |key: &str| {
             u32::parse(&source[key])
-                .map_err(|_| data::Error::Invalid("unwritten source requires u32 fields"))
+                .map_err(|_| data::Error::Invalid("unwritten source requires u32 fields".into()))
         };
         let address = raw.wrapping_add(index.wrapping_mul(616));
         let offset = address
             .checked_sub(number("base")?)
             .ok_or(data::Error::SourceUnavailable(
-                "unwritten source address precedes byte source",
+                "unwritten source address precedes byte source".into(),
             ))? as usize;
         if captured_memory.is_none() {
             captured_memory = Some(
                 io::read(
                     source["memory"]
                         .as_str()
-                        .ok_or(data::Error::Invalid("unwritten source memory path"))?,
+                        .ok_or(data::Error::Invalid("unwritten source memory path".into()))?,
                 )
                 .map_err(|_| {
-                    data::Error::SourceUnavailable("unwritten repeater memory read failed")
+                    data::Error::SourceUnavailable("unwritten repeater memory read failed".into())
                 })?,
             );
         }
@@ -547,12 +551,12 @@ fn import_repeater(
             .expect("source acquired")
             .get(
                 offset
-                    ..offset
-                        .checked_add(616)
-                        .ok_or(data::Error::Invalid("unwritten source address overflow"))?,
+                    ..offset.checked_add(616).ok_or(data::Error::Invalid(
+                        "unwritten source address overflow".into(),
+                    ))?,
             )
             .ok_or(data::Error::SourceUnavailable(
-                "unwritten repeater byte window unavailable",
+                "unwritten repeater byte window unavailable".into(),
             ))?
             .try_into()
             .expect("checked record width");
@@ -832,12 +836,12 @@ pub fn import(
                 reader_report = Some(report);
                 expanded.map_err(|error| {
                     reader_error = Some(error.message);
-                    icf::Error::Invalid { line: 0, reason: "CSV expansion failed" }
+                    icf::Error::Invalid { line: 0, reason: "CSV expansion failed".into() }
                 })
             }
             Err(error) => {
                 reader_error = Some(error.message);
-                Err(icf::Error::Invalid { line: 0, reason: "CSV reader failed" })
+                Err(icf::Error::Invalid { line: 0, reason: "CSV reader failed".into() })
             }
         }
     });

@@ -29,7 +29,10 @@ pub struct Report {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn raw<const N: usize>(image: &[u8], at: usize) -> Result<[u8; N], Error> {
     image

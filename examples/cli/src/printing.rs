@@ -852,7 +852,7 @@ fn run_native(args: Args, preferences: &Value) -> Result<u8> {
             })?;
             document.replace_current(image.memory().to_vec());
             document.finish_action(&mut action.context, frame.notify != 0, action.flags, |_, _, flags| {
-                if frame.callback != 0x3173c { return Err(cs705::icf::Error::Invalid { line:0, reason:"native inline callback has no registered receiver" }); }
+                if frame.callback != 0x3173c { return Err(cs705::icf::Error::Invalid { line:0, reason:"native inline callback has no registered receiver".into() }); }
                 invalidations.push(json!({"receiver":"native-grid","column":frame.column,"row":frame.row,"flags":flags}));
                 Ok(())
             })?;

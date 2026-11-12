@@ -375,7 +375,7 @@ pub fn store_channel_image_into(
     let address =
         super::record_image::channel_address(&working, kind, index)?.ok_or(Error::Invalid {
             line: 5,
-            reason: "channel destination has no allocated physical slot",
+            reason: "channel destination has no allocated physical slot".into(),
         })?;
     super::record_image::store_channel_into(
         &mut working,
@@ -414,13 +414,13 @@ pub fn repeater_reset_word(generation: &[u8], which: usize) -> Result<u16, Error
         _ => {
             return Err(Error::Invalid {
                 line: 5,
-                reason: "unknown repeater global reset word",
+                reason: "unknown repeater global reset word".into(),
             });
         }
     };
     let bytes = generation.get(at..at + 2).ok_or(Error::Invalid {
         line: 5,
-        reason: "repeater global reset source unavailable",
+        reason: "repeater global reset source unavailable".into(),
     })?;
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
@@ -528,7 +528,7 @@ pub fn initial_normal_channel_into(
         .and_then(|r| r.get(component))
         .ok_or(Error::Invalid {
             line: 0,
-            reason: "type1D compiled source selector unavailable",
+            reason: "type1D compiled source selector unavailable".into(),
         })?;
     holder.set_header(0x1d, index, holder.binding());
     holder.as_mut_bytes()[0x24] = 0;
@@ -542,7 +542,7 @@ pub fn initial_normal_channel_into(
         .get(0x3c84f..0x3c873)
         .ok_or(Error::Invalid {
             line: 0,
-            reason: "type1D live G template unavailable",
+            reason: "type1D live G template unavailable".into(),
         })?
         .try_into()
         .expect("checked36-byte template");
@@ -555,7 +555,7 @@ pub fn initial_normal_channel_into(
     );
     let selected = u8::try_from(source_selector).map_err(|_| Error::Invalid {
         line: 0,
-        reason: "type1D compiled source selector unavailable",
+        reason: "type1D compiled source selector unavailable".into(),
     })?;
     holder.set_offset_hz(super::frequency::offset_for_source(
         selected,
@@ -592,7 +592,7 @@ fn channel_side(side: usize) -> Result<usize, Error> {
     } else {
         Err(Error::Invalid {
             line: 5,
-            reason: "channel side must be zero or one",
+            reason: "channel side must be zero or one".into(),
         })
     }
 }
@@ -930,7 +930,7 @@ pub fn load_callsign_storage_into(
     if index >= 300 {
         return Err(Error::Invalid {
             line: 5,
-            reason: "UR slot outside 0..300",
+            reason: "UR slot outside 0..300".into(),
         });
     }
     let name = image
@@ -938,14 +938,14 @@ pub fn load_callsign_storage_into(
         .get(0x2f703 + 16 * index..0x2f703 + 16 * (index + 1))
         .ok_or(Error::Invalid {
             line: 5,
-            reason: "UR name window unavailable",
+            reason: "UR name window unavailable".into(),
         })?;
     let call = image
         .memory()
         .get(0x2eda3 + 8 * index..0x2eda3 + 8 * (index + 1))
         .ok_or(Error::Invalid {
             line: 5,
-            reason: "UR call window unavailable",
+            reason: "UR call window unavailable".into(),
         })?;
     decode_callsign_into(
         holder,
@@ -965,7 +965,7 @@ pub fn store_callsign_storage_into(
     if index >= 300 {
         return Err(Error::Invalid {
             line: 5,
-            reason: "UR slot outside 0..300",
+            reason: "UR slot outside 0..300".into(),
         });
     }
     encode_callsign_into(holder, |write| match write {
@@ -982,7 +982,7 @@ pub fn decode_pair_into(holder: &mut DecodedRecord, raw: &[u8; 8], kind: u32) ->
     if !matches!(kind, 0x15 | 0x16) {
         return Err(Error::Invalid {
             line: 5,
-            reason: "unknown frequency pair kind",
+            reason: "unknown frequency pair kind".into(),
         });
     }
     holder.bytes[0x138..0x13c].copy_from_slice(&raw[..4]);
@@ -1011,7 +1011,7 @@ pub fn encode_pair_into(
     if !matches!(kind, 0x15 | 0x16) {
         return Err(Error::Invalid {
             line: 5,
-            reason: "unknown frequency pair kind",
+            reason: "unknown frequency pair kind".into(),
         });
     }
     if kind == 0x15 && !holder.valid() {
@@ -1182,14 +1182,14 @@ pub fn decode_history_base_into(
         _ => {
             return Err(Error::Invalid {
                 line: 5,
-                reason: "unknown base history record kind",
+                reason: "unknown base history record kind".into(),
             });
         }
     };
     if raw.is_some_and(|bytes| bytes.len() != width) {
         return Err(Error::Invalid {
             line: 5,
-            reason: "base history record has wrong width",
+            reason: "base history record has wrong width".into(),
         });
     }
     holder.set_valid(raw.is_some());
@@ -1335,7 +1335,7 @@ pub fn resolve_history_query(
                 let at = 0xaa0f + 52 * usize::from(index);
                 let raw = repeaters.working().get(at..at + 52).ok_or(Error::Invalid {
                     line: 5,
-                    reason: "history raw repeater search window unavailable",
+                    reason: "history raw repeater search window unavailable".into(),
                 })?;
                 if raw[10] & 0xc0 != 0 {
                     continue;
@@ -1401,7 +1401,7 @@ pub fn load_reflector_storage_into(
     if index as usize >= count {
         return Err(Error::Invalid {
             line: 5,
-            reason: "reflector logical row outside dataset",
+            reason: "reflector logical row outside dataset".into(),
         });
     }
     let physical = *image
@@ -1409,7 +1409,7 @@ pub fn load_reflector_storage_into(
         .get(map + index as usize)
         .ok_or(Error::Invalid {
             line: 5,
-            reason: "reflector map byte unavailable",
+            reason: "reflector map byte unavailable".into(),
         })?;
     let raw = if physical == 255 {
         None
@@ -1417,7 +1417,7 @@ pub fn load_reflector_storage_into(
         let at = 0x32aed + 8 * usize::from(physical);
         Some(image.memory().get(at..at + 8).ok_or(Error::Invalid {
             line: 5,
-            reason: "reflector physical payload unavailable",
+            reason: "reflector physical payload unavailable".into(),
         })?)
     };
     holder.set_header(0x14, index, holder.binding());
@@ -1442,14 +1442,14 @@ pub fn load_history_storage_into(
         _ => {
             return Err(Error::Invalid {
                 line: 5,
-                reason: "history document adapter requires FromDV/FromFM/ToDV",
+                reason: "history document adapter requires FromDV/FromFM/ToDV".into(),
             });
         }
     };
     if index >= count {
         return Err(Error::Invalid {
             line: 5,
-            reason: "history logical row outside dataset",
+            reason: "history logical row outside dataset".into(),
         });
     }
     let physical = image.memory()[map + index];
@@ -1459,7 +1459,7 @@ pub fn load_history_storage_into(
         let at = base + width * usize::from(physical);
         Some(image.memory().get(at..at + width).ok_or(Error::Invalid {
             line: 5,
-            reason: "history physical payload unavailable",
+            reason: "history physical payload unavailable".into(),
         })?)
     };
     holder.set_header(kind, index as u32, holder.binding());
@@ -1569,7 +1569,7 @@ fn history_map(kind: u32) -> Result<(usize, usize), Error> {
         0x14 => Ok((0x3c363, 5)),
         _ => Err(Error::Invalid {
             line: 5,
-            reason: "unknown history map kind",
+            reason: "unknown history map kind".into(),
         }),
     }
 }
@@ -1586,7 +1586,7 @@ pub fn history_selection_present(
     if first > last || last >= count {
         return Err(Error::Invalid {
             line: 5,
-            reason: "history selection outside dataset",
+            reason: "history selection outside dataset".into(),
         });
     }
     let map = &image.memory()[base..base + count];
@@ -1685,7 +1685,7 @@ fn receive_history_range(key: u32) -> Result<std::ops::Range<usize>, Error> {
         _ => {
             return Err(Error::Invalid {
                 line: 5,
-                reason: "key is not a native Rx history field",
+                reason: "key is not a native Rx history field".into(),
             });
         }
     };
@@ -1698,7 +1698,7 @@ pub fn receive_history_raw(holder: &DecodedRecord, key: u32) -> Result<&[u8], Er
     if holder.kind() != 0x0e {
         return Err(Error::Invalid {
             line: 5,
-            reason: "native Rx history source requires kind0E",
+            reason: "native Rx history source requires kind0E".into(),
         });
     }
     Ok(&holder.bytes[receive_history_range(key)?])
@@ -1719,7 +1719,7 @@ pub fn history_field_visible(holder: &DecodedRecord, key: u32) -> Result<bool, E
         _ => {
             return Err(Error::Invalid {
                 line: 5,
-                reason: "native history field/key kind mismatch",
+                reason: "native history field/key kind mismatch".into(),
             });
         }
     };
@@ -1794,7 +1794,7 @@ pub fn load_receive_history_storage_into(
     if index >= 50 {
         return Err(Error::Invalid {
             line: 5,
-            reason: "Rx history logical row outside 0..50",
+            reason: "Rx history logical row outside 0..50".into(),
         });
     }
     let memory = image.memory();
@@ -2290,7 +2290,7 @@ mod tests {
                         if seen.len() - 1 == stop {
                             return Err(Error::Invalid {
                                 line: 0,
-                                reason: "injected raw8 failure",
+                                reason: "injected raw8 failure".into(),
                             });
                         }
                         committed[at..at + 4].copy_from_slice(bytes);
@@ -2419,7 +2419,7 @@ mod tests {
                     if seen.len() - 1 == stop {
                         return Err(Error::Invalid {
                             line: 0,
-                            reason: "injected raw10 failure",
+                            reason: "injected raw10 failure".into(),
                         });
                     }
                     committed[at..at + bytes.len()].copy_from_slice(bytes);
@@ -2980,7 +2980,7 @@ mod tests {
                 if seen.len() - 1 == stop {
                     return Err(Error::Invalid {
                         line: 0,
-                        reason: "injected channel failure",
+                        reason: "injected channel failure".into(),
                     });
                 }
                 match event {
@@ -3167,7 +3167,7 @@ mod tests {
             if event.stage() == ChannelStage::CorrectRepeater1 {
                 return Err(Error::Invalid {
                     line: 0,
-                    reason: "injected post-pack failure",
+                    reason: "injected post-pack failure".into(),
                 });
             }
             if let ChannelWrite::Body { offset, bytes, .. } = event {
@@ -3205,7 +3205,7 @@ mod tests {
                 if seen.len() - 1 == stop {
                     return Err(Error::Invalid {
                         line: 0,
-                        reason: "injected GPS failure",
+                        reason: "injected GPS failure".into(),
                     });
                 }
                 committed[at..at + bytes.len()].copy_from_slice(bytes);
@@ -3248,7 +3248,7 @@ mod tests {
                     if count - 1 == stop {
                         return Err(Error::Invalid {
                             line: 0,
-                            reason: "injected UR failure",
+                            reason: "injected UR failure".into(),
                         });
                     }
                     match event {
@@ -3504,7 +3504,7 @@ mod tests {
                         if queried - 1 == stop {
                             return Err(Error::Invalid {
                                 line: 0,
-                                reason: "injected history query failure",
+                                reason: "injected history query failure".into(),
                             });
                         }
                         Ok(value)
@@ -3516,7 +3516,7 @@ mod tests {
                         holder.bytes[0x26..0x2b].copy_from_slice(b"FIRST");
                         Err(Error::Invalid {
                             line: 0,
-                            reason: "injected history load failure",
+                            reason: "injected history load failure".into(),
                         })
                     },
                 );
@@ -3846,7 +3846,7 @@ mod tests {
                 if visited.len() - 1 == stop {
                     return Err(Error::Invalid {
                         line: 0,
-                        reason: "injected ordered write failure",
+                        reason: "injected ordered write failure".into(),
                     });
                 }
                 match event {

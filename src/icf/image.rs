@@ -13,13 +13,13 @@ impl Icf<'_> {
         if memory.len() != IMAGE_BYTES {
             return Err(Error::Invalid {
                 line: 0,
-                reason: "MapRev 6 storage image requires exactly 0x3c9c0 bytes",
+                reason: "MapRev 6 storage image requires exactly 0x3c9c0 bytes".into(),
             });
         }
         if memory[INTERNAL_MAP_REV] != 6 || !memory.ends_with(IMAGE_SIGNATURE) {
             return Err(Error::Invalid {
                 line: 0,
-                reason: "MapRev 6 storage revision or signature",
+                reason: "MapRev 6 storage revision or signature".into(),
             });
         }
         Ok(Icf {
@@ -46,7 +46,7 @@ pub(super) fn apply_patches(image: &mut [u8], patches: &[(usize, &[u8])]) -> Res
         if offset > image.len() || bytes.len() > image.len() - offset {
             return Err(Error::Invalid {
                 line: 0,
-                reason: "raw patch exceeds storage image",
+                reason: "raw patch exceeds storage image".into(),
             });
         }
     }

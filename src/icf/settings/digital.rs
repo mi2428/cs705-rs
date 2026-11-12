@@ -51,7 +51,9 @@ impl SelectionField {
         if index < self.count() {
             Ok(())
         } else {
-            Err(Error::Invalid("digital native index outside field axis"))
+            Err(Error::Invalid(
+                "digital native index outside field axis".into(),
+            ))
         }
     }
     pub fn active_raw(self, image: &Icf<'_>) -> u8 {
@@ -65,7 +67,7 @@ impl SelectionField {
         Self::ALL
             .into_iter()
             .find(|f| f.name() == name_or_id || f.feature_id() == name_or_id)
-            .ok_or(Error::Invalid("unknown digital selection field"))
+            .ok_or(Error::Invalid("unknown digital selection field".into()))
     }
     /// 6C009/6C28B keep MyCall OFF distinct from TX Message OFF. Unknown old
     /// active bytes are comparison inputs, not a reason to reject a new event.
@@ -86,7 +88,7 @@ impl SelectionField {
             };
             image
                 .patch_memory(&[(self.at(), &[raw])])
-                .map_err(|_| Error::Invalid("digital selection image store"))?;
+                .map_err(|_| Error::Invalid("digital selection image store".into()))?;
         }
         Ok(SelectionEffect {
             helper_accepted: candidate.is_some(),
@@ -156,11 +158,13 @@ impl TextField {
         Self::ALL
             .into_iter()
             .find(|f| f.name() == name_or_id || f.feature_id() == name_or_id)
-            .ok_or(Error::Invalid("unknown digital text field"))
+            .ok_or(Error::Invalid("unknown digital text field".into()))
     }
     fn at(self, index: usize) -> Result<usize, Error> {
         if index >= self.count() {
-            return Err(Error::Invalid("digital text index outside native axis"));
+            return Err(Error::Invalid(
+                "digital text index outside native axis".into(),
+            ));
         }
         Ok(match self {
             Self::MyCall => 0x2ed5b + 12 * index,
@@ -182,17 +186,21 @@ impl TextField {
         bytes: &[u8],
     ) -> Result<(), Error> {
         if self != Self::TxMessage {
-            return Err(Error::Invalid("encoded messages cannot replace callsigns"));
+            return Err(Error::Invalid(
+                "encoded messages cannot replace callsigns".into(),
+            ));
         }
         let at = self.at(index)?;
         if bytes.len() > self.width() {
-            return Err(Error::Invalid("encoded TX message exceeds field width"));
+            return Err(Error::Invalid(
+                "encoded TX message exceeds field width".into(),
+            ));
         }
         let mut raw = vec![b' '; self.width()];
         raw[..bytes.len()].copy_from_slice(bytes);
         image
             .patch_memory(&[(at, &raw)])
-            .map_err(|_| Error::Invalid("encoded TX message image store"))
+            .map_err(|_| Error::Invalid("encoded TX message image store".into()))
     }
     pub fn display(self, image: &Icf<'_>, index: usize) -> Result<Vec<u8>, Error> {
         Ok(c_prefix(self.raw(image, index)?).to_vec())
@@ -240,7 +248,7 @@ impl TextField {
             raw[..display.len()].copy_from_slice(&display);
             image
                 .patch_memory(&[(at, &raw)])
-                .map_err(|_| Error::Invalid("digital text image store"))?;
+                .map_err(|_| Error::Invalid("digital text image store".into()))?;
         }
         Ok(TextEffect {
             stored,
@@ -264,7 +272,7 @@ pub fn ur_physical_slots(image: &Icf<'_>) -> Result<Vec<usize>, Error> {
             ended = true;
         } else if ended || slot >= 300 || seen[slot] {
             return Err(Error::Invalid(
-                "UR order requires a unique prefix and FFFF suffix",
+                "UR order requires a unique prefix and FFFF suffix".into(),
             ));
         } else {
             seen[slot] = true;
@@ -300,7 +308,9 @@ fn normalize(
     upper: impl FnMut(&mut [u8]) -> Result<u32, Error>,
 ) -> Result<Vec<u8>, Error> {
     if !matches!(phase, 1 | 2) {
-        return Err(Error::Invalid("digital text requires native phase1 or2"));
+        return Err(Error::Invalid(
+            "digital text requires native phase1 or2".into(),
+        ));
     }
     let mut candidate = nls::whole_text(source, profile, map, upper)?;
     if aligned {
@@ -322,12 +332,12 @@ pub struct AllowedView {
     pub display: Vec<u8>,
 }
 fn typed_error(_: crate::icf::Error) -> Error {
-    Error::Invalid("digital typed storage operation")
+    Error::Invalid("digital typed storage operation".into())
 }
 fn allowed_holder(image: &Icf<'_>, index: u32) -> Result<record::DecodedRecord, Error> {
     if index > 30 {
         return Err(Error::Invalid(
-            "allowed callsign row outside native0..30 axis",
+            "allowed callsign row outside native0..30 axis".into(),
         ));
     }
     let mut holder = record::reset_holder(0x17, index, 0);
@@ -338,7 +348,7 @@ pub fn allowed_view(image: &Icf<'_>, index: u32) -> Result<AllowedView, Error> {
     let count = record_image::callsign_count(image.memory(), 0x17).map_err(typed_error)?;
     if index > count {
         return Err(Error::Invalid(
-            "allowed row exceeds current prefix plus add row",
+            "allowed row exceeds current prefix plus add row".into(),
         ));
     }
     let holder = allowed_holder(image, index)?;
@@ -636,7 +646,7 @@ mod tests {
                         0,
                         |from, _| {
                             assert_eq!(&from[..3], b"a b");
-                            Err(Error::SourceUnavailable("injected NLS failure"))
+                            Err(Error::SourceUnavailable("injected NLS failure".into()))
                         },
                         nls::platform_uppercase
                     )
@@ -869,7 +879,7 @@ mod tests {
                 },
                 0,
                 &mut effect,
-                |_, _| Err(Error::SourceUnavailable("injected late NLS failure")),
+                |_, _| Err(Error::SourceUnavailable("injected late NLS failure".into())),
                 nls::platform_uppercase
             )
             .is_err()

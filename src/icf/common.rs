@@ -34,7 +34,7 @@ impl Icf<'_> {
             30_000..=199_999_999 | 400_000_000..=470_000_000 => Ok(Some(value)),
             _ => Err(Error::Unsupported {
                 line: 5 + 0x392f6 / RECORD_BYTES,
-                reason: "Home frequency outside canonical ranges",
+                reason: "Home frequency outside canonical ranges".into(),
             }),
         }
     }
@@ -53,7 +53,7 @@ impl Icf<'_> {
             _ => {
                 return Err(Error::Invalid {
                     line: 5 + 0x392f6 / RECORD_BYTES,
-                    reason: "new Home frequency outside canonical ranges",
+                    reason: "new Home frequency outside canonical ranges".into(),
                 });
             }
         };
@@ -83,7 +83,7 @@ impl Icf<'_> {
         {
             return Err(Error::Invalid {
                 line: 5 + 0x396be / RECORD_BYTES,
-                reason: "NTP server requires 0..=64 ASCII letters, digits, hyphens or dots",
+                reason: "NTP server requires 0..=64 ASCII letters, digits, hyphens or dots".into(),
             });
         }
         let mut field = [b' '; 64];
@@ -117,7 +117,8 @@ impl Icf<'_> {
         {
             return Err(Error::Invalid {
                 line: 5 + 0x35591 / RECORD_BYTES,
-                reason: "clone comment requires 0..=16 printable ASCII bytes without edge spaces",
+                reason: "clone comment requires 0..=16 printable ASCII bytes without edge spaces"
+                    .into(),
             });
         }
         let mut field = [b' '; 16];
@@ -164,7 +165,8 @@ macro_rules! bounded_byte {
                 if !($min..=$max).contains(&value) {
                     return Err(Error::Unsupported {
                         line: 5 + $offset / RECORD_BYTES,
-                        reason: concat!(stringify!($get), " current value outside supported range"),
+                        reason: concat!(stringify!($get), " current value outside supported range")
+                            .into(),
                     });
                 }
                 Ok(value as u8)
@@ -180,7 +182,8 @@ macro_rules! bounded_byte {
                 if !($min..=$max).contains(&value) {
                     return Err(Error::Invalid {
                         line: 5 + $offset / RECORD_BYTES,
-                        reason: concat!(stringify!($get), " new value outside supported range"),
+                        reason: concat!(stringify!($get), " new value outside supported range")
+                            .into(),
                     });
                 }
                 self.memory[$offset] = (i16::from(value) - $bias) as u8;
@@ -204,7 +207,7 @@ macro_rules! bounded_word {
                 if !($min..=$max).contains(&value) $(|| value % $step != 0)? {
                     return Err(Error::Unsupported {
                         line: 5 + $offset / RECORD_BYTES,
-                        reason: concat!(stringify!($get), " current value outside supported range or step"),
+                        reason: concat!(stringify!($get), " current value outside supported range or step").into(),
                     });
                 }
                 Ok(value)
@@ -220,7 +223,7 @@ macro_rules! bounded_word {
                 if !($min..=$max).contains(&value) $(|| value % $step != 0)? {
                     return Err(Error::Invalid {
                         line: 5 + $offset / RECORD_BYTES,
-                        reason: concat!(stringify!($get), " new value outside supported range or step"),
+                        reason: concat!(stringify!($get), " new value outside supported range or step").into(),
                     });
                 }
                 self.memory[$offset..$offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -351,7 +354,7 @@ impl Icf<'_> {
         if raw == 0 {
             return Err(Error::Unsupported {
                 line: 5 + 0x399a6 / RECORD_BYTES,
-                reason: "manual_notch_position current raw zero",
+                reason: "manual_notch_position current raw zero".into(),
             });
         }
         Ok((i16::from(raw) - 128) as i8)
@@ -366,7 +369,7 @@ impl Icf<'_> {
         if value == i8::MIN {
             return Err(Error::Invalid {
                 line: 5 + 0x399a6 / RECORD_BYTES,
-                reason: "manual_notch_position new value outside -127..=127",
+                reason: "manual_notch_position new value outside -127..=127".into(),
             });
         }
         self.memory[0x399a6] = (i16::from(value) + 128) as u8;
@@ -399,7 +402,7 @@ macro_rules! stored_setting {
                     $($raw => Ok($value),)+
                     _ => Err(Error::Unsupported {
                         line: 5 + $offset / RECORD_BYTES,
-                        reason: concat!(stringify!($get), " value outside supported codes"),
+                        reason: concat!(stringify!($get), " value outside supported codes").into(),
                     }),
                 }
             }
@@ -805,7 +808,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + KEY_TOUCH_BEEP / RECORD_BYTES,
-                reason: "key-touch beep value other than OFF or ON",
+                reason: "key-touch beep value other than OFF or ON".into(),
             }),
         }
     }
@@ -835,7 +838,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + BEEP_LEVEL_LIMIT / RECORD_BYTES,
-                reason: "beep-level limit value other than OFF or ON",
+                reason: "beep-level limit value other than OFF or ON".into(),
             }),
         }
     }
@@ -862,7 +865,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + HOME_CHANNEL_BEEP / RECORD_BYTES,
-                reason: "home-channel beep value other than OFF or ON",
+                reason: "home-channel beep value other than OFF or ON".into(),
             }),
         }
     }
@@ -891,7 +894,7 @@ impl Icf<'_> {
             3 => Ok(BandEdgeBeep::UserEdgesWithTransmitLimit),
             _ => Err(Error::Unsupported {
                 line: 5 + BAND_EDGE_BEEP / RECORD_BYTES,
-                reason: "band-edge beep selection outside 0 through 3",
+                reason: "band-edge beep selection outside 0 through 3".into(),
             }),
         }
     }
@@ -923,7 +926,7 @@ impl Icf<'_> {
             4 => Ok(AutoPowerOff::Minutes120),
             _ => Err(Error::Unsupported {
                 line: 5 + AUTO_POWER_OFF / RECORD_BYTES,
-                reason: "auto power-off selection outside 0 through 4",
+                reason: "auto power-off selection outside 0 through 4".into(),
             }),
         }
     }
@@ -953,7 +956,7 @@ impl Icf<'_> {
             3 => Ok(PowerSave::AutoLong),
             _ => Err(Error::Unsupported {
                 line: 5 + POWER_SAVE / RECORD_BYTES,
-                reason: "power-save selection outside 0 through 3",
+                reason: "power-save selection outside 0 through 3".into(),
             }),
         }
     }
@@ -980,7 +983,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + QUICK_SPLIT / RECORD_BYTES,
-                reason: "quick-split value other than OFF or ON",
+                reason: "quick-split value other than OFF or ON".into(),
             }),
         }
     }
@@ -1007,7 +1010,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + SPLIT_LOCK / RECORD_BYTES,
-                reason: "split-lock value other than OFF or ON",
+                reason: "split-lock value other than OFF or ON".into(),
             }),
         }
     }
@@ -1035,7 +1038,7 @@ impl Icf<'_> {
             2 => Ok(ReceivedCallsignSpeech::All),
             _ => Err(Error::Unsupported {
                 line: 5 + RECEIVED_CALLSIGN_SPEECH / RECORD_BYTES,
-                reason: "received callsign speech selection outside 0 through 2",
+                reason: "received callsign speech selection outside 0 through 2".into(),
             }),
         }
     }
@@ -1065,7 +1068,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + RX_CS_SPEECH / RECORD_BYTES,
-                reason: "RX-to-CS speech value other than OFF or ON",
+                reason: "RX-to-CS speech value other than OFF or ON".into(),
             }),
         }
     }
@@ -1093,7 +1096,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + MIC_UP_DOWN_SPEECH / RECORD_BYTES,
-                reason: "MIC Up/Down speech value other than OFF or ON",
+                reason: "MIC Up/Down speech value other than OFF or ON".into(),
             }),
         }
     }
@@ -1120,7 +1123,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + S_METER_LEVEL_SPEECH / RECORD_BYTES,
-                reason: "S-meter level speech value other than OFF or ON",
+                reason: "S-meter level speech value other than OFF or ON".into(),
             }),
         }
     }
@@ -1147,7 +1150,7 @@ impl Icf<'_> {
             1 => Ok(true),
             _ => Err(Error::Unsupported {
                 line: 5 + MODE_SPEECH / RECORD_BYTES,
-                reason: "mode speech value other than OFF or ON",
+                reason: "mode speech value other than OFF or ON".into(),
             }),
         }
     }
@@ -1171,7 +1174,7 @@ impl Icf<'_> {
             1 => Ok(SpeechLanguage::Japanese),
             _ => Err(Error::Unsupported {
                 line: 5 + SPEECH_LANGUAGE / RECORD_BYTES,
-                reason: "speech language selection outside 0 through 1",
+                reason: "speech language selection outside 0 through 1".into(),
             }),
         }
     }
@@ -1195,7 +1198,7 @@ impl Icf<'_> {
             1 => Ok(SpeechAlphabet::Phonetic),
             _ => Err(Error::Unsupported {
                 line: 5 + SPEECH_ALPHABET / RECORD_BYTES,
-                reason: "speech alphabet selection outside 0 through 1",
+                reason: "speech alphabet selection outside 0 through 1".into(),
             }),
         }
     }
@@ -1219,7 +1222,7 @@ impl Icf<'_> {
             1 => Ok(SpeechSpeed::Fast),
             _ => Err(Error::Unsupported {
                 line: 5 + SPEECH_SPEED / RECORD_BYTES,
-                reason: "speech speed selection outside 0 through 1",
+                reason: "speech speed selection outside 0 through 1".into(),
             }),
         }
     }
@@ -1419,7 +1422,7 @@ fn swr_graph_offset(slot: usize) -> Result<usize, Error> {
     if slot >= 17 {
         return Err(Error::Unsupported {
             line: 5,
-            reason: "SWR graph physical slot outside 0..=16",
+            reason: "SWR graph physical slot outside 0..=16".into(),
         });
     }
     Ok(0x379b9 + 2 * slot)
@@ -1445,7 +1448,7 @@ impl Icf<'_> {
         if value > 3 {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "new SWR graph step index outside 0..=3",
+                reason: "new SWR graph step index outside 0..=3".into(),
             });
         }
         self.memory[at] = value;
@@ -1471,7 +1474,7 @@ impl Icf<'_> {
         if value > 5 {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "new SWR graph bar index outside 0..=5",
+                reason: "new SWR graph bar index outside 0..=5".into(),
             });
         }
         self.memory[at] = value;
@@ -1505,14 +1508,14 @@ impl Icf<'_> {
         if fixed > 1 {
             return Err(Error::Unsupported {
                 line: 5 + 0x377c6 / RECORD_BYTES,
-                reason: "scope_mode fixed byte outside 0..=1",
+                reason: "scope_mode fixed byte outside 0..=1".into(),
             });
         }
         let scroll = self.memory[0x3808a];
         if scroll > 1 {
             return Err(Error::Unsupported {
                 line: 5 + 0x3808a / RECORD_BYTES,
-                reason: "scope_mode scroll byte outside 0..=1",
+                reason: "scope_mode scroll byte outside 0..=1".into(),
             });
         }
         Ok(match (fixed, scroll) {
@@ -1586,7 +1589,7 @@ fn scope_reference_offset(slot: usize) -> Result<usize, Error> {
     if slot >= 17 {
         return Err(Error::Unsupported {
             line: 5,
-            reason: "Scope REF physical slot outside 0..=16",
+            reason: "Scope REF physical slot outside 0..=16".into(),
         });
     }
     Ok(0x377db + 2 * slot)
@@ -1620,7 +1623,7 @@ impl Icf<'_> {
         if !(-200..=200).contains(&value) || value % 5 != 0 {
             return Err(Error::Invalid {
                 line: 5 + at / RECORD_BYTES,
-                reason: "new Scope REF level requires -200..=200 tenths dB in steps of 5",
+                reason: "new Scope REF level requires -200..=200 tenths dB in steps of 5".into(),
             });
         }
         self.memory[at..at + 2].copy_from_slice(&((value + 200) as u16).to_le_bytes());

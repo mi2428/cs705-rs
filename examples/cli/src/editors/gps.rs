@@ -406,7 +406,9 @@ pub fn run(args: Args) -> Result<u8> {
                     let effect = if let Some(nls) = nls {
                         field.edit_with_nls(&mut image, index, input, |_, out| {
                             if out.len() != nls.map.bytes.len() {
-                                return Err(cs705::csv::Error::Invalid("symbol LCMap width"));
+                                return Err(cs705::csv::Error::Invalid(
+                                    "symbol LCMap width".into(),
+                                ));
                             }
                             out.copy_from_slice(&nls.map.bytes);
                             Ok(nls.map.result)
@@ -758,7 +760,9 @@ pub fn run(args: Args) -> Result<u8> {
                     let effect = if let Some(output) = output {
                         field.edit_with_nls(&mut image, index, input, |_, destination| {
                             if destination.len() != output.map.bytes.len() {
-                                return Err(cs705::csv::Error::Invalid("GPS LCMap output width"));
+                                return Err(cs705::csv::Error::Invalid(
+                                    "GPS LCMap output width".into(),
+                                ));
                             }
                             destination.copy_from_slice(&output.map.bytes);
                             Ok(output.map.result)

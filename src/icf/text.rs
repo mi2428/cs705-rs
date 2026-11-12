@@ -249,7 +249,10 @@ pub fn extra_data_valid(word: u32) -> bool {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn c_prefix(bytes: &[u8]) -> &[u8] {
     bytes.split(|&b| b == 0).next().unwrap()

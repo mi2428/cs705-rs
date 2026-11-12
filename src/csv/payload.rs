@@ -17,7 +17,7 @@ pub struct Holder<'a>(&'a [u8]);
 impl<'a> Holder<'a> {
     pub fn new(bytes: &'a [u8]) -> Result<Self, Error> {
         if bytes.len() != 0x268 {
-            return Err(Error::Invalid("decoded holder must have 616 bytes"));
+            return Err(Error::Invalid("decoded holder must have 616 bytes".into()));
         }
         Ok(Self(bytes))
     }
@@ -407,7 +407,7 @@ pub fn build(
                     (u32::from(power).pow(2)).to_string().into_bytes()
                 } else {
                     return Err(Error::SourceUnavailable(
-                        "PHG power table outside normal range",
+                        "PHG power table outside normal range".into(),
                     ));
                 });
                 let height = h.b(0x1f9);
@@ -419,7 +419,7 @@ pub fn build(
                         .into_bytes()
                 } else {
                     return Err(Error::SourceUnavailable(
-                        "PHG height table outside normal range",
+                        "PHG height table outside normal range".into(),
                     ));
                 });
                 cells.extend([
@@ -428,7 +428,7 @@ pub fn build(
                         n @ 0..=9 => n.to_string().into_bytes(),
                         _ => {
                             return Err(Error::SourceUnavailable(
-                                "PHG gain table outside normal range",
+                                "PHG gain table outside normal range".into(),
                             ));
                         }
                     },
@@ -482,7 +482,7 @@ pub fn callsign_row(
     c: Context<'_>,
 ) -> Result<Vec<u8>, Error> {
     if index >= 300 {
-        return Err(Error::Invalid("CSV callsign row outside 0..300"));
+        return Err(Error::Invalid("CSV callsign row outside 0..300".into()));
     }
     let memory = image.memory();
     let name: &[u8; 16] = memory[0x2f703 + 16 * index..0x2f703 + 16 * (index + 1)]
@@ -500,7 +500,11 @@ pub fn callsign_row(
             row: index as u32,
             ..c
         },
-        |_| Err(Error::Invalid("unexpected callsign formatter request")),
+        |_| {
+            Err(Error::Invalid(
+                "unexpected callsign formatter request".into(),
+            ))
+        },
     )
 }
 

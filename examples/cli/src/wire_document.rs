@@ -239,9 +239,9 @@ fn drive(
                 break operation
                     .finalize(&mut live_controls, |operation, _| {
                         let identity = operation.outcomes.last().and_then(|o| o.identity.as_ref())
-                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone identity is unavailable" })?;
+                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone identity is unavailable".into() })?;
                         let label = identity.tail.get(2..18)
-                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone label is unavailable" })?;
+                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone label is unavailable".into() })?;
                         information = Some(json!({"heading":"Device information","model":identity.model,"revision":identity.revision,"stored_label":io::bytes_value(label.split(|b|*b==0).next().unwrap())}));
                         Ok(())
                     })

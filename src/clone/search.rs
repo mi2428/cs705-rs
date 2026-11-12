@@ -15,7 +15,9 @@ pub const USB_FLAGS: u32 = 0x12;
 
 fn ascii(s: &[u8]) -> Result<&[u8], Error> {
     if !s.is_ascii() || s.contains(&0) {
-        Err(Error::Invalid("search requires bounded ASCII observation"))
+        Err(Error::Invalid(
+            "search requires bounded ASCII observation".into(),
+        ))
     } else {
         Ok(s)
     }
@@ -55,7 +57,7 @@ pub fn manual_commit(text: &[u8]) -> Result<u16, Error> {
     if (1..=256).contains(&n) {
         Ok(n as u16)
     } else {
-        Err(Error::Invalid("manual COM outside 1..=256"))
+        Err(Error::Invalid("manual COM outside 1..=256".into()))
     }
 }
 
@@ -245,7 +247,7 @@ pub struct SearchRecord {
 impl SearchRecord {
     pub fn to_bytes(&self) -> Result<[u8; RECORD_BYTES], Error> {
         if self.slots.len() > 8 {
-            return Err(Error::Invalid("search slots exceed eight"));
+            return Err(Error::Invalid("search slots exceed eight".into()));
         }
         let mut out = [0; RECORD_BYTES];
         out[..4].copy_from_slice(&self.wave_in.to_le_bytes());
@@ -266,11 +268,11 @@ impl SearchRecord {
     }
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != RECORD_BYTES {
-            return Err(Error::Invalid("search record length"));
+            return Err(Error::Invalid("search record length".into()));
         }
         let n = u32::from_le_bytes(bytes[8..12].try_into().expect("fixed length")) as usize;
         if n > 8 {
-            return Err(Error::Invalid("search slot count"));
+            return Err(Error::Invalid("search slot count".into()));
         }
         let mut slots = Vec::new();
         for i in 0..n {
@@ -279,7 +281,7 @@ impl SearchRecord {
             let end = name
                 .iter()
                 .position(|&b| b == 0)
-                .ok_or(Error::Invalid("search name lacks NUL"))?;
+                .ok_or(Error::Invalid("search name lacks NUL".into()))?;
             slots.push(Slot {
                 number: u32::from_le_bytes(bytes[a..a + 4].try_into().expect("fixed slot")),
                 name: name[..end].to_vec(),

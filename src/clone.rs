@@ -8,6 +8,7 @@
 //! bounds and explicit profiles are separate safety boundaries. See [`Extractor`]
 //! for the original last-completed-frame query/ACK semantics.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
 
@@ -60,7 +61,7 @@ impl Direction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// A structural boundary, direction, escape, length or address is invalid.
-    Invalid(&'static str),
+    Invalid(Cow<'static, str>),
     /// A command outside the recovered clone command family was encountered.
     UnsupportedCommand(u8),
     /// The unescaped E4 body does not sum to zero modulo 256.
@@ -185,11 +186,11 @@ impl Frame {
     pub fn decode(wire: &[u8], direction: Direction) -> Result<Self, Error> {
         let preambles = wire.iter().take_while(|&&b| b == 0xfe).count();
         if preambles < 2 {
-            return Err(Error::Invalid("frame prefix"));
+            return Err(Error::Invalid("frame prefix".into()));
         }
         let wire = &wire[preambles - 2..];
         if !(6..=MAX_FRAME_BYTES).contains(&wire.len()) {
-            return Err(Error::Invalid("frame length"));
+            return Err(Error::Invalid("frame length".into()));
         }
         if !wire.starts_with(&[0xfe, 0xfe])
             || wire.last() != Some(&0xfd)
@@ -197,10 +198,10 @@ impl Frame {
                 .iter()
                 .any(|byte| matches!(byte, 0xfe | 0xfd))
         {
-            return Err(Error::Invalid("frame boundary"));
+            return Err(Error::Invalid("frame boundary".into()));
         }
         if wire[2..4] != direction.addresses() {
-            return Err(Error::Invalid("direction"));
+            return Err(Error::Invalid("direction".into()));
         }
         let command = wire[4];
         check_direction(command, direction)?;
@@ -208,7 +209,7 @@ impl Frame {
         match command {
             0xe0 | 0xe2 | 0xe3 => {
                 if body != REQUEST_ID {
-                    return Err(Error::Invalid("fixed request identity or length"));
+                    return Err(Error::Invalid("fixed request identity or length".into()));
                 }
                 Ok(match command {
                     0xe0 => Self::Identify,
@@ -222,7 +223,7 @@ impl Frame {
                 revision: u16::from_be_bytes([body[2], body[3]]),
                 tail: body[4..].to_vec(),
             })),
-            0xe1 => Err(Error::Invalid("identity response length")),
+            0xe1 => Err(Error::Invalid("identity response length".into())),
             0xe5 => {
                 if body == b"Icom Inc." {
                     return Ok(Self::EndUncounted);
@@ -230,7 +231,7 @@ impl Frame {
                 let count = body
                     .strip_prefix(b"Icom Inc.")
                     .filter(|count| count.len() == 2)
-                    .ok_or(Error::Invalid("end brand or length"))?;
+                    .ok_or(Error::Invalid("end brand or length".into()))?;
                 Ok(Self::End {
                     block_count: (hex_digit(count[0])? << 4) | hex_digit(count[1])?,
                 })
@@ -238,7 +239,7 @@ impl Frame {
             0xe6 => match body {
                 [0] => Ok(Self::Acknowledgement),
                 [status] => Err(Error::Rejected(*status)),
-                _ => Err(Error::Invalid("E6 status length")),
+                _ => Err(Error::Invalid("E6 status length".into())),
             },
             _ => Err(Error::UnsupportedCommand(command)),
         }
@@ -265,11 +266,11 @@ impl Frame {
     /// Rejects non-data frames, invalid blocks and any byte outside `allowed`.
     pub fn check_data_range(&self, allowed: Range<u32>) -> Result<(), Error> {
         let Self::Data { address, payload } = self else {
-            return Err(Error::Invalid("not a data frame"));
+            return Err(Error::Invalid("not a data frame".into()));
         };
         let end = block_end(*address, payload.len())?;
         if *address < allowed.start || end > allowed.end {
-            return Err(Error::Invalid("data outside caller range"));
+            return Err(Error::Invalid("data outside caller range".into()));
         }
         Ok(())
     }
@@ -278,7 +279,7 @@ impl Frame {
 fn check_direction(command: u8, direction: Direction) -> Result<(), Error> {
     match (command, direction) {
         (0xe0 | 0xe2 | 0xe3, Direction::FromRadio) | (0xe1 | 0xe6, Direction::ToRadio) => {
-            Err(Error::Invalid("command direction"))
+            Err(Error::Invalid("command direction".into()))
         }
         _ => Ok(()),
     }
@@ -286,7 +287,7 @@ fn check_direction(command: u8, direction: Direction) -> Result<(), Error> {
 
 fn block_end(address: u32, count: usize) -> Result<u32, Error> {
     if count > 255 {
-        return Err(Error::Invalid("data length outside 0..=255"));
+        return Err(Error::Invalid("data length outside 0..=255".into()));
     }
     address
         .checked_add(count as u32)
@@ -301,7 +302,7 @@ fn decode_data_body(body: &[u8]) -> Result<Frame, Error> {
         return Err(Error::SourceBounds);
     }
     if body.len() < 6 || body.len() != usize::from(body[4]) + 6 {
-        return Err(Error::Invalid("data length"));
+        return Err(Error::Invalid("data length".into()));
     }
     let address = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
     if sum(&body) != 0 {
@@ -336,7 +337,7 @@ fn hex_digit(byte: u8) -> Result<u8, Error> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
         b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(Error::Invalid("uppercase hex block count")),
+        _ => Err(Error::Invalid("uppercase hex block count".into())),
     }
 }
 
@@ -366,7 +367,7 @@ impl Framer {
             || (byte == 0xfd && self.partial.len() < 5)
         {
             self.partial.clear();
-            return Err(Error::Invalid("frame boundary or length"));
+            return Err(Error::Invalid("frame boundary or length".into()));
         }
         self.partial.push(byte);
         if byte == 0xfd {
@@ -386,7 +387,7 @@ impl Framer {
         let incomplete = !self.partial.is_empty();
         self.partial.clear();
         if incomplete {
-            Err(Error::Invalid("truncated frame"))
+            Err(Error::Invalid("truncated frame".into()))
         } else {
             Ok(())
         }
@@ -396,6 +397,22 @@ impl Framer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_reasons_borrow_literals_and_own_dynamic_text() {
+        let error = Frame::decode(b"", Direction::FromRadio).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Invalid(Cow::Borrowed("frame prefix"))
+        ));
+        let text = String::from("dynamic reason\0with suffix");
+        let error = Error::Invalid(Cow::Owned(text.clone()));
+        assert_eq!(
+            crate::diagnostic::Diagnostic::from(&error).technical_detail(),
+            Some(text.as_str())
+        );
+        assert_eq!(error.clone(), Error::Invalid(text.into()));
+    }
 
     // Independent Python/struct expectations, not output from this Rust codec.
     // Four 64-byte blocks cover every possible memory byte and escape boundary.
@@ -546,7 +563,7 @@ mod tests {
         }
         assert_eq!(
             Frame::decode(&hex("FEFEEFEEE100FD"), Direction::FromRadio),
-            Err(Error::Invalid("identity response length"))
+            Err(Error::Invalid("identity response length".into()))
         );
         assert!(Frame::decode(&hex("FEFEEFEEE040750000FD"), Direction::FromRadio).is_err());
         assert!(Frame::decode(&hex("FEFEEEEFE600FD"), Direction::ToRadio).is_err());
