@@ -498,14 +498,10 @@ impl Session {
         transport: &mut impl Transport,
         mut cancelled: impl FnMut() -> io::Result<bool>,
     ) -> Outcome {
-        let result = transport
-            .now_ms()
-            .map_err(|e| Failure::Io(e.kind()))
-            .and_then(|now| {
-                self.last_now = now;
-                self.deadline = now.saturating_add(self.config.timeout_ms);
-                self.drive(transport, &mut cancelled)
-            });
+        let result = self.now(transport).and_then(|now| {
+            self.deadline = now.saturating_add(self.config.timeout_ms);
+            self.drive(transport, &mut cancelled)
+        });
         if let Err(error) = result {
             self.out.failure = Some(error);
         }
@@ -534,6 +530,18 @@ impl Session {
             _ => self.config.timeout_ms,
         };
         self.deadline = now.saturating_add(duration);
+    }
+
+    fn now(&mut self, transport: &impl Transport) -> Result<u64, Failure> {
+        let now = transport.now_ms().map_err(|e| Failure::Io(e.kind()))?;
+        // Startup deadlines and the transition into the wire epoch also consume
+        // clock samples. Checking only the main loop could miss a regression
+        // followed by recovery and incorrectly grant a completed-query proof.
+        if now < self.last_now {
+            return Err(Failure::ClockRegressed);
+        }
+        self.last_now = now;
+        Ok(now)
     }
 
     fn send(
@@ -756,10 +764,7 @@ impl Session {
                 self.drain_input(t, cancelled)?;
             } else {
                 self.send(t, &decode_hex_script(token), cancelled)?;
-                let deadline = t
-                    .now_ms()
-                    .map_err(|e| Failure::Io(e.kind()))?
-                    .saturating_add(self.config.timeout_ms);
+                let deadline = self.now(t)?.saturating_add(self.config.timeout_ms);
                 loop {
                     self.receive(t)?;
                     if t.pending_output().map_err(|e| Failure::Io(e.kind()))? == 0
@@ -770,7 +775,7 @@ impl Session {
                     if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                         return Err(Failure::Cancelled);
                     }
-                    if t.now_ms().map_err(|e| Failure::Io(e.kind()))? >= deadline {
+                    if self.now(t)? >= deadline {
                         return Err(if self.out.echo == Echo::Known && !self.mirror.is_empty() {
                             Failure::EchoTimeout
                         } else {
@@ -794,19 +799,13 @@ impl Session {
         self.receive.clear();
         self.mirror.clear();
         self.out.echo = self.config.settings.echo;
-        self.transition(
-            self.entry_phase,
-            t.now_ms().map_err(|e| Failure::Io(e.kind()))?,
-        );
+        let now = self.now(t)?;
+        self.transition(self.entry_phase, now);
         loop {
             if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                 return Err(Failure::Cancelled);
             }
-            let now = t.now_ms().map_err(|e| Failure::Io(e.kind()))?;
-            if now < self.last_now {
-                return Err(Failure::ClockRegressed);
-            }
-            self.last_now = now;
+            let now = self.now(t)?;
             match self.phase {
                 State::QuerySend => {
                     self.send(t, &self.wire(Frame::Identify)?, cancelled)?;

@@ -71,6 +71,8 @@ pub(crate) struct Mock {
     stuck_after_ack: bool,
     close_failure: bool,
     clock_failure: bool,
+    clock_regression_at: Option<usize>,
+    clock_calls: Cell<usize>,
     pub(crate) closes: usize,
     shared_sent: Rc<Cell<usize>>,
     reads: usize,
@@ -103,6 +105,8 @@ impl Mock {
             stuck_after_ack: false,
             close_failure: false,
             clock_failure: false,
+            clock_regression_at: None,
+            clock_calls: Cell::new(0),
             closes: 0,
             shared_sent: Rc::new(Cell::new(0)),
             reads: 0,
@@ -187,8 +191,13 @@ impl Write for Mock {
 }
 impl Transport for Mock {
     fn now_ms(&self) -> io::Result<u64> {
+        let call = self.clock_calls.replace(self.clock_calls.get() + 1);
         if self.clock_failure {
             Err(io::ErrorKind::PermissionDenied.into())
+        } else if self.clock_regression_at == Some(call) {
+            Ok(0)
+        } else if self.clock_regression_at.is_some() {
+            Ok(self.now + 1000)
         } else {
             Ok(self.now)
         }
@@ -215,6 +224,32 @@ impl Transport for Mock {
         } else {
             Ok(())
         }
+    }
+}
+
+#[test]
+fn clock_regression_during_startup_is_terminal() {
+    for (script, regression_at, pending) in [
+        (b"".as_slice(), 1, 0),
+        (b"00".as_slice(), 1, 0),
+        (b"00".as_slice(), 2, 1),
+    ] {
+        let mut transport = Mock::new(6);
+        transport.clock_regression_at = Some(regression_at);
+        transport.pending = pending;
+        let mut config = config();
+        config.startup_script = script.to_vec();
+        let outcome = Session::query(config)
+            .unwrap()
+            .run(&mut transport, || Ok(false));
+        assert_eq!(outcome.failure, Some(Failure::ClockRegressed));
+        assert_eq!(outcome.terminal_phase, State::Startup);
+        assert_eq!(transport.closes, 1);
+        assert!(transport.commands.is_empty());
+        assert_eq!(
+            outcome.transmitted_wire_bytes,
+            u64::from(!script.is_empty())
+        );
     }
 }
 
