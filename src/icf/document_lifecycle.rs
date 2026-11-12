@@ -244,16 +244,13 @@ pub struct MenuContext<'a> {
     pub active: Option<&'a NativeView>,
     pub recent: &'a RecentFiles,
 }
+type MenuQueryFn =
+    dyn for<'a> Fn(&mut MenuContext<'a>, &mut MenuDescriptor) -> Result<(), Error> + Send + Sync;
+
 /// Registered software code receives the SAME live objects, not snapshots or
 /// caller-completed menu flags or caption packets.
 #[derive(Clone)]
-pub struct MenuQuery(
-    Arc<
-        dyn for<'a> Fn(&mut MenuContext<'a>, &mut MenuDescriptor) -> Result<(), Error>
-            + Send
-            + Sync,
-    >,
-);
+pub struct MenuQuery(Arc<MenuQueryFn>);
 impl MenuQuery {
     pub fn new(
         query: impl for<'a> Fn(&mut MenuContext<'a>, &mut MenuDescriptor) -> Result<(), Error>
