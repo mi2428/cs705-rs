@@ -1243,6 +1243,10 @@ impl<'a> Resources<'a> {
                 {
                     return Err(invalid("native page does not belong to its generated grid"));
                 }
+                let number = job
+                    .pages
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("print page count overflow"))?;
                 job.begin_page();
                 let mut visited = std::collections::BTreeSet::new();
                 for r in (0..grid.fixed_rows).chain(page.rows.clone()) {
@@ -1263,13 +1267,7 @@ impl<'a> Resources<'a> {
                         }
                     }
                 }
-                html.push_str(&super::html_page(
-                    &painted,
-                    page,
-                    paper,
-                    metrics,
-                    job.pages + 1,
-                )?);
+                html.push_str(&super::html_page(&painted, page, paper, metrics, number)?);
                 job.page_drawn();
             }
         }
@@ -1359,6 +1357,106 @@ mod tests {
             keys: BTreeMap::from([(b"CL_Value".as_slice(), 0x136)]),
             source: None,
         }
+    }
+
+    #[test]
+    fn render_page_count_exhaustion_precedes_paint_output_and_events() {
+        use crate::printing::{Event, Job, Views};
+
+        let source = localized_source().with_language(0, false);
+        let factory = Factory::parse(b"[St_Common]GI_Sheet_Local,403").unwrap();
+        let grid = source
+            .schema(&factory, &[], |_| panic!("no condition"))
+            .unwrap();
+        let metrics = Metrics {
+            font_height: -12,
+            em: 12,
+            advance_em: 6,
+            line_em: 12,
+            padding: 1,
+        };
+        let paper = Paper {
+            width: 200,
+            height: 200,
+        };
+        let plan = layout(&grid, paper, metrics).unwrap();
+        assert_eq!(plan.pages.len(), 1);
+        let mut views = Views::default();
+        let mut job = Job::begin(vec![grid.name.clone()]).unwrap();
+        job.pages = usize::MAX;
+        let events = job.events.clone();
+        let mut html = String::from("prefix");
+        let mut calls = 0;
+        let error = source
+            .render(
+                &[],
+                &grid,
+                &plan,
+                &mut views,
+                &mut job,
+                paper,
+                metrics,
+                &mut html,
+                |_| {
+                    calls += 1;
+                    Ok(b"paint".to_vec())
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "print page count overflow");
+        assert_eq!(calls, 0);
+        assert_eq!(html, "prefix");
+        assert_eq!(job.events, events);
+        assert_eq!(job.pages, usize::MAX);
+        assert!(!job.ended && !job.cancelled);
+        assert_eq!(job.remaining_names(), std::slice::from_ref(&grid.name));
+
+        job.pages = 0;
+        source
+            .render(
+                &[],
+                &grid,
+                &plan,
+                &mut views,
+                &mut job,
+                paper,
+                metrics,
+                &mut html,
+                |_| {
+                    calls += 1;
+                    Ok(b"paint".to_vec())
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert!(html.starts_with("prefix<section") && html.contains(">paint</text>"));
+        assert_eq!(job.pages, 1);
+        assert_eq!(job.events, [Event::BeginDoc, Event::Page]);
+
+        let prefix = html.clone();
+        let error = source
+            .render(
+                &[],
+                &grid,
+                &plan,
+                &mut views,
+                &mut job,
+                paper,
+                metrics,
+                &mut html,
+                |_| {
+                    calls += 1;
+                    Err(io::Error::other("paint failed"))
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.to_string(), "paint failed");
+        assert_eq!(calls, 2);
+        assert_eq!(html, prefix);
+        assert_eq!(job.pages, 1);
+        assert_eq!(job.events, [Event::BeginDoc, Event::Page, Event::NewPage]);
+        assert!(!job.ended);
     }
 
     #[test]
