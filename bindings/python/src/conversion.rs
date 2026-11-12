@@ -37,7 +37,10 @@ pub fn strict_range(value: &Bound<'_, PyAny>) -> PyResult<std::ops::Range<usize>
     Ok(strict_usize(&range.getattr("start")?)?..strict_usize(&range.getattr("stop")?)?)
 }
 
-/// Move-out storage keeps native callback loans independent of PyO3 guards.
+/// Owned bytes; construction from bytes or bytearray copies the input.
+/// to_bytes() returns a snapshot, not an in-place Python output buffer. No buffer
+/// protocol is exposed. Busy access raises RuntimeError; completed writes remain
+/// visible after a callback or native operation fails.
 #[pyclass(module = "cs705", frozen)]
 pub struct MutableBytes {
     owner: crate::owner::Owner<Vec<u8>>,
@@ -80,6 +83,8 @@ impl MutableBytes {
 }
 
 #[pyclass(module = "cs705", frozen)]
+/// Mutable scalar accepting only real bool values, never integer substitutes.
+/// Busy access raises RuntimeError; completed changes survive operation failure.
 pub struct Bool {
     owner: crate::owner::Owner<bool>,
 }
@@ -155,13 +160,13 @@ mod tests {
             assert!(flag.value().is_err());
             *taken = false;
             drop(taken);
-            assert_eq!(flag.value().unwrap(), false);
+            assert!(!flag.value().unwrap());
             let result: PyResult<()> = flag.with_mut(|value| {
                 *value = true;
                 Err(PyValueError::new_err("injected bool failure"))
             });
             assert!(result.is_err());
-            assert_eq!(flag.value().unwrap(), true);
+            assert!(flag.value().unwrap());
             let builtins = PyModule::import(py, "builtins").unwrap();
             let range = builtins.getattr("range").unwrap();
             assert_eq!(strict_range(&range.call1((2, 4)).unwrap()).unwrap(), 2..4);

@@ -254,7 +254,7 @@ mod tests {
     fn owned_error_reasons_preserve_native_borrows_and_runtime_text() {
         use super::*;
         use std::{borrow::Cow, fmt::Display};
-        const TEXT: &str = "runtime 理由\0é";
+        const TEXT: &str = "runtime \u{7406}\u{7531}\0\u{e9}";
         fn check<E: Clone + Display>(error: E, domain: Domain, kind: Kind)
         where
             for<'a> Diagnostic<'a>: From<&'a E>,

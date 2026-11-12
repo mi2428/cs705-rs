@@ -1,13 +1,32 @@
 //! Native variants become structured exceptions, never message-parsed categories.
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyOSError};
+use pyo3::exceptions::{PyBaseException, PyException, PyOSError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
-create_exception!(cs705, Error, PyException);
+create_exception!(
+    cs705,
+    Error,
+    PyException,
+    "Base for native domain failures.\n\nNative-raised instances carry structured domain, kind, diagnostic, and native data.\nCommitted effects are not rolled back. Standard boundary exceptions, OSError,\nand retained callback exceptions are not replaced by this class."
+);
+
+pub(crate) fn attach_native(error: &PyErr, native: &Bound<'_, PyAny>) -> PyResult<()> {
+    let py = native.py();
+    // Error carriers may retain a caller-supplied exception. Its attribute hooks
+    // must not replace that primary failure or reenter while metadata is added.
+    py.get_type::<PyBaseException>()
+        .getattr("__dict__")?
+        .get_item("__dict__")?
+        .call_method1("__get__", (error.value(py),))?
+        .cast::<PyDict>()?
+        .set_item("native", native)
+}
 
 fn with_native<T: pyo3::PyClass<BaseType = PyAny>>(error: PyErr, native: T) -> PyErr {
     Python::attach(|py| {
-        match Py::new(py, native).and_then(|native| error.value(py).setattr("native", native)) {
+        match Py::new(py, native).and_then(|native| attach_native(&error, native.bind(py).as_any()))
+        {
             Ok(()) => error,
             Err(error) => error,
         }

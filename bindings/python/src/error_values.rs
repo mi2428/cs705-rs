@@ -165,6 +165,9 @@ enum IoPayload {
     },
 }
 #[pyclass(module = "cs705")]
+/// Shared I/O error payload, created by from_os_error() or a native error report.
+/// share() retains the actual source rather than reconstructing it from text.
+/// Python sources are GC-visible and keep their exception identity and traceback.
 pub struct IoErrorData {
     payload: Option<IoPayload>,
 }
@@ -208,13 +211,14 @@ impl IoErrorData {
             IoPayload::Native(error) => errors::io_view(&error),
             IoPayload::Python { error, .. } => PyErr::from_value(error.into_bound(py).into_any()),
         };
-        error.value(py).setattr("native", slf)?;
+        errors::attach_native(&error, slf.bind(py).as_any())?;
         Ok(error)
     }
 }
 #[pymethods]
 impl IoErrorData {
     #[staticmethod]
+    /// Retain the supplied OSError object, including its traceback; do not raise it.
     fn from_os_error(py: Python<'_>, error: &Bound<'_, PyAny>) -> PyResult<Self> {
         error.cast::<PyOSError>()?;
         Ok(Self::from_core(
@@ -258,6 +262,8 @@ impl IoErrorData {
             }
         }
     }
+    /// Return without raising: map a native payload or return the same Python
+    /// exception object and traceback. Updates its native carrier metadata.
     fn exception(slf: Py<Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(Self::exception_for(slf, py)?.into_value(py).into_any())
     }
@@ -322,7 +328,7 @@ impl FileErrorData {
             FilePayload::Image(error) => errors::icf(error),
             FilePayload::Output(error) => IoErrorData::exception_for(error, py)?,
         };
-        error.value(py).setattr("native", slf)?;
+        errors::attach_native(&error, slf.bind(py).as_any())?;
         Ok(error)
     }
 }
@@ -421,7 +427,7 @@ impl CloneErrorData {
             icf::document::CloneError::Image(error) => errors::icf(error.clone()),
             icf::document::CloneError::Protocol(error) => errors::clone(error.clone()),
         };
-        error.value(py).setattr("native", slf)?;
+        errors::attach_native(&error, slf.bind(py).as_any())?;
         Ok(error)
     }
 }

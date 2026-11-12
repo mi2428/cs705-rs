@@ -11,6 +11,8 @@ enum Source {
     Presentation(cs705_core::presentation::Error),
 }
 #[pyclass(module = "cs705.diagnostic")]
+/// Produced by native errors, not by a public constructor. Summary fields are
+/// writable; technical_detail retains the original error text.
 pub struct Diagnostic {
     source: Source,
     domain: core::Domain,

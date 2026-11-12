@@ -28,7 +28,7 @@ struct CallableState {
     callable: Mutex<Option<Py<PyAny>>>,
 }
 
-/// The enclosing Python object must own and traverse a Py<CallbackHolder>.
+/// The enclosing Python object must own and traverse a `Py<CallbackHolder>`.
 #[pyclass(frozen, module = "cs705")]
 pub struct CallbackHolder {
     state: Arc<CallableState>,
@@ -228,10 +228,10 @@ impl CallbackError {
             (None, Ok(_)) => self.cleanup.remove(0),
             (None, Err(error)) => error,
             (Some(primary), native) => {
-                if let Err(error) = native {
-                    if !error.value(py).is(primary.value(py)) {
-                        self.cleanup.push(error);
-                    }
+                if let Err(error) = native
+                    && !error.value(py).is(primary.value(py))
+                {
+                    self.cleanup.push(error);
                 }
                 primary
             }

@@ -27,6 +27,10 @@ class Kind(Enum):
     InvalidSymbolWidth = 15
     AmbiguousField = 16
 class Diagnostic:
+    """Produced by native errors, not by a public constructor.
+
+    Summary fields are writable; technical_detail retains the original error text.
+    """
     domain: Domain
     kind: Kind
     line: int | None
