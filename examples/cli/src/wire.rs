@@ -279,10 +279,10 @@ fn execute(session: Session, args: &TransportArgs) -> Result<Outcome> {
     };
     if let Some(path) = &args.mock {
         let mut mock = transport::Mock::from_file(path)?;
-        Ok(session.run(&mut mock, cancelled))
+        Ok(session.run(&mut mock, || Ok(cancelled())))
     } else {
         let mut serial = transport::Serial::open(args)?;
-        Ok(session.run(&mut serial, cancelled))
+        Ok(session.run(&mut serial, || Ok(cancelled())))
     }
 }
 fn sequence_session(
@@ -299,7 +299,7 @@ fn sequence_session(
     }
     let outcome = session.run(
         &mut transport::SequenceLease::new(transport, retain),
-        cancelled,
+        || Ok(cancelled()),
     );
     *ran = true;
     Ok(outcome)

@@ -500,7 +500,7 @@ impl Software {
             .query_document(
                 clone::SessionConfig::default(),
                 &mut transport,
-                || false,
+                || Ok(false),
                 &mut self.receiver(),
             )
             .map_err(|e| invalid(&e.to_string()))?;

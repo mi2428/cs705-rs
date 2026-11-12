@@ -205,11 +205,11 @@ fn logic_phase_initial_lowbyte_saved_bl_and_native_read_callbacks() {
     loop {
         match read.advance(&session, controls(), reply).unwrap() {
             CloneReadStep::Query(query) => {
-                reply = CloneReadReply::Probe(query.run(&mut wire, || false))
+                reply = CloneReadReply::Probe(query.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Sync(_) => reply = CloneReadReply::Continue,
             CloneReadStep::Read(read) => {
-                reply = CloneReadReply::Read(read.run(&mut wire, || false))
+                reply = CloneReadReply::Read(read.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Apply => break,
             CloneReadStep::Stopped(stop) => {
@@ -246,7 +246,7 @@ fn logic_phase_initial_lowbyte_saved_bl_and_native_read_callbacks() {
     let mut wire = Wire::new(query_events(&[bad]));
     let failed = clone::Session::read(config(), 6.try_into().unwrap())
         .unwrap()
-        .run(&mut wire, || false);
+        .run(&mut wire, || Ok(false));
     let mut events = Vec::new();
     let result = doc
         .receive_clone_read(
@@ -276,10 +276,10 @@ fn logic_phase_initial_lowbyte_saved_bl_and_native_read_callbacks() {
     loop {
         match rejected.advance(&session, controls(), reply).unwrap() {
             CloneReadStep::Query(query) => {
-                reply = CloneReadReply::Probe(query.run(&mut wire, || false))
+                reply = CloneReadReply::Probe(query.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Read(read) => {
-                reply = CloneReadReply::Read(read.run(&mut wire, || false))
+                reply = CloneReadReply::Read(read.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Sync(_) => reply = CloneReadReply::Continue,
             CloneReadStep::Apply => break,
@@ -363,7 +363,7 @@ fn logic_phase_option_producer_and_saved_q_are_live_not_numeric_snapshots() {
                 .unwrap()
             {
                 CloneStep::Sync(_) => reply = CloneReply::Continue,
-                CloneStep::Query(q) => reply = CloneReply::Probe(q.run(&mut wire, || false)),
+                CloneStep::Query(q) => reply = CloneReply::Probe(q.run(&mut wire, || Ok(false))),
                 CloneStep::Confirm { .. } => break,
                 _ => panic!("unexpected phase"),
             }
@@ -387,7 +387,7 @@ fn logic_phase_option_producer_and_saved_q_are_live_not_numeric_snapshots() {
                 panic!("expected saved-Q query")
             };
             let mut second = Wire::new(query_events(&[identity(6)]));
-            assert_eq!(q.run(&mut second, || false).result_code(), 0);
+            assert_eq!(q.run(&mut second, || Ok(false)).result_code(), 0);
             second.finish();
         }
         wire.finish();
@@ -411,10 +411,10 @@ fn logic_phase_read_mismatch_saves_then_reprobes_and_keeps_callback_failure_pref
     loop {
         match read.advance(&session, controls(), reply).unwrap() {
             CloneReadStep::Query(query) => {
-                reply = CloneReadReply::Probe(query.run(&mut wire, || false))
+                reply = CloneReadReply::Probe(query.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Read(read) => {
-                reply = CloneReadReply::Read(read.run(&mut wire, || false))
+                reply = CloneReadReply::Read(read.run(&mut wire, || Ok(false)))
             }
             CloneReadStep::Sync(0x2a) => {
                 let id = read.outcomes.last().unwrap().identity.as_ref().unwrap();
@@ -554,8 +554,8 @@ impl Write for Wire {
     }
 }
 impl Transport for Wire {
-    fn now_ms(&self) -> u64 {
-        self.now
+    fn now_ms(&self) -> std::io::Result<u64> {
+        Ok(self.now)
     }
     fn wait_ms(&mut self, ms: u64) -> std::io::Result<()> {
         self.now += ms;
@@ -589,9 +589,9 @@ fn run(
                 boundary(event, doc, &mut c);
                 reply = CloneReply::Continue;
             }
-            CloneStep::Query(q) => reply = CloneReply::Probe(q.run(wire, || false)),
+            CloneStep::Query(q) => reply = CloneReply::Probe(q.run(wire, || Ok(false))),
             CloneStep::Confirm { .. } => reply = CloneReply::Confirmation(response),
-            CloneStep::Write(w) => reply = CloneReply::Written(w.run(wire, || false)),
+            CloneStep::Write(w) => reply = CloneReply::Written(w.run(wire, || Ok(false))),
             CloneStep::Finalize => return op.finalize(&mut c, |_, _| Ok(())).unwrap(),
             CloneStep::Stopped(stop) => return stop,
         }
@@ -798,7 +798,7 @@ fn late_stage9_error_keeps_current_prefix_private_allocation_and_previous_wire_b
             reply,
         ) {
             Ok(CloneStep::Sync(_)) => reply = CloneReply::Continue,
-            Ok(CloneStep::Query(q)) => reply = CloneReply::Probe(q.run(&mut wire, || false)),
+            Ok(CloneStep::Query(q)) => reply = CloneReply::Probe(q.run(&mut wire, || Ok(false))),
             Ok(CloneStep::Confirm { .. }) => reply = CloneReply::Confirmation(1),
             Err(CloneError::Image(_)) => break,
             _ => panic!("preparation failure must not reach final probe/write"),
@@ -907,7 +907,7 @@ fn actual_selector_context_gate_and_controller_busy_stop_at_callback_generation(
     else {
         panic!()
     };
-    let out = q.run(&mut wire, || false);
+    let out = q.run(&mut wire, || Ok(false));
     let mut busy = controls();
     busy.controller_busy = 1;
     assert!(matches!(
@@ -935,7 +935,7 @@ fn actual_selector_context_gate_and_controller_busy_stop_at_callback_generation(
             reply,
         ) {
             Ok(CloneStep::Sync(_)) => reply = CloneReply::Continue,
-            Ok(CloneStep::Query(q)) => reply = CloneReply::Probe(q.run(&mut wire, || false)),
+            Ok(CloneStep::Query(q)) => reply = CloneReply::Probe(q.run(&mut wire, || Ok(false))),
             Ok(CloneStep::Confirm { .. }) => {
                 op.fd = 1;
                 reply = CloneReply::Confirmation(1);
@@ -1172,10 +1172,10 @@ fn logic_phase_write_final_callback_releases_live_mask_only_after_normal_return(
                     if op.outcomes.len() == 2 {
                         op.options.as_mut().unwrap().word = 21;
                     }
-                    reply = CloneReply::Probe(q.run(&mut wire, || false));
+                    reply = CloneReply::Probe(q.run(&mut wire, || Ok(false)));
                 }
                 CloneStep::Confirm { .. } => reply = CloneReply::Confirmation(1),
-                CloneStep::Write(w) => reply = CloneReply::Written(w.run(&mut wire, || false)),
+                CloneStep::Write(w) => reply = CloneReply::Written(w.run(&mut wire, || Ok(false))),
                 CloneStep::Finalize => break,
                 _ => panic!("unexpected write stop"),
             }

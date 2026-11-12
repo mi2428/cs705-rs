@@ -420,8 +420,8 @@ mod transport_tests {
         }
     }
     impl Transport for Endpoint {
-        fn now_ms(&self) -> u64 {
-            self.now
+        fn now_ms(&self) -> std::io::Result<u64> {
+            Ok(self.now)
         }
         fn wait_ms(&mut self, ms: u64) -> stdio::Result<()> {
             self.now += ms;
@@ -510,7 +510,7 @@ mod transport_tests {
             }
             let out = clone::Session::query(config.clone()).unwrap().run(
                 &mut transport::SequenceLease::new(&mut endpoint, false),
-                || false,
+                || Ok(false),
             );
             assert_eq!(out.result_code(), 0);
             assert_eq!(out.identity_gate.cached_tail.unwrap()[1], selector);

@@ -9,6 +9,7 @@ use crate::icf::document::{
     self,
     lifecycle::{RecentFiles, UiState},
 };
+use std::borrow::Cow;
 
 /// Receivers borrow the real document and shared session, never a copied image.
 pub struct DocumentReceiver<'a> {
@@ -37,7 +38,7 @@ pub enum Life {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     pub argument: i64,
     pub bytes: Vec<u8>,
 }
@@ -314,7 +315,7 @@ mod tests {
             c.events
                 .iter()
                 .filter(|e| e.name != "native_return_ignored")
-                .map(|e| (e.name, e.argument))
+                .map(|e| (e.name.as_ref(), e.argument))
                 .collect::<Vec<_>>(),
             [
                 ("cancel_close_request", 0),
@@ -642,7 +643,7 @@ impl Controller {
     }
     fn event(&mut self, name: &'static str, argument: i64) {
         self.events.push(Event {
-            name,
+            name: name.into(),
             argument,
             bytes: Vec::new(),
         });
@@ -1103,7 +1104,7 @@ impl Controller {
         &mut self,
         mut config: SessionConfig,
         transport: &mut impl Transport,
-        cancelled: impl FnMut() -> bool,
+        cancelled: impl FnMut() -> std::io::Result<bool>,
     ) -> Result<Outcome, Error> {
         if !self.reidentify_requested {
             return Err(Error::Invalid("no pending reidentify request".into()));
@@ -1131,7 +1132,7 @@ impl Controller {
         &mut self,
         mut config: SessionConfig,
         transport: &mut impl Transport,
-        cancelled: impl FnMut() -> bool,
+        cancelled: impl FnMut() -> std::io::Result<bool>,
         receiver: &mut DocumentReceiver<'_>,
     ) -> Result<Outcome, document::CloneError> {
         config.expected_context = Some(receiver.session.context.fields());

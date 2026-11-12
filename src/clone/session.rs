@@ -31,7 +31,7 @@ use super::{
 /// blocked OS call. The adapter alone implements OS access. Reconfiguration
 /// must retain the same explicitly selected port; it must never search ports.
 pub trait Transport: Read + Write {
-    fn now_ms(&self) -> u64;
+    fn now_ms(&self) -> io::Result<u64>;
     fn wait_ms(&mut self, milliseconds: u64) -> io::Result<()>;
     fn pending_output(&mut self) -> io::Result<usize>;
     fn close(&mut self) -> io::Result<()>;
@@ -229,7 +229,7 @@ impl Failure {
 
 /// Owned terminal result, including failure-prefix image and coverage. Bytes
 /// whose coverage bit is clear are NOT acquired data even if the byte is zero.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Outcome {
     pub operation: Operation,
     pub failure: Option<Failure>,
@@ -496,11 +496,16 @@ impl Session {
     pub fn run(
         mut self,
         transport: &mut impl Transport,
-        mut cancelled: impl FnMut() -> bool,
+        mut cancelled: impl FnMut() -> io::Result<bool>,
     ) -> Outcome {
-        self.last_now = transport.now_ms();
-        self.deadline = self.last_now.saturating_add(self.config.timeout_ms);
-        let result = self.drive(transport, &mut cancelled);
+        let result = transport
+            .now_ms()
+            .map_err(|e| Failure::Io(e.kind()))
+            .and_then(|now| {
+                self.last_now = now;
+                self.deadline = now.saturating_add(self.config.timeout_ms);
+                self.drive(transport, &mut cancelled)
+            });
         if let Err(error) = result {
             self.out.failure = Some(error);
         }
@@ -535,12 +540,12 @@ impl Session {
         &mut self,
         t: &mut impl Transport,
         bytes: &[u8],
-        cancelled: &mut impl FnMut() -> bool,
+        cancelled: &mut impl FnMut() -> io::Result<bool>,
     ) -> Result<(), Failure> {
         self.out.requested_wire_bytes += bytes.len() as u64;
         let mut offset = 0;
         while offset < bytes.len() {
-            if cancelled() {
+            if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                 return Err(Failure::Cancelled);
             }
             // Any E3-or-later write attempt may have an unobservable prefix
@@ -733,15 +738,15 @@ impl Session {
     fn drive(
         &mut self,
         t: &mut impl Transport,
-        cancelled: &mut impl FnMut() -> bool,
+        cancelled: &mut impl FnMut() -> io::Result<bool>,
     ) -> Result<(), Failure> {
-        if cancelled() {
+        if cancelled().map_err(|e| Failure::Io(e.kind()))? {
             return Err(Failure::Cancelled);
         }
         let script = self.config.startup_script.clone();
         let mut remaining = script.as_slice();
         while !remaining.is_empty() {
-            if cancelled() {
+            if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                 return Err(Failure::Cancelled);
             }
             let (token, consumed, settings) = script_token(remaining);
@@ -751,7 +756,10 @@ impl Session {
                 self.drain_input(t, cancelled)?;
             } else {
                 self.send(t, &decode_hex_script(token), cancelled)?;
-                let deadline = t.now_ms().saturating_add(self.config.timeout_ms);
+                let deadline = t
+                    .now_ms()
+                    .map_err(|e| Failure::Io(e.kind()))?
+                    .saturating_add(self.config.timeout_ms);
                 loop {
                     self.receive(t)?;
                     if t.pending_output().map_err(|e| Failure::Io(e.kind()))? == 0
@@ -759,10 +767,10 @@ impl Session {
                     {
                         break;
                     }
-                    if cancelled() {
+                    if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                         return Err(Failure::Cancelled);
                     }
-                    if t.now_ms() >= deadline {
+                    if t.now_ms().map_err(|e| Failure::Io(e.kind()))? >= deadline {
                         return Err(if self.out.echo == Echo::Known && !self.mirror.is_empty() {
                             Failure::EchoTimeout
                         } else {
@@ -786,12 +794,15 @@ impl Session {
         self.receive.clear();
         self.mirror.clear();
         self.out.echo = self.config.settings.echo;
-        self.transition(self.entry_phase, t.now_ms());
+        self.transition(
+            self.entry_phase,
+            t.now_ms().map_err(|e| Failure::Io(e.kind()))?,
+        );
         loop {
-            if cancelled() {
+            if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                 return Err(Failure::Cancelled);
             }
-            let now = t.now_ms();
+            let now = t.now_ms().map_err(|e| Failure::Io(e.kind()))?;
             if now < self.last_now {
                 return Err(Failure::ClockRegressed);
             }
@@ -966,13 +977,13 @@ impl Session {
     fn drain_input(
         &mut self,
         t: &mut impl Transport,
-        cancelled: &mut impl FnMut() -> bool,
+        cancelled: &mut impl FnMut() -> io::Result<bool>,
     ) -> Result<(), Failure> {
         // 15EF0: 100 ms wait, then at most 65535 one-byte reads until count 0.
         t.wait_ms(100).map_err(|e| Failure::Io(e.kind()))?;
         let mut byte = [0];
         for _ in 0..65535 {
-            if cancelled() {
+            if cancelled().map_err(|e| Failure::Io(e.kind()))? {
                 return Err(Failure::Cancelled);
             }
             match t.read(&mut byte) {
