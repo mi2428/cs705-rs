@@ -350,7 +350,8 @@ impl UiState {
         visit.call(&self.retained)
     }
     fn __clear__(&self, py: Python<'_>) -> PyResult<()> {
-        self.retained.bind(py).set_item(0, py.None())
+        // GC may clear this shared list before either UiState, and clear may repeat.
+        self.retained.bind(py).del_slice(0, usize::MAX)
     }
 }
     };
@@ -360,4 +361,34 @@ ui_methods!(task_period,set_task_period:i32=>strict_i32; task_enabled,set_task_e
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NativeState>()?;
     m.add_class::<UiState>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_ui_clear_is_idempotent_after_list_gc() {
+        Python::initialize();
+        Python::attach(|py| {
+            for list_cleared_first in [true, false] {
+                let ui = UiState::from_core(py, core::UiState::headless()).unwrap();
+                let shared = ui.share(py);
+                assert!(Arc::ptr_eq(&ui.owner, &shared.owner));
+                assert!(ui.retained.bind(py).is(shared.retained.bind(py)));
+                ui.set_menu(py, vec![]).unwrap();
+                assert!(shared.menu(py).unwrap().is_empty());
+                if list_cleared_first {
+                    ui.retained.bind(py).del_slice(0, usize::MAX).unwrap();
+                }
+                ui.__clear__(py).unwrap();
+                shared.__clear__(py).unwrap();
+                ui.__clear__(py).unwrap();
+                assert!(ui.retained.bind(py).is_empty());
+                assert!(shared.menu(py).is_err());
+                assert!(shared.set_menu(py, vec![]).is_err());
+                assert_eq!(shared.with_ref(|state| Ok(state.menu.len())).unwrap(), 0);
+            }
+        });
+    }
 }
