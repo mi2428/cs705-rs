@@ -1,4 +1,9 @@
-"""Help requests and observation effects; no native help window is launched."""
+"""Help requests and captured API observations; no help window is launched.
+
+Paths and resource names are bytes with no inferred host encoding. drive may
+fail after changing state/effects. Collection effects are detached snapshots;
+assign replacements to update the owner.
+"""
 from ._native import item_help as _h
 Api = _h.Api
 Call = _h.Call

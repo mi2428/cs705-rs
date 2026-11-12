@@ -73,6 +73,10 @@ owner!(Grid, core::Grid);
 #[pymethods]
 impl Grid {
     #[new]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The print grid constructor keeps text, fixed axes, boundary arrays, native nodes and factory separate."
+    )]
     fn new(
         name: String,
         cells: &Bound<'_, PyAny>,
@@ -318,7 +322,7 @@ fn html_page(
 mod io;
 pub(crate) mod resources;
 mod tasks;
-pub use tasks::{Editor, Event, Job};
+pub use tasks::{Editor, Job};
 pub fn register(root: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(root.py(), "printing")?;
     m.add_class::<Metrics>()?;

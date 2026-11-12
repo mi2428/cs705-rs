@@ -193,6 +193,12 @@ fn text_edit(
     Ok(TextEffect::from_core(value))
 }
 #[pyfunction]
+/// Normalize the shared source through callback-scoped NLS buffers.
+/// Input sanitation can survive later failure; Python callback exceptions propagate unchanged.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The native text editor receives independent map and uppercase callbacks in addition to its edit inputs."
+)]
 fn text_edit_with_nls(
     py: Python<'_>,
     field: &Bound<'_, PyAny>,
@@ -263,6 +269,7 @@ fn notifications(value: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
 }
 value!(AllowedEffect { inserted: bool => set_inserted; stored: bool => set_stored; full_warning: bool => set_full_warning; view_bad: bool => set_view_bad; duplicate_warning: bool => set_duplicate_warning; state_out: u32 => set_state_out; notify_flags: u32 => set_notify_flags; display: Vec<u8> => set_display; } {
     #[new]
+    #[expect(clippy::too_many_arguments, reason = "The constructor exposes each native allowed-call effect and its ordered notification list.")]
     fn new(
         inserted: &Bound<'_, PyAny>,
         stored: &Bound<'_, PyAny>,
@@ -352,6 +359,12 @@ fn edit_allowed(
     })
 }
 #[pyfunction]
+/// Edit an allowed-call row with shared NLS callbacks; insertion may precede later failure.
+/// The effect owner and image retain the committed prefix, not a rollback snapshot.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The allowed-call operation keeps mutable input, effect, alignment and both NLS callbacks explicit."
+)]
 fn edit_allowed_with_nls(
     py: Python<'_>,
     image: Py<Icf>,

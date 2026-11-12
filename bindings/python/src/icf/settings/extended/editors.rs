@@ -206,6 +206,10 @@ fn edit_fixed_text(
     FixedTextEffect::from_core(py, result)
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Fixed-text editing keeps the native field, index, phase input, alignment and both NLS callbacks explicit."
+)]
 fn edit_fixed_text_with_nls(
     py: Python<'_>,
     image: Py<Icf>,

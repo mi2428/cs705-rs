@@ -1,4 +1,8 @@
-"""Shared native editor input variants and observable effects."""
+"""Editor variants and field effects, not a document-save transaction.
+
+Mutable text inputs retain the supplied owner; sanitation may survive failure.
+before_store callbacks receive readonly, callback-scoped Bytes and return None.
+"""
 from ..._native import icf as _icf
 
 ChoiceInput = _icf.settings.extended.ChoiceInput

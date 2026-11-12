@@ -140,6 +140,10 @@ impl Setting {
 impl Setting {
     /// A native template preserves private storage coordinates; all public metadata is explicit.
     #[new]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The template retains private coordinates while all seven public metadata replacements remain explicit."
+    )]
     fn new(
         template: &Setting,
         name: &str,

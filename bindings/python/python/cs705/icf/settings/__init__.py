@@ -1,4 +1,9 @@
-"""Typed native stored setting helpers."""
+"""Stored settings; no device access or inferred factory defaults.
+
+Catalog descriptors are detached owners. Their domain and kind properties are
+live nested projections; template construction preserves private coordinates.
+Checked writes validate storage width; selected-event bypasses retain raw codes.
+"""
 from . import digital, extended, gps, network
 from ..._native import icf as _icf
 

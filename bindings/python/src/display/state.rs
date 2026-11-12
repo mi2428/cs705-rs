@@ -247,6 +247,10 @@ impl Resources {
             py, self, image, current, factory, show_split, condition, None,
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Native grid production keeps image, factory, split, condition and paint inputs explicit."
+    )]
     fn produce(
         &self,
         py: Python<'_>,
@@ -268,6 +272,10 @@ impl Resources {
             Some(display),
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Native rendering borrows separate grid, layout, views, job and output owners."
+    )]
     fn render(
         &self,
         py: Python<'_>,
@@ -390,6 +398,8 @@ impl State {
         })
     }
     #[getter]
+    /// Live projection of the parent's views, including its callback lifetime.
+    /// Assigning ordinary Views transfers its owner and invalidates the supplied wrapper.
     fn views(&self) -> Views {
         Views::from_state(self.target.clone())
     }
@@ -517,6 +527,10 @@ impl State {
         })
     }
     #[pyo3(signature=(current,key,event,index,flags,disabled,confirmation))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The native menu event keeps its source, command coordinates, flags and confirmation separate."
+    )]
     fn menu(
         &self,
         current: &Bound<'_, PyAny>,

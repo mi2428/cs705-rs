@@ -60,6 +60,10 @@ pub fn schema(
     });
     Ok(Grid::from_core(errors.finish(py, result)?))
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Production keeps the image, source snapshot, factory, split and two callbacks separate."
+)]
 pub fn instantiate(
     py: Python<'_>,
     resources: &Resources,
@@ -112,6 +116,10 @@ impl HtmlBuffer {
         })
     }
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Rendering borrows distinct resource, grid, layout, view, job and output owners with explicit measurements."
+)]
 pub fn render(
     py: Python<'_>,
     resources: &Resources,

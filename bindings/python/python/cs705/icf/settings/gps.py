@@ -1,4 +1,8 @@
-"""Native GPS settings with explicit resources and shared editor inputs."""
+"""GPS settings with explicit sources and byte-oriented editor inputs.
+
+Descriptor.setting is a live projection, not a snapshot. NLS buffer loans
+expire when the callback returns; earlier input sanitation is not rolled back.
+"""
 from ..._native import icf as _icf
 
 _gps = _icf.settings.gps

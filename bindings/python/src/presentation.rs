@@ -361,35 +361,9 @@ pub fn register(root: &Bound<'_, PyModule>) -> PyResult<()> {
             "English", "Japanese", "German", "French", "Spanish", "Italian",
         ],
     )?;
-    add_enum(
-        &m,
-        "cs705.presentation",
-        "ChannelField",
-        &[
-            "FrequencyHz",
-            "Duplex",
-            "Selection",
-            "Tone",
-            "Dtcs",
-            "Polarity",
-            "DigitalSquelch",
-            "DigitalCode",
-        ],
-    )?;
-    add_enum(
-        &m,
-        "cs705.presentation",
-        "RepeaterField",
-        &[
-            "Mode",
-            "Tone",
-            "ToneIndex",
-            "Use",
-            "Position",
-            "UtcOffset",
-            "GatewayIndex",
-        ],
-    )?;
+    for name in ["ChannelField", "RepeaterField"] {
+        m.add(name, root.getattr("icf")?.getattr("record")?.getattr(name)?)?;
+    }
     m.add(
         "FixedValue",
         root.getattr("icf")?

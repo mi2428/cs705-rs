@@ -6,6 +6,7 @@ from .icf import Agc, FilterShape, RepeaterMode, RepeaterDuplex, RepeaterTone, R
 from .icf import settings as _settings
 from .icf.settings.network import Field as NetworkField
 from .icf.settings.extended import FixedValue as FixedValue
+from .icf.record import ChannelField as ChannelField, RepeaterField as RepeaterField
 class ErrorData:
     @staticmethod
     def UnsupportedLanguage() -> ErrorData: ...
@@ -41,23 +42,6 @@ class Language(Enum):
     French = 3
     Spanish = 4
     Italian = 5
-class ChannelField(Enum):
-    FrequencyHz = 0
-    Duplex = 1
-    Selection = 2
-    Tone = 3
-    Dtcs = 4
-    Polarity = 5
-    DigitalSquelch = 6
-    DigitalCode = 7
-class RepeaterField(Enum):
-    Mode = 0
-    Tone = 1
-    ToneIndex = 2
-    Use = 3
-    Position = 4
-    UtcOffset = 5
-    GatewayIndex = 6
 class Message:
     @property
     def variant(self) -> str: ...

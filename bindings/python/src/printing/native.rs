@@ -167,18 +167,18 @@ impl Factory {
     }
 }
 macro_rules! record{
- ($name:ident,$ty:path,$module:literal; $([$($getattr:meta),*] [$($setattr:meta),*] $field:ident:$ft:ty=>$get:ident,$set:ident,$parse:ident,$output:ident);*;@extra{$($extra:tt)*})=>{
+  ($(#[$constructor:meta])* $name:ident,$ty:path,$module:literal; $([$($getattr:meta),*] [$($setattr:meta),*] $field:ident:$ft:ty=>$get:ident,$set:ident,$parse:ident,$output:ident);*;@extra{$($extra:tt)*})=>{
   #[pyclass(module=$module,frozen)]pub struct $name{pub(crate) target:Target<$ty>}
   impl $name{pub fn from_core(v:$ty)->Self{Self{target:Target::new(v)}}pub fn from_loan(loan:crate::scoped::Loan<$ty>)->Self{Self{target:Target::Scoped(loan)}}pub fn with_ref<R>(&self,f:impl FnOnce(&$ty)->PyResult<R>)->PyResult<R>{self.target.with_ref(f)}pub fn with_mut<R>(&self,f:impl FnOnce(&mut $ty)->PyResult<R>)->PyResult<R>{self.target.with_mut(f)}}
   #[pymethods]impl $name{
-   #[new]fn new($($field:&Bound<'_,PyAny>),*)->PyResult<Self>{use $ty as Core;Ok(Self::from_core(Core{$($field:self::$parse($field)?),*}))}
+   $(#[$constructor])* #[new]fn new($($field:&Bound<'_,PyAny>),*)->PyResult<Self>{use $ty as Core;Ok(Self::from_core(Core{$($field:self::$parse($field)?),*}))}
    $($(#[$getattr])*fn $get<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=self.with_ref(|v|Ok(v.$field.clone()))?;$output(py,v)}
    $(#[$setattr])*fn $set(&self,v:&Bound<'_,PyAny>)->PyResult<()>{let v=$parse(v)?;self.with_mut(|o|{o.$field=v;Ok(())})})*
    $($extra)*
   }
  }
 }
-record!(CellNode,n::CellNode,"cs705.printing.native";
+record!(#[expect(clippy::too_many_arguments, reason = "The constructor exposes the complete native cell node, including merge, visibility and display metadata.")] CellNode,n::CellNode,"cs705.printing.native";
  [getter][setter]group:u32=>group,set_group,strict_u32,out;[getter][setter]key:u32=>key,set_key,strict_u32,out;[getter][setter]index:i32=>index,set_index,strict_i32,out;
  [getter][setter]name:Vec<u8> =>name,set_name,bytes,bytes_out;[getter][setter]flags1c:u8=>flags1c,set_flags1c,strict_u8,out;[getter][setter]flags1d:u8=>flags1d,set_flags1d,strict_u8,out;
  [getter][setter]comb:i32=>comb,set_comb,strict_i32,out;[getter][setter]above:usize=>above,set_above,strict_usize,out;[getter][setter]below:usize=>below,set_below,strict_usize,out;
@@ -212,7 +212,7 @@ pub(crate) fn nodes(v: &Bound<'_, PyAny>) -> PyResult<Option<Vec<Vec<n::CellNode
             .collect::<PyResult<_>>()?,
     ))
 }
-record!(InlineFrame,n::InlineFrame,"cs705.printing.native";
+record!(#[expect(clippy::too_many_arguments, reason = "The constructor preserves all native inline-dispatch fields and its independent node and factory.")] InlineFrame,n::InlineFrame,"cs705.printing.native";
  [getter][setter]column:usize=>column,set_column,strict_usize,out;[getter][setter]row:usize=>row,set_row,strict_usize,out;
  [][]node:n::CellNode=>node_snapshot,set_node,node,node_out;[][]factory:n::Factory=>factory_snapshot,set_factory,factory,factory_out;
  [getter][setter]input_code:u32=>input_code,set_input_code,strict_u32,out;[getter][setter]layout:u32=>layout,set_layout,strict_u32,out;
@@ -238,6 +238,8 @@ fn byte_text(bytes: &Bound<'_, PyAny>) -> PyResult<String> {
     Ok(n::byte_text(strict_bytes(bytes)?))
 }
 #[pyfunction]
+/// Dispatch a readonly InlineFrame loan; node/factory snapshots are detached owners.
+/// The editor guard clears before dispatch; failure preserves visibility and expires the loan.
 fn sync_editor(
     py: Python<'_>,
     editor: Py<super::Editor>,

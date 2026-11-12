@@ -55,6 +55,8 @@ impl Seek for Reader<'_> {
     }
 }
 #[pyfunction]
+/// Capture bounded PE data windows from a synchronous binary read/seek object.
+/// read must return bytes and seek an integer offset. Never closes the reader; exceptions propagate.
 pub fn read_source<'py>(py: Python<'py>, reader: Py<PyAny>) -> PyResult<Bound<'py, PyBytes>> {
     let interpreter = crate::scoped::interpreter(py)?;
     let (errors, result) = py.detach(move || {

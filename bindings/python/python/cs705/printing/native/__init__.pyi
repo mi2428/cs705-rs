@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 from ...display import Resources as Resources, ViewState
 from .. import Grid, Editor
 from . import menu as menu

@@ -74,6 +74,8 @@ impl TextView {
     }
 }
 #[pyfunction]
+/// Dispatch visible editor text through a readonly, callback-scoped TextView.
+/// The guard clears first; callback failure preserves visibility and is re-raised unchanged.
 fn sync_editor(py: Python<'_>, editor: Py<Editor>, dispatch_phase1: Py<PyAny>) -> PyResult<()> {
     let mut taken = editor.get().target.take()?;
     let interpreter = crate::scoped::interpreter(py)?;
@@ -201,6 +203,8 @@ impl Job {
         let names = self.with_ref(|v| Ok(v.remaining_names().to_vec()))?;
         PyTuple::new(py, names)
     }
+    /// Render one name through a mutable Job loan; return whether the job remains active.
+    /// The original owner is busy during the callback. Failure keeps its prefix without automatic EndDoc.
     fn tick(&self, py: Python<'_>, render: Py<PyAny>) -> PyResult<bool> {
         let mut job = self.target.take()?;
         if !job.ended && job.remaining_names().is_empty() {

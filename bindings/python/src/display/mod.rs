@@ -8,9 +8,8 @@ use crate::{conversion::*, icf::document::Target};
 use cs705_core::display as core;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-pub use state::{Grid, Resources, State};
-pub use values::{Cell, NoticeCell, Row, Toolbar};
-pub use views::kind as view_kind;
+pub use state::Resources;
+pub use values::{Row, Toolbar};
 pub use views::{ViewState, Views};
 
 pub(crate) fn optional_u32(v: &Bound<'_, PyAny>) -> PyResult<Option<u32>> {
@@ -50,17 +49,17 @@ macro_rules! owner {
 pub(crate) use owner;
 
 macro_rules! scalars {
-    ($name:ident, $native:path; $($field:ident:$ty:ty=>$set:ident,$parse:ident);*; @extra {$($extra:tt)*}) => {
+    ($(#[$constructor:meta])* $name:ident, $native:path; $($field:ident:$ty:ty=>$set:ident,$parse:ident);*; @extra {$($extra:tt)*}) => {
         owner!($name,$native);
         #[pymethods] impl $name {
-            #[new] fn new($($field:&Bound<'_,PyAny>),*)->PyResult<Self>{use $native as Native;Ok(Self::from_core(Native{$($field:$parse($field)?),*}))}
+            $(#[$constructor])* #[new] fn new($($field:&Bound<'_,PyAny>),*)->PyResult<Self>{use $native as Native;Ok(Self::from_core(Native{$($field:$parse($field)?),*}))}
             $(#[getter] fn $field(&self)->PyResult<$ty>{self.with_ref(|v|Ok(v.$field))}
             #[setter] fn $set(&self,value:&Bound<'_,PyAny>)->PyResult<()>{let value=$parse(value)?;self.with_mut(|v|{v.$field=value;Ok(())})})*
             $($extra)*
         }
     }
 }
-scalars!(Settings,core::Settings;
+scalars!(#[expect(clippy::too_many_arguments, reason = "The constructor exposes all ten independent native display words.")] Settings,core::Settings;
 language:u32=>set_language,strict_u32;system_language:u32=>set_system_language,strict_u32;
 font_percent:u32=>set_font_percent,strict_u32;toolbar:u32=>set_toolbar,strict_u32;split:u32=>set_split,strict_u32;
 callsign_dialog:u32=>set_callsign_dialog,strict_u32;auto_correct:u32=>set_auto_correct,strict_u32;

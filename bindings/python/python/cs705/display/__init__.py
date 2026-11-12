@@ -3,6 +3,8 @@
 Copied nested values use *_snapshot() and explicit set_*() methods. State.views
 is a live owner view; assigning ordinary Views transfers its native owner.
 No native GUI events or OS calls are delivered.
+Library bookkeeping counters reject unrepresentable advances with OSError
+before changing that operation's state or invoking its callback.
 """
 from .._native import display as _d
 from . import filter

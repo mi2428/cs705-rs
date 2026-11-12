@@ -492,7 +492,7 @@ mod tests {
         }
         assert_eq!(
             Presenter::new(Language::Japanese).message(Message::Enabled),
-            "有効"
+            "\u{6709}\u{52b9}"
         );
         assert_eq!(
             Presenter::new(Language::English).message(Message::Enabled),

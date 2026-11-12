@@ -1,4 +1,9 @@
-"""Native digital editors. native_name() preserves Rust name() beside Enum.name."""
+"""Byte-oriented digital editors; native_name() is distinct from Enum.name.
+
+NLS callbacks receive scoped buffers. Sanitation and insertion can survive a
+later exception; these operations are not transactional document edits.
+"""
+from functools import wraps
 from ..._native import icf as _icf
 
 _digital = _icf.settings.digital
@@ -16,6 +21,7 @@ reflector_view = _digital.reflector_view
 
 
 def _method(native):
+    @wraps(native)
     def call(self, *args, **kwargs):
         return native(self, *args, **kwargs)
     return call

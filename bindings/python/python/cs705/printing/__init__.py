@@ -1,4 +1,8 @@
-"""Headless print layout and explicit native resource producers; no OS printing."""
+"""Headless layout and explicit resource producers; no OS printing.
+
+Callback loans expire on return. Rendering failures retain completed output,
+page events and owner changes; they do not synthesize EndDoc or roll back.
+"""
 from .._native import printing as _p
 from . import native
 Metrics = _p.Metrics

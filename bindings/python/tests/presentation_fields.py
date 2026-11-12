@@ -26,11 +26,11 @@ assert presenter.choice_label(choice, choice.first_index)
 settings = icf.settings
 setting = settings.find("lcd_backlight_raw")
 assert isinstance(setting, settings.Setting)
-setting.name = "owned\0設定"
+setting.name = "owned\0\u8a2d\u5b9a"
 field_text = presenter.setting(setting)
-assert (field_text.key, field_text.name) == (setting.key, "owned\0設定")
+assert (field_text.key, field_text.name) == (setting.key, "owned\0\u8a2d\u5b9a")
 setting.name = "changed"
-assert field_text.name == "owned\0設定"
+assert field_text.name == "owned\0\u8a2d\u5b9a"
 setting.domain.min, setting.domain.max, setting.domain.step = 5, 9, 2
 setting.count = 2
 assert presenter.setting_value(setting, 1, 7).in_domain
@@ -67,8 +67,8 @@ for field in ("line", "index", "value"):
     assert getattr(diagnostic, field) is None
 assert diagnostic.technical_detail() == detail
 
-call = h.Call("Unlisted\0API名", None)
-assert call.api == "Unlisted\0API名" and call.command is None
+call = h.Call("Unlisted\0API\u540d", None)
+assert call.api == "Unlisted\0API\u540d" and call.command is None
 call.api = "Another API"
 call.command = 0xFFFFFFFF
 effects = h.Effects()

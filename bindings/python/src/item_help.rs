@@ -75,6 +75,7 @@ impl Request {
 }
 macro_rules! request {
     ($($bytes:ident=>$set:ident),*) => { #[pymethods] impl Request {
+        #[expect(clippy::too_many_arguments, reason = "The request retains independent lookup coordinates, original and resolved names, topic and two paths.")]
         #[new] fn new(key:&Bound<'_,PyAny>,index:&Bound<'_,PyAny>,group:&Bound<'_,PyAny>,original_name:&Bound<'_,PyAny>,name:&Bound<'_,PyAny>,topic:&Bound<'_,PyAny>,chm:&Bound<'_,PyAny>,target:&Bound<'_,PyAny>)->PyResult<Self>{
             let optional=|v:&Bound<'_,PyAny>|->PyResult<Option<i32>>{if v.is_none(){Ok(None)}else{Ok(Some(strict_i32(v)?))}};
             Ok(Self {inner:core::Request{key:optional(key)?,index:optional(index)?,group:optional(group)?,original_name:strict_bytes(original_name)?.to_vec(),name:strict_bytes(name)?.to_vec(),topic:strict_i32(topic)?,chm:strict_bytes(chm)?.to_vec(),target:strict_bytes(target)?.to_vec()}})

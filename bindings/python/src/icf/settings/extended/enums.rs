@@ -10,7 +10,7 @@ pub(super) fn method(
     call: Bound<'_, PyAny>,
 ) -> PyResult<()> {
     let globals = PyDict::new(m.py());
-    globals.set_item("_call", call)?;
+    globals.set_item("_call", &call)?;
     m.py().run(
         &std::ffi::CString::new(format!(
             "def {name}(self, *args, **kwargs):\n    return _call(self, *args, **kwargs)\n"
@@ -19,8 +19,12 @@ pub(super) fn method(
         Some(&globals),
         Some(&globals),
     )?;
-    m.getattr(class)?
-        .setattr(name, globals.get_item(name)?.unwrap())
+    let method = globals.get_item(name)?.unwrap();
+    m.py()
+        .import("functools")?
+        .getattr("update_wrapper")?
+        .call1((&method, &call))?;
+    m.getattr(class)?.setattr(name, method)
 }
 macro_rules! unit {
     ($name:ident; $($variant:ident),*)=>{

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Callable
+from collections.abc import Callable
 from ..printing import Grid as PrintGrid, Layout, Job, Paper, Metrics, HtmlBuffer
 from ..printing.native import Factory, CellNode
 from ..printing.native.menu import Command

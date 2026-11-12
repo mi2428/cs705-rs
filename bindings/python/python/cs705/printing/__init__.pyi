@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 from ..display import Resources as Resources, Views as Views, ViewState as ViewState, ViewKind as ViewKind
 from . import native as native
 class Metrics:

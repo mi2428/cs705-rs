@@ -1,4 +1,8 @@
-"""Native data/resource operations using explicit PE bytes and callbacks."""
+"""Data/resource operations using explicit PE bytes; no code is executed.
+
+Paint nodes and inline frames passed to callbacks are readonly loans that
+expire on return. Their explicit snapshot methods return independent owners.
+"""
 from ..._native import printing as _p
 from . import menu
 Class = _p.native.Class

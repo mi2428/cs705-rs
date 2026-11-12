@@ -293,7 +293,7 @@ impl FixedTextInput {
     }
 }
 macro_rules! effects {
-    ($name:ident { $($field:ident: $ty:ty => $set:ident;)* }) => {
+    ($(#[$constructor:meta])* $name:ident { $($field:ident: $ty:ty => $set:ident;)* }) => {
         #[pyclass(module = "cs705.icf.settings.extended", frozen)]
         pub struct $name { state: State<core::$name> }
         impl $name {
@@ -304,13 +304,13 @@ macro_rules! effects {
         }
         #[pymethods]
         impl $name {
-            #[new] fn new($($field: &Bound<'_, PyAny>),*) -> PyResult<Self> { Ok(Self::from_core(core::$name { $($field: <$ty as Input>::input($field)?),* })) }
+            $(#[$constructor])* #[new] fn new($($field: &Bound<'_, PyAny>),*) -> PyResult<Self> { Ok(Self::from_core(core::$name { $($field: <$ty as Input>::input($field)?),* })) }
             $(#[getter] fn $field<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py,PyAny>> { let value=self.with_ref(|v|Ok(v.$field.clone()))?; value.output(py) }
             #[setter] fn $set(&self,value:&Bound<'_,PyAny>)->PyResult<()> { let value=<$ty as Input>::input(value)?; self.with_mut(|v| {v.$field=value;Ok(())}) })*
         }
     }
 }
-effects!(NumberEffect { stored: bool => set_stored; accepted: bool => set_accepted; candidate: i64 => set_candidate; raw_candidate: i32 => set_raw_candidate; state_out: u32 => set_state_out; notify_flags: u32 => set_notify_flags; suffix: Vec<u8> => set_suffix; gray: bool => set_gray; });
+effects!(#[expect(clippy::too_many_arguments, reason = "The constructor preserves the native numeric helper result, raw candidate and separate display effects.")] NumberEffect { stored: bool => set_stored; accepted: bool => set_accepted; candidate: i64 => set_candidate; raw_candidate: i32 => set_raw_candidate; state_out: u32 => set_state_out; notify_flags: u32 => set_notify_flags; suffix: Vec<u8> => set_suffix; gray: bool => set_gray; });
 effects!(TextEffect { stored: bool => set_stored; state_out: u32 => set_state_out; notify_flags: u32 => set_notify_flags; display: Vec<u8> => set_display; });
 effects!(ChoiceEffect { stored: bool => set_stored; value: i64 => set_value; notify_flags: u32 => set_notify_flags; gray: bool => set_gray; popup_requested: bool => set_popup_requested; fixed_value: Option<core::FixedValue> => set_fixed_value; });
 impl NumberEffect {
@@ -543,6 +543,7 @@ impl NumberField {
 macro_rules! number_metadata {
     ($($field:ident:$ty:ty=>$setter:ident,$strict:ident;)*) => { #[pymethods] impl NumberField {
         #[new]
+        #[expect(clippy::too_many_arguments, reason = "The constructor exposes every public native numeric descriptor field without changing its schema.")]
         fn new(feature_id: &str, name: &str, unit: &str, $($field: &Bound<'_, PyAny>),*) -> PyResult<Self> {
             Ok(Self::from_core(core::NumberField {
                 feature_id: std::borrow::Cow::Owned(feature_id.to_owned()),
