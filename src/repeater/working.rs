@@ -16,6 +16,7 @@ use crate::icf::{
     record::{self, DecodedRecord, RepeaterWrite},
     special::Notification,
 };
+use std::borrow::Borrow;
 
 const BODY: usize = 0xaa0f;
 const AUX: usize = 0x2a5df;
@@ -410,23 +411,23 @@ impl Working {
     /// Accepted rows always use the full typed saver, even for an equal USE.
     /// There is no save/reload, confirmation or rollback. Normal completion queues
     /// 11(0,0) then 13(0,14F), including reversed and all-skipped ranges.
-    pub fn bulk_use<'a>(
+    pub fn bulk_use<B: Borrow<Ranges>, Q: Borrow<Context>>(
         &mut self,
         range: UseRange,
         value: bool,
         binding: u32,
-        live: impl FnMut() -> Result<(&'a Ranges, &'a Context), Error>,
+        live: impl FnMut() -> Result<(B, Q), Error>,
         enqueue: impl FnMut(Notification) -> Result<(), Error>,
     ) -> Result<(), Error> {
         self.bulk_use_with(range, value, binding, live, enqueue, &mut |_, _| Ok(()))
     }
 
-    fn bulk_use_with<'a>(
+    fn bulk_use_with<B: Borrow<Ranges>, Q: Borrow<Context>>(
         &mut self,
         range: UseRange,
         value: bool,
         binding: u32,
-        mut live: impl FnMut() -> Result<(&'a Ranges, &'a Context), Error>,
+        mut live: impl FnMut() -> Result<(B, Q), Error>,
         mut enqueue: impl FnMut(Notification) -> Result<(), Error>,
         before: &mut impl FnMut(usize, &[u8]) -> Result<(), Error>,
     ) -> Result<(), Error> {
@@ -443,11 +444,11 @@ impl Working {
                     continue;
                 }
                 let (ranges, q) = live()?;
-                if ranges.db98(hz).ecdc(q, hz) {
+                if ranges.borrow().db98(hz).ecdc(q.borrow(), hz) {
                     continue;
                 }
                 let (ranges, q) = live()?;
-                if ranges.db98(hz).eb64(q, hz) {
+                if ranges.borrow().db98(hz).eb64(q.borrow(), hz) {
                     continue;
                 }
                 let kind = super::staging::classify_bytes(holder.as_bytes());
@@ -831,7 +832,7 @@ mod tests {
             UseRange { first: 0, last: 12 },
             false,
             0,
-            || panic!("No does not read Q/B"),
+            || -> Result<(&Ranges, &Context), Error> { panic!("No does not read Q/B") },
             |_| Ok(()),
             &mut |at, _| {
                 if (BODY..BODY + 52 * 2500).contains(&at) && (at - BODY) % 52 == 18 {
@@ -849,7 +850,7 @@ mod tests {
             UseRange { first: 0, last: 0 },
             false,
             0,
-            || panic!(),
+            || -> Result<(&Ranges, &Context), Error> { panic!() },
             |_| Ok(()),
             &mut |_, _| {
                 writes += 1;
@@ -904,7 +905,7 @@ mod tests {
                 w.bulk_use_range(Some(group)).unwrap(),
                 false,
                 0,
-                || panic!(),
+                || -> Result<(&Ranges, &Context), Error> { panic!() },
                 |_| Ok(()),
             )
             .unwrap();
@@ -916,7 +917,7 @@ mod tests {
             UseRange { first: 3, last: 2 },
             true,
             0,
-            || panic!(),
+            || -> Result<(&Ranges, &Context), Error> { panic!() },
             |e| {
                 events.push(e.event);
                 Ok(())
@@ -963,7 +964,7 @@ mod tests {
             },
             true,
             0,
-            || panic!("invalid row skips getters"),
+            || -> Result<(&Ranges, &Context), Error> { panic!("invalid row skips getters") },
             |e| {
                 events.push(e.event);
                 Ok(())
@@ -978,7 +979,7 @@ mod tests {
                 UseRange { first: 0, last: 1 },
                 false,
                 0,
-                || panic!(),
+                || -> Result<(&Ranges, &Context), Error> { panic!() },
                 |_| {
                     queued += 1;
                     Ok(())
@@ -998,7 +999,7 @@ mod tests {
                 UseRange { first: 1, last: 1 },
                 false,
                 0,
-                || panic!(),
+                || -> Result<(&Ranges, &Context), Error> { panic!() },
                 |_| panic!("failed saver skips queue"),
                 &mut |at, _| if at == BODY + 52 + 42 {
                     Err(invalid("injected post-USE latitude failure"))
@@ -1017,7 +1018,7 @@ mod tests {
                 },
                 false,
                 0,
-                || panic!(),
+                || -> Result<(&Ranges, &Context), Error> { panic!() },
                 |_| {
                     queued += 1;
                     Ok(())
@@ -1032,7 +1033,7 @@ mod tests {
                 UseRange { first: 0, last: -1 },
                 false,
                 0,
-                || panic!(),
+                || -> Result<(&Ranges, &Context), Error> { panic!() },
                 |e| {
                     if e.event == 0x13 {
                         Err(invalid("injected second queue failure"))
@@ -1046,6 +1047,34 @@ mod tests {
         );
         assert_eq!(events, [0x11]);
     }
+    #[test]
+    fn bulk_use_owned_providers_are_live_at_each_predicate() {
+        let mut w = bulk_fixture();
+        let mut reads = 0;
+        w.bulk_use(
+            UseRange {
+                first: 10,
+                last: 10,
+            },
+            true,
+            0,
+            || {
+                reads += 1;
+                let mut q = bulk_context();
+                if reads == 2 {
+                    let mut fields = q.fields();
+                    fields.0[0] = 16;
+                    q.adopt(fields);
+                }
+                Ok((Ranges::generate(&bulk_context(), None)?, q))
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(reads, 2);
+        assert_eq!(w.memory[USE + 1] & 4, 4);
+    }
+
     fn fixture() -> Working {
         let mut memory = vec![0xa5; WORKING_BYTES];
         memory[COUNTS..COUNTS + 100].fill(0);

@@ -123,6 +123,14 @@ impl Staging {
         names: [[u8; 16]; 50],
         old_reference: u16,
     ) -> Result<Self, Error> {
+        Self::preload_fallible(rows.into_iter().map(Ok), names, old_reference)
+    }
+    /// Stop a supplied fallible iterator at its first failure or native row cap.
+    pub fn preload_fallible(
+        rows: impl IntoIterator<Item = Result<Record, Error>>,
+        names: [[u8; 16]; 50],
+        old_reference: u16,
+    ) -> Result<Self, Error> {
         let mut s = Self {
             arena: Vec::new(),
             order: Vec::new(),
@@ -134,7 +142,8 @@ impl Staging {
             old_reference_existed: old_reference != u16::MAX,
             counts: Counts::default(),
         };
-        for (index, mut row) in rows.into_iter().enumerate() {
+        for (index, row) in rows.into_iter().enumerate() {
+            let mut row = row?;
             if index >= 2500 {
                 return Err(Error::Limit("repeater preload exceeds 2500 rows".into()));
             }
@@ -587,6 +596,37 @@ pub fn restored_reference(rows: &[Record], new_absolute_start: u32, old_referenc
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fallible_preload_stops_at_the_native_failure_and_row_cap() {
+        let blank = Record {
+            bytes: Box::new([0; 616]),
+            frequency_class: 0,
+        };
+        let mut calls = 0;
+        let source = std::iter::from_fn(|| {
+            calls += 1;
+            Some(match calls {
+                1 => Ok(blank.clone()),
+                2 => Err(Error::Operation("preload source failed".into())),
+                _ => panic!("preload continued after source failure"),
+            })
+        });
+        assert!(matches!(
+            Staging::preload_fallible(source, [[b' '; 16]; 50], u16::MAX),
+            Err(Error::Operation(reason)) if reason == "preload source failed"
+        ));
+        assert_eq!(calls, 2);
+        let mut calls = 0;
+        let source = std::iter::repeat_with(|| {
+            calls += 1;
+            Ok(blank.clone())
+        });
+        assert!(matches!(
+            Staging::preload_fallible(source, [[b' '; 16]; 50], u16::MAX),
+            Err(Error::Limit(_))
+        ));
+        assert_eq!(calls, 2501);
+    }
     fn row(group: u32, key: u8, k: u32, use_value: u32) -> Record {
         let mut r = Record {
             bytes: Box::new([0; 616]),
