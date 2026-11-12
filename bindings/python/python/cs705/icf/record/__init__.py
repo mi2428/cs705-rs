@@ -1,4 +1,8 @@
-"""Decoded native holder and explicit codecs."""
+"""Decoded 616-byte holders and explicit byte-oriented codecs.
+
+as_bytes() copies; as_mut_bytes() retains live fixed-size storage, not a detached
+copy. Callback loans remain readonly where supplied and expire with their frame.
+"""
 from ..._native import icf as _icf
 ChannelWrite = _icf.record.ChannelWrite
 CallsignWrite = _icf.record.CallsignWrite

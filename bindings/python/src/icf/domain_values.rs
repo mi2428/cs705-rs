@@ -300,6 +300,7 @@ macro_rules! repeater_fields {
         #[pymethods]
         impl RepeaterRecord {
             #[new]
+            #[expect(clippy::too_many_arguments, reason = "The constructor preserves every public RepeaterRecord field and its two coordinate owners")]
             fn new(py: Python<'_>, $($name: &Bound<'_, PyAny>,)* latitude: Py<RepeaterCoordinate>, longitude: Py<RepeaterCoordinate>) -> PyResult<Self> {
                 let value = core::RepeaterRecord { $($name: <$ty as Input>::input($name)?,)* latitude: latitude.try_borrow(py)?.inner, longitude: longitude.try_borrow(py)?.inner };
                 Ok(Self { value, latitude, longitude })

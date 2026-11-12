@@ -234,11 +234,11 @@ impl RepeaterWrite {
 #[allow(non_snake_case)]
 impl RepeaterWrite {
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        match &self.state {
-            RepeaterWriteState::Owned(
-                OwnedRepeaterWrite::Body { bytes, .. } | OwnedRepeaterWrite::Gateway(bytes),
-            ) => visit.call(bytes)?,
-            _ => {}
+        if let RepeaterWriteState::Owned(
+            OwnedRepeaterWrite::Body { bytes, .. } | OwnedRepeaterWrite::Gateway(bytes),
+        ) = &self.state
+        {
+            visit.call(bytes)?;
         }
         Ok(())
     }
@@ -689,7 +689,7 @@ pub struct DecodedRecord {
     state: State,
 }
 enum State {
-    Owned(Owner<core::DecodedRecord>),
+    Owned(Box<Owner<core::DecodedRecord>>),
     Scoped(crate::scoped::Loan<core::DecodedRecord>),
     DialogField {
         parent: super::callsign_dialog::DialogOwner,
@@ -715,7 +715,7 @@ impl DecodedRecord {
     }
     pub fn from_core(value: core::DecodedRecord) -> Self {
         Self {
-            state: State::Owned(Owner::new(value)),
+            state: State::Owned(Box::new(Owner::new(value))),
         }
     }
     pub fn from_loan(loan: crate::scoped::Loan<core::DecodedRecord>) -> Self {
@@ -756,6 +756,8 @@ impl DecodedRecord {
 super::direct::direct_methods! {
 DecodedRecord
 existing {
+    /// Return a live fixed-size byte view, not a detached mutable copy.
+    /// Read-only callback loans reject this operation; retained loans expire.
     fn as_mut_bytes(slf: Py<Self>) -> PyResult<buffer::RecordBytes> { buffer::RecordBytes::from_parent(slf) }
     #[staticmethod]
     fn from_bytes(bytes: &Bound<'_, PyAny>) -> PyResult<Self> { Ok(Self::from_core(core::DecodedRecord::from_bytes(fixed_bytes(bytes)?))) }
@@ -988,6 +990,9 @@ fn encode_callsign_into(
 }
 #[pyfunction]
 #[pyo3(signature = (holder, raw, side, normal_flag, write))]
+/// Encode into caller-owned raw83 scratch and optional one-byte normal flag.
+/// Each readonly writer payload expires on callback return. Scratch includes
+/// the attempted store when the writer raises; earlier effects are not undone.
 fn encode_channel_into(
     py: Python<'_>,
     holder: Py<DecodedRecord>,

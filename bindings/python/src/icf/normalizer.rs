@@ -6,6 +6,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use std::cell::RefCell;
 
+/// Explicit image role: Working reads the live target; Separate retains bytes.
+/// Equal contents do not imply aliasing. Later reads observe earlier writes only
+/// for Working; no default image or current-image source is synthesized.
 #[pyclass(module = "cs705.icf.normalizer", frozen)]
 pub struct ReferenceImage {
     source: Option<Py<PyBytes>>,
@@ -232,6 +235,8 @@ impl Callbacks {
     }
 }
 #[pyfunction]
+/// Read count on each iteration and get twice per range, for low then high.
+/// Callback exceptions stop immediately and retain completed output pairs.
 fn stage7_live(
     py: Python<'_>,
     image: Py<MutableBytes>,
@@ -303,6 +308,10 @@ fn normalize_range_at(
         .map(|value| value.map(super::record::DecodedRecord::from_core))
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The native normalizer requires distinct W/F images, binding pair, Q12 and writer"
+)]
 fn normalize_special_at(
     py: Python<'_>,
     image: Py<MutableBytes>,

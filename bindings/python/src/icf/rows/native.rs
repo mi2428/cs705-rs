@@ -58,14 +58,14 @@ impl<T> Value<T> {
 }
 
 macro_rules! value {
-    ($name:ident { $($field:ident:$ty:ty => $set:ident,)* } snapshots { $($nested:ident:$nty:ty => $get:ident,$nset:ident,)* } methods { $($methods:tt)* })=>{
+    ($(#[$constructor:meta])* $name:ident { $($field:ident:$ty:ty => $set:ident,)* } snapshots { $($nested:ident:$nty:ty => $get:ident,$nset:ident,)* } methods { $($methods:tt)* })=>{
         #[pyclass(module="cs705.icf.rows.native",frozen)]
         pub struct $name {pub(super) state:Value<core::$name>}
         impl $name {pub(super) fn from_core(v:core::$name)->Self{Self{state:Value::new(v)}}}
         impl Input<'_> for core::$name {fn input(v:&Bound<'_,PyAny>)->PyResult<Self>{v.extract::<PyRef<'_,$name>>()?.state.read(v.py(),|v|Ok(v.clone()))}}
         impl Output for core::$name {fn output<'py>(self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{Ok(Py::new(py,$name::from_core(self))?.into_bound(py).into_any())}}
         #[pymethods] impl $name {
-            #[new] fn new($($field:&Bound<'_,PyAny>,)*$($nested:&Bound<'_,PyAny>,)*)->PyResult<Self>{Ok(Self::from_core(core::$name{$($field:<$ty as Input>::input($field)?,)*$($nested:<$nty as Input>::input($nested)?,)*}))}
+            $(#[$constructor])* #[new] fn new($($field:&Bound<'_,PyAny>,)*$($nested:&Bound<'_,PyAny>,)*)->PyResult<Self>{Ok(Self::from_core(core::$name{$($field:<$ty as Input>::input($field)?,)*$($nested:<$nty as Input>::input($nested)?,)*}))}
             $(#[getter]fn $field<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=self.state.read(py,|v|Ok(v.$field.clone()))?;v.output(py)}
             #[setter]fn $set(&self,py:Python<'_>,value:&Bound<'_,PyAny>)->PyResult<()>{let v=<$ty as Input>::input(value)?;self.state.edit(py,|o|{o.$field=v;Ok(())})})*
             $(fn $get<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=self.state.read(py,|v|Ok(v.$nested.clone()))?;v.output(py)}
@@ -105,11 +105,11 @@ value!(Clipboard {source_kind:u32=>set_source_kind,mode:u32=>set_mode,declared_c
     fn copy_from(&self,py:Python<'_>,image:&Bound<'_,PyAny>,source:&Bound<'_,PyAny>)->PyResult<()>{let source=core::CopySource::input(source)?;let image=strict_bytes(image)?;let mut v=self.state.take()?;py.detach(||v.copy_from(image,source)).map_err(errors::icf)}
 });
 value!(Notification {id:u32=>set_id,synchronous:bool=>set_synchronous,arg1:u32=>set_arg1,arg2:u32=>set_arg2,} snapshots{} methods{});
-value!(Effects {home_invalidated:u8=>set_home_invalidated,dr_invalidated:u8=>set_dr_invalidated,context_flags:u8=>set_context_flags,selection:Option<(usize,usize)> =>set_selection,active:Option<usize> =>set_active,display_mode:Option<u32> =>set_display_mode,cache_invalidated:bool=>set_cache_invalidated,} snapshots{notifications:Vec<core::Notification> =>notifications_snapshot,set_notifications,} methods{
+value!(#[expect(clippy::too_many_arguments, reason = "The constructor exposes all native row effect fields and its notification list")] Effects {home_invalidated:u8=>set_home_invalidated,dr_invalidated:u8=>set_dr_invalidated,context_flags:u8=>set_context_flags,selection:Option<(usize,usize)> =>set_selection,active:Option<usize> =>set_active,display_mode:Option<u32> =>set_display_mode,cache_invalidated:bool=>set_cache_invalidated,} snapshots{notifications:Vec<core::Notification> =>notifications_snapshot,set_notifications,} methods{
     #[staticmethod]fn default()->Self{Self::from_core(core::Effects::default())}
 });
 value!(Outcome {processed:bool=>set_processed,written:usize=>set_written,native_count:usize=>set_native_count,exhausted:bool=>set_exhausted,} snapshots{} methods{#[staticmethod]fn default()->Self{Self::from_core(core::Outcome::default())}});
-value!(SplitFrame {layout:u32=>set_layout,pre_step:i32=>set_pre_step,selection_first:i32=>set_selection_first,node_index:i32=>set_node_index,node_flags:u8=>set_node_flags,notify_flags:u32=>set_notify_flags,active:i32=>set_active,display_mode:i32=>set_display_mode,} snapshots{} methods{});
+value!(#[expect(clippy::too_many_arguments, reason = "The split frame retains independent native layout, selection, node and notification controls")] SplitFrame {layout:u32=>set_layout,pre_step:i32=>set_pre_step,selection_first:i32=>set_selection_first,node_index:i32=>set_node_index,node_flags:u8=>set_node_flags,notify_flags:u32=>set_notify_flags,active:i32=>set_active,display_mode:i32=>set_display_mode,} snapshots{} methods{});
 value!(SplitOutcome {stored:bool=>set_stored,candidate:Option<i32> =>set_candidate,popup_requested:bool=>set_popup_requested,} snapshots{} methods{});
 value!(ChoiceOutcome {stored:bool=>set_stored,candidate:Option<i32> =>set_candidate,mode_blocked:bool=>set_mode_blocked,popup_requested:bool=>set_popup_requested,} snapshots{} methods{});
 value!(ChoiceFrame {layout:u32=>set_layout,node_flags:u8=>set_node_flags,} snapshots{} methods{});
@@ -124,49 +124,50 @@ value!(CodeOutcome {stored:bool=>set_stored,candidate:Option<u32> =>set_candidat
 value!(PendingName {active:bool=>set_active,index:u32=>set_index,bytes:Vec<u8> =>set_bytes,} snapshots{} methods{fn reset(&self,py:Python<'_>)->PyResult<()>{self.state.edit(py,|v|{v.reset();Ok(())})}});
 value!(EditorState {filter_enabled:u8=>set_filter_enabled,} snapshots{mode_cache:cs705_core::icf::record::DecodedRecord=>mode_cache_snapshot,set_mode_cache,filter_cache:cs705_core::icf::record::DecodedRecord=>filter_cache_snapshot,set_filter_cache,pending:core::PendingName=>pending_snapshot,set_pending,} methods{#[staticmethod]fn initialized()->Self{Self::from_core(core::EditorState::initialized())}});
 
-macro_rules! enums {($($name:ident {$($v:ident),*});*)=>{$(
-    #[pyclass(module="cs705.icf.rows.native",eq,eq_int)]#[derive(Clone,Copy,PartialEq,Eq)]pub enum $name{$($v),*}
-    impl $name{fn native(self)->core::$name{match self{$(Self::$v=>core::$name::$v),*}}}
-    impl Input<'_> for core::$name{fn input(v:&Bound<'_,PyAny>)->PyResult<Self>{Ok(v.extract::<PyRef<'_,$name>>()?.native())}}
-)*}}
+macro_rules! enums {($($name:ident {$($v:ident),*});*)=>{
+    $(impl Input<'_> for core::$name {
+        fn input(v:&Bound<'_,PyAny>)->PyResult<Self>{
+            let code=crate::icf::enum_value(v,"cs705.icf.rows.native",stringify!($name))?;
+            $(if code==Self::$v as i64{return Ok(Self::$v);})*
+            Err(pyo3::exceptions::PyValueError::new_err("invalid row enum"))
+        }
+    }
+    impl Output for core::$name {
+        fn output<'py>(self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{crate::icf::enum_result(py,"cs705.icf.rows.native",stringify!($name),self as i64)}
+    })*
+    fn register_enums(m:&Bound<'_,PyModule>)->PyResult<()>{
+        $(crate::icf::add_enum(m,stringify!($name),&[$((stringify!($v),core::$name::$v as i64)),*])?;
+        m.getattr(stringify!($name))?.setattr("__module__","cs705.icf.rows.native")?;)*
+        Ok(())
+    }
+}}
 enums!(Confirmation{Overwrite,Truncate,Clear,Delete,DiscardTail};ChannelChoice{Selection,Duplex,Polarity,DigitalSquelch};ChannelEnum{Mode,Data,Filter};ToneField{Tone,Tx,Rx,Dtcs});
-macro_rules! enum_output{($($name:ident{$($v:ident),*}),*)=>{$(impl Output for core::$name{fn output<'py>(self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=match self{$(core::$name::$v=>$name::$v),*};Ok(v.into_pyobject(py)?.into_any())}})*}}
-enum_output!(
-    ChannelChoice {
-        Selection,
-        Duplex,
-        Polarity,
-        DigitalSquelch
-    },
-    ChannelEnum { Mode, Data, Filter },
-    ToneField { Tone, Tx, Rx, Dtcs }
-);
-#[pymethods]
-impl ChannelChoice {
-    fn key(&self) -> u32 {
-        self.native().key()
-    }
-    fn selector(&self) -> &'static str {
-        self.native().selector()
-    }
-    fn choices(&self, holder: &DecodedRecord) -> PyResult<Vec<i64>> {
-        holder.with_ref(|h| Ok(self.native().choices(h)))
-    }
+
+#[pyfunction]
+fn _channel_choice_key(field: &Bound<'_, PyAny>) -> PyResult<u32> {
+    Ok(core::ChannelChoice::input(field)?.key())
 }
-#[pymethods]
-impl ChannelEnum {
-    fn key(&self) -> u32 {
-        self.native().key()
-    }
-    fn choices(&self, holder: &DecodedRecord) -> PyResult<Vec<i64>> {
-        holder.with_ref(|h| Ok(self.native().choices(h)))
-    }
+#[pyfunction]
+fn _channel_choice_selector(field: &Bound<'_, PyAny>) -> PyResult<&'static str> {
+    Ok(core::ChannelChoice::input(field)?.selector())
 }
-#[pymethods]
-impl ToneField {
-    fn key(&self) -> u32 {
-        self.native().key()
-    }
+#[pyfunction]
+fn _channel_choice_choices(field: &Bound<'_, PyAny>, holder: &DecodedRecord) -> PyResult<Vec<i64>> {
+    let field = core::ChannelChoice::input(field)?;
+    holder.with_ref(|h| Ok(field.choices(h)))
+}
+#[pyfunction]
+fn _channel_enum_key(field: &Bound<'_, PyAny>) -> PyResult<u32> {
+    Ok(core::ChannelEnum::input(field)?.key())
+}
+#[pyfunction]
+fn _channel_enum_choices(field: &Bound<'_, PyAny>, holder: &DecodedRecord) -> PyResult<Vec<i64>> {
+    let field = core::ChannelEnum::input(field)?;
+    holder.with_ref(|h| Ok(field.choices(h)))
+}
+#[pyfunction]
+fn _tone_field_key(field: &Bound<'_, PyAny>) -> PyResult<u32> {
+    Ok(core::ToneField::input(field)?.key())
 }
 
 #[pyclass(module = "cs705.icf.rows.native")]
@@ -283,12 +284,13 @@ fn compatible(source: &Bound<'_, PyAny>, destination: &Bound<'_, PyAny>) -> PyRe
 fn channel_choice_input(
     py: Python<'_>,
     holder: &DecodedRecord,
-    field: &ChannelChoice,
+    field: &Bound<'_, PyAny>,
     input: &ChoiceInput,
 ) -> PyResult<ChoiceOutcome> {
+    let field = core::ChannelChoice::input(field)?;
     let input = input.to_core(py)?;
     holder.with_mut(|h| {
-        core::channel_choice_input(h, field.native(), input)
+        core::channel_choice_input(h, field, input)
             .map(ChoiceOutcome::from_core)
             .map_err(errors::icf)
     })
@@ -297,12 +299,13 @@ fn channel_choice_input(
 fn channel_enum_input(
     py: Python<'_>,
     holder: &DecodedRecord,
-    field: &ChannelEnum,
+    field: &Bound<'_, PyAny>,
     input: &ChoiceInput,
 ) -> PyResult<ChoiceOutcome> {
+    let field = core::ChannelEnum::input(field)?;
     let input = input.to_core(py)?;
     holder.with_mut(|h| {
-        core::channel_enum_input(h, field.native(), input)
+        core::channel_enum_input(h, field, input)
             .map(ChoiceOutcome::from_core)
             .map_err(errors::icf)
     })
@@ -380,9 +383,10 @@ fn digital_code_label<'py>(
     ))
 }
 #[pyfunction]
-fn tone_choices(field: &ToneField, live_q: Option<Py<Context>>) -> PyResult<Vec<i64>> {
+fn tone_choices(field: &Bound<'_, PyAny>, live_q: Option<Py<Context>>) -> PyResult<Vec<i64>> {
+    let field = core::ToneField::input(field)?;
     let q = live_q.map(|q| q.get().with_ref(|q| Ok(*q))).transpose()?;
-    core::tone_choices(field.native(), q.as_ref()).map_err(errors::icf)
+    core::tone_choices(field, q.as_ref()).map_err(errors::icf)
 }
 
 trait ClonePy {
@@ -399,12 +403,12 @@ impl<T> ClonePy for Option<Py<T>> {
     }
 }
 macro_rules! request {
-    ($name:ident refs{$($r:ident:$rt:ty,)*} scalars{$($s:ident:$st:ty=>$set:ident,)*} callbacks{$($cb:ident=>$cbset:ident,)*})=>{
+    ($(#[$constructor:meta])* $name:ident refs{$($r:ident:$rt:ty,)*} scalars{$($s:ident:$st:ty=>$set:ident,)*} callbacks{$($cb:ident=>$cbset:ident,)*})=>{
         #[pyclass(module="cs705.icf.rows.native")]
         pub struct $name {$(#[pyo3(get,set)]$r:$rt,)*$($s:$st,)*$($cb:Py<CallbackHolder>,)*}
         impl $name {fn inputs(&self,py:Python<'_>)->Self{Self{$($r:self.$r.clone_py(py),)*$($s:self.$s.clone(),)*$($cb:self.$cb.clone_ref(py),)*}}}
         #[pymethods]impl $name {
-            #[new]fn new(py:Python<'_>,$($r:$rt,)*$($s:&Bound<'_,PyAny>,)*$($cb:&Bound<'_,PyAny>,)*)->PyResult<Self>{let _=py;Ok(Self{$($r,)*$($s:<$st as Input>::input($s)?,)*$($cb:CallbackHolder::new(py,$cb)?,)*})}
+            $(#[$constructor])* #[new]fn new(py:Python<'_>,$($r:$rt,)*$($s:&Bound<'_,PyAny>,)*$($cb:&Bound<'_,PyAny>,)*)->PyResult<Self>{let _=py;Ok(Self{$($r,)*$($s:<$st as Input>::input($s)?,)*$($cb:CallbackHolder::new(py,$cb)?,)*})}
             $(#[getter]fn $s<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{self.$s.clone().output(py)}#[setter]fn $set(&mut self,value:&Bound<'_,PyAny>)->PyResult<()>{self.$s=<$st as Input>::input(value)?;Ok(())})*
             $(#[getter]fn $cb(&self,py:Python<'_>)->PyResult<Py<PyAny>>{CallbackHolder::link(self.$cb.bind(py)).with_callable(py,|c|Ok(c.clone().unbind()))}#[setter]fn $cbset(&mut self,py:Python<'_>,value:&Bound<'_,PyAny>)->PyResult<()>{self.$cb=CallbackHolder::new(py,value)?;Ok(())})*
             fn __traverse__(&self,visit:PyVisit<'_>)->Result<(),PyTraverseError>{$(visit.call(&self.$r)?;)*$(visit.call(&self.$cb)?;)*Ok(())}
@@ -420,7 +424,7 @@ request!(CallsignTextRequest refs{input:Py<TextInput>,context:Py<EditorContext>,
 request!(FrequencyRequest refs{input:Py<NumberInput>,context:Py<EditorContext>,live_q:Py<Context>,}scalars{point:u8=>set_point,warning_bits:u8=>set_warning_bits,focus:u8=>set_focus,}callbacks{});
 request!(OffsetRequest refs{input:Py<NumberInput>,context:Py<EditorContext>,}scalars{point:u8=>set_point,}callbacks{});
 request!(EnumRequest refs{input:Py<ChoiceInput>,context:Py<EditorContext>,}scalars{field:core::ChannelEnum=>set_field,warning_bits:Option<u8> =>set_warning_bits,}callbacks{});
-request!(ToneInput refs{input:Py<NumberInput>,live_q:Option<Py<Context>>,}scalars{field:core::ToneField=>set_field,point:u8=>set_point,inline:bool=>set_inline,first:Option<u8> =>set_first,}callbacks{upper=>set_upper,});
+request!(#[expect(clippy::too_many_arguments, reason = "Tone input keeps the native numeric source, live Q, field, inline controls and uppercase producer explicit")] ToneInput refs{input:Py<NumberInput>,live_q:Option<Py<Context>>,}scalars{field:core::ToneField=>set_field,point:u8=>set_point,inline:bool=>set_inline,first:Option<u8> =>set_first,}callbacks{upper=>set_upper,});
 request!(ToneRequest refs{input:Py<ToneInput>,context:Py<EditorContext>,}scalars{}callbacks{});
 request!(CodeRequest refs{input:Py<NumberInput>,node_flags:Py<MutableBytes>,context:Py<EditorContext>,}scalars{first:Option<u8> =>set_first,}callbacks{});
 
@@ -846,8 +850,8 @@ macro_rules! target {
     (raw,$name:ident,$w:expr,$($args:expr),*)=>{core::$name(&mut $w,$($args),*)};
 }
 macro_rules! runners {
-    ($mode:ident,$model:ty;$( $name:ident:$request:ident ($($extra:ident:$et:ident),*); )*)=>{$(
-        #[pyfunction]fn $name<'py>(py:Python<'py>,model:Py<$model>,holder:Py<DecodedRecord>,state:Py<EditorState>,request:Py<$request>,$($extra:Py<$et>,)*effects:Py<Effects>,before_store:Py<PyAny>)->PyResult<Bound<'py,PyAny>>{
+    ($mode:ident,$model:ty;$( $(#[$function:meta])* $name:ident:$request:ident ($($extra:ident:$et:ident),*); )*)=>{$(
+        $(#[$function])* #[pyfunction]fn $name<'py>(py:Python<'py>,model:Py<$model>,holder:Py<DecodedRecord>,state:Py<EditorState>,request:Py<$request>,$($extra:Py<$et>,)*effects:Py<Effects>,before_store:Py<PyAny>)->PyResult<Bound<'py,PyAny>>{
             let request=request.try_borrow(py)?.inputs(py);
             let callback=CallbackHolder::new(py,before_store.bind(py))?;
             let link=CallbackHolder::link(callback.bind(py));
@@ -860,10 +864,19 @@ macro_rules! runners {
     )*}
 }
 runners!(normal,NormalMemory;
-    native_choice_input:ChoiceRequest();native_enum_input:EnumRequest();native_offset_input:OffsetRequest();native_frequency_input:FrequencyRequest();native_code_input:CodeRequest();native_tone_input:ToneRequest(tone_effect:ToneEffect);native_name_input:NameRequest(text_effect:NameEffect);
+    native_choice_input:ChoiceRequest();native_enum_input:EnumRequest();native_offset_input:OffsetRequest();native_frequency_input:FrequencyRequest();native_code_input:CodeRequest();
+    #[expect(clippy::too_many_arguments, reason = "The native tone runner borrows separate model, record, cache, request, tone effect, row effects and writer")]
+    native_tone_input:ToneRequest(tone_effect:ToneEffect);
+    #[expect(clippy::too_many_arguments, reason = "The native name runner preserves separate model, record, cache, request, text effect, row effects and writer")]
+    native_name_input:NameRequest(text_effect:NameEffect);
 );
 runners!(raw,MutableBytes;
-    call_choice_input_into:ChoiceRequest();call_enum_input_into:EnumRequest();call_offset_input_into:OffsetRequest();call_frequency_input_into:FrequencyRequest();call_code_input_into:CodeRequest();call_tone_input_into:ToneRequest(tone_effect:ToneEffect);call_name_input_into:NameRequest(text_effect:NameEffect);channel_callsign_text_input_into:CallsignTextRequest();
+    call_choice_input_into:ChoiceRequest();call_enum_input_into:EnumRequest();call_offset_input_into:OffsetRequest();call_frequency_input_into:FrequencyRequest();call_code_input_into:CodeRequest();
+    #[expect(clippy::too_many_arguments, reason = "The call tone runner borrows separate image, record, cache, request, tone effect, row effects and writer")]
+    call_tone_input_into:ToneRequest(tone_effect:ToneEffect);
+    #[expect(clippy::too_many_arguments, reason = "The call name runner preserves separate image, record, cache, request, text effect, row effects and writer")]
+    call_name_input_into:NameRequest(text_effect:NameEffect);
+    channel_callsign_text_input_into:CallsignTextRequest();
 );
 
 #[pyfunction]
@@ -957,6 +970,7 @@ fn reference_into(
 macro_rules! cached {
     ($name:ident,$model:ty,$mode:ident) => {
         #[pyfunction]
+        #[expect(clippy::too_many_arguments, reason = "Cached native writes require separate cache request, editor sources, row effects and pre-store producer")]
         fn $name<'py>(
             py: Python<'py>,
             model: Py<$model>,
@@ -1003,6 +1017,7 @@ cached!(channel_save_cached_into, MutableBytes, raw);
 macro_rules! split {
     ($name:ident,$model:ty,$mode:ident) => {
         #[pyfunction]
+        #[expect(clippy::too_many_arguments, reason = "Split editing preserves distinct pre-store and pre-notification callbacks with live frame state")]
         fn $name<'py>(
             py: Python<'py>,
             model: Py<$model>,
@@ -1117,19 +1132,13 @@ fn native_copy(
     py.detach(|| w.native_copy(s, &mut clip, &mut effects))
         .map_err(errors::icf)
 }
-fn confirmation(v: core::Confirmation) -> Confirmation {
-    match v {
-        core::Confirmation::Overwrite => Confirmation::Overwrite,
-        core::Confirmation::Truncate => Confirmation::Truncate,
-        core::Confirmation::Clear => Confirmation::Clear,
-        core::Confirmation::Delete => Confirmation::Delete,
-        core::Confirmation::DiscardTail => Confirmation::DiscardTail,
-    }
+fn confirmation(py: Python<'_>, v: core::Confirmation) -> PyResult<Bound<'_, PyAny>> {
+    v.output(py)
 }
 macro_rules! confirmed {($($name:ident),*)=>{$(
     #[pyfunction]fn $name<'py>(py:Python<'py>,model:Py<NormalMemory>,selection:&Bound<'_,PyAny>,generation:Py<ReferenceImage>,effects:Py<Effects>,confirm:Py<PyAny>)->PyResult<Bound<'py,PyAny>>{
         let s=core::Selection::input(selection)?;let cb=CallbackHolder::new(py,confirm.bind(py))?;let link=CallbackHolder::link(cb.bind(py));
-        execute(py,||{let mut w=model.get().take()?;let mut effects=effects.get().state.take()?;generation.get().with_core(py,|g|Ok(py.detach(||w.$name(s,g,&mut effects,|kind|call(&link,|_,c|strict_i32(&c.call1((confirmation(kind),))?))))))})
+        execute(py,||{let mut w=model.get().take()?;let mut effects=effects.get().state.take()?;generation.get().with_core(py,|g|Ok(py.detach(||w.$name(s,g,&mut effects,|kind|call(&link,|py,c|strict_i32(&c.call1((confirmation(py,kind)?,))?))))))})
     }
 )*}}
 confirmed!(native_clear, native_delete, native_insert);
@@ -1173,6 +1182,10 @@ fn native_carry<'py>(
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Native paste preserves explicit selection, clipboard, generation, effects, confirmation and writer roles"
+)]
 fn native_paste<'py>(
     py: Python<'py>,
     model: Py<NormalMemory>,
@@ -1200,8 +1213,8 @@ fn native_paste<'py>(
                     g,
                     &mut effects,
                     |kind| {
-                        call(&confirm, |_, c| {
-                            strict_i32(&c.call1((confirmation(kind),))?)
+                        call(&confirm, |py, c| {
+                            strict_i32(&c.call1((confirmation(py, kind)?,))?)
                         })
                     },
                     |i, e| store(&link, i, e),
@@ -1212,6 +1225,10 @@ fn native_paste<'py>(
 }
 
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Modal callsign editing needs separate editor state, request, effects, dialog actions and writer"
+)]
 fn channel_callsign_modal_input_into<'py>(
     py: Python<'py>,
     model: Py<MutableBytes>,
@@ -1304,10 +1321,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
         CodeOutcome,
         PendingName,
         EditorState,
-        Confirmation,
-        ChannelChoice,
-        ChannelEnum,
-        ToneField,
         ChannelEntry,
         EditorContext,
         CacheWrite,
@@ -1325,8 +1338,15 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
         CallsignModalRequest,
         CallsignModalOutcome
     );
+    register_enums(&m)?;
     macro_rules! functions{($($name:ident),*)=>{$(m.add_function(wrap_pyfunction!($name,&m)?)?;)*}}
     functions!(
+        _channel_choice_key,
+        _channel_choice_selector,
+        _channel_choice_choices,
+        _channel_enum_key,
+        _channel_enum_choices,
+        _tone_field_key,
         compatible,
         channel_choice_input,
         channel_enum_input,

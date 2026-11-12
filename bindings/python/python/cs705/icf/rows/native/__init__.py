@@ -1,5 +1,6 @@
 """Native row editors and explicit caller state; no GUI delivery is implied."""
 from ...._native import icf as _icf
+from ...record import DecodedRecord
 from . import call
 
 Selection = _icf.rows.native.Selection
@@ -23,6 +24,34 @@ FrequencyOutcome = _icf.rows.native.FrequencyOutcome
 ChannelEnum = _icf.rows.native.ChannelEnum
 EnumOutcome = _icf.rows.native.EnumOutcome
 ToneField = _icf.rows.native.ToneField
+
+def _choice_key(self) -> int:
+    return _icf.rows.native._channel_choice_key(self)
+
+def _choice_selector(self) -> str:
+    return _icf.rows.native._channel_choice_selector(self)
+
+def _choice_choices(self, holder: DecodedRecord) -> list[int]:
+    """Duplex choices depend on the holder's mode and current duplex value."""
+    return _icf.rows.native._channel_choice_choices(self, holder)
+
+def _enum_key(self) -> int:
+    return _icf.rows.native._channel_enum_key(self)
+
+def _enum_choices(self, holder: DecodedRecord) -> list[int]:
+    """Mode choices retain the stored mode while checking the holder's state."""
+    return _icf.rows.native._channel_enum_choices(self, holder)
+
+def _tone_key(self) -> int:
+    return _icf.rows.native._tone_field_key(self)
+
+ChannelChoice.key = _choice_key
+ChannelChoice.selector = _choice_selector
+ChannelChoice.choices = _choice_choices
+ChannelEnum.key = _enum_key
+ChannelEnum.choices = _enum_choices
+ToneField.key = _tone_key
+
 ToneEffect = _icf.rows.native.ToneEffect
 CodeOutcome = _icf.rows.native.CodeOutcome
 PendingName = _icf.rows.native.PendingName

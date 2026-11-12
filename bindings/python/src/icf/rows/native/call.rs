@@ -35,6 +35,10 @@ fn copy(
         .map_err(errors::icf)
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Call paste retains explicit selection, clipboard, ranges, effects, confirmation and pre-store producer"
+)]
 fn paste<'py>(
     py: Python<'py>,
     image: Py<MutableBytes>,
@@ -63,8 +67,8 @@ fn paste<'py>(
                 &ranges,
                 &mut effects,
                 |reason| {
-                    super::call(&confirm, |_, callback| {
-                        strict_i32(&callback.call1((super::confirmation(reason),))?)
+                    super::call(&confirm, |py, callback| {
+                        strict_i32(&callback.call1((super::confirmation(py, reason)?,))?)
                     })
                 },
                 |index, event| super::store(&writer, index, event),

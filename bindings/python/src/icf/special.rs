@@ -186,7 +186,7 @@ impl DisplayValue {
 }
 
 macro_rules! holder {
-    ($name:ident { $($field:ident: $ty:ty => $set:ident;)* } methods { $($methods:tt)* }) => {
+    ($(#[$constructor:meta])* $name:ident { $($field:ident: $ty:ty => $set:ident;)* } methods { $($methods:tt)* }) => {
         #[pyclass(module = "cs705.icf.special", frozen)]
         pub struct $name { state: State<core::$name> }
         impl $name {
@@ -198,6 +198,7 @@ macro_rules! holder {
         #[pymethods]
         impl $name {
             #[new]
+            $(#[$constructor])*
             fn new($($field: &Bound<'_, PyAny>),*) -> PyResult<Self> { Ok(Self::from_core(core::$name { $($field: <$ty as Input>::input($field)?),* })) }
             $(#[getter] fn $field<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> { let value = self.with_ref(|h| Ok(h.$field.clone()))?; value.output(py) }
             #[setter] fn $set(&self, value: &Bound<'_, PyAny>) -> PyResult<()> { let value = <$ty as Input>::input(value)?; self.with_mut(|h| { h.$field = value; Ok(()) }) })*
@@ -230,7 +231,7 @@ holder!(FrequencyInput {
     second_value: u32 => set_second_value;
     second_accepted: bool => set_second_accepted;
 } methods {});
-holder!(CompactChannel {
+holder!(#[expect(clippy::too_many_arguments, reason = "The constructor exposes all native compact-channel scalars and the three explicit callsigns")] CompactChannel {
     valid: bool => set_valid;
     frequency_hz: u32 => set_frequency_hz;
     duplex: u32 => set_duplex;
@@ -342,12 +343,12 @@ fn scan_reset_enabled(source: &Bound<'_, PyAny>, index: &Bound<'_, PyAny>) -> Py
     core::scan_reset_enabled(strict_bytes(source)?, strict_u32(index)?).map_err(errors::icf)
 }
 #[pyfunction]
-fn decode_bandwidth(class: &Bound<'_, PyAny>, raw: &Bound<'_, PyAny>) -> PyResult<i32> {
-    core::decode_bandwidth(strict_u32(class)?, strict_u8(raw)?).map_err(errors::icf)
+fn decode_bandwidth(class_: &Bound<'_, PyAny>, raw: &Bound<'_, PyAny>) -> PyResult<i32> {
+    core::decode_bandwidth(strict_u32(class_)?, strict_u8(raw)?).map_err(errors::icf)
 }
 #[pyfunction]
-fn encode_bandwidth(class: &Bound<'_, PyAny>, width: &Bound<'_, PyAny>) -> PyResult<u8> {
-    core::encode_bandwidth(strict_u32(class)?, strict_i32(width)?).map_err(errors::icf)
+fn encode_bandwidth(class_: &Bound<'_, PyAny>, width: &Bound<'_, PyAny>) -> PyResult<u8> {
+    core::encode_bandwidth(strict_u32(class_)?, strict_i32(width)?).map_err(errors::icf)
 }
 #[pyfunction]
 fn scan_suitable_rows(
@@ -489,7 +490,9 @@ impl Effects {
 }
 macro_rules! effect_fields {
     ($($field:ident:$ty:ty=>$set:ident;)*)=>{#[pymethods]impl Effects {
-        #[new]fn new($($field:&Bound<'_,PyAny>,)*notifications:&Bound<'_,PyAny>)->PyResult<Self>{let notifications=notification_values(notifications)?;Ok(Self::from_core(core::Effects{$($field:<$ty as Input>::input($field)?,)*notifications}))}
+        #[new]
+        #[expect(clippy::too_many_arguments, reason = "The constructor preserves every native special-sheet effect field and its notification list")]
+        fn new($($field:&Bound<'_,PyAny>,)*notifications:&Bound<'_,PyAny>)->PyResult<Self>{let notifications=notification_values(notifications)?;Ok(Self::from_core(core::Effects{$($field:<$ty as Input>::input($field)?,)*notifications}))}
         #[staticmethod]fn default()->Self{Self::from_core(core::Effects::default())}
         $(#[getter]fn $field<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let value=self.with_ref(|value|Ok(value.$field))?;value.output(py)}
         #[setter]fn $set(&self,value:&Bound<'_,PyAny>)->PyResult<()>{let value=<$ty as Input>::input(value)?;self.with_mut(|effects|{effects.$field=value;Ok(())})})*
@@ -575,6 +578,10 @@ fn scan_rows(
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Scan frequency editing keeps generation, edge side, parser result, reset gate and predicate explicit"
+)]
 fn edit_scan_frequency(
     py: Python<'_>,
     image: &super::Icf,
@@ -630,6 +637,10 @@ fn edit_user_frequency(
 }
 #[pyfunction]
 #[pyo3(signature=(image,g,q,live_preset,name,label,notify))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preset rename distinguishes generation, selected and live presets, text, label producer and notifier"
+)]
 fn rename_preset(
     py: Python<'_>,
     image: &super::Icf,
@@ -782,6 +793,10 @@ fn edit_preset_bandwidth(
 }
 
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preset number editing requires generation, field key, numeric source, decimal point and live preset separately"
+)]
 fn edit_preset_number(
     py: Python<'_>,
     image: &super::Icf,

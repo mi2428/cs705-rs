@@ -1,5 +1,5 @@
 from collections.abc import Callable, Iterable
-from typing import ClassVar, TypeAlias
+from enum import Enum
 from cs705 import MutableBytes
 from cs705.csv.nls import Bytes
 from cs705.icf import MemoryCallsign
@@ -12,7 +12,7 @@ from cs705.icf.settings.extended import ChoiceInput, NumberInput, TextInput
 from .. import NormalMemory
 from . import call as call
 
-Store: TypeAlias = Callable[[int, ChannelWrite], None]
+type Store = Callable[[int, ChannelWrite], None]
 class Selection:
     group: int; active: int; first: int; last: int; merged: bool; show_both: bool
     def __init__(self, group: int, active: int, first: int, last: int, merged: bool, show_both: bool) -> None: ...
@@ -29,8 +29,8 @@ class Clipboard:
     def count(self, paired: bool) -> int: ...
     def copy_from(self, image: bytes, source: CopySource) -> None: ...
     def validate(self) -> None: ...
-class Confirmation:
-    Overwrite: ClassVar[Confirmation]; Truncate: ClassVar[Confirmation]; Clear: ClassVar[Confirmation]; Delete: ClassVar[Confirmation]; DiscardTail: ClassVar[Confirmation]
+class Confirmation(Enum):
+    Overwrite = 0; Truncate = 1; Clear = 2; Delete = 3; DiscardTail = 4
 class Notification:
     id: int; synchronous: bool; arg1: int; arg2: int
     def __init__(self, id: int, synchronous: bool, arg1: int, arg2: int) -> None: ...
@@ -52,8 +52,8 @@ class SplitFrame:
 class SplitOutcome:
     stored: bool; candidate: int | None; popup_requested: bool
     def __init__(self, stored: bool, candidate: int | None, popup_requested: bool) -> None: ...
-class ChannelChoice:
-    Selection: ClassVar[ChannelChoice]; Duplex: ClassVar[ChannelChoice]; Polarity: ClassVar[ChannelChoice]; DigitalSquelch: ClassVar[ChannelChoice]
+class ChannelChoice(Enum):
+    Selection = 0; Duplex = 1; Polarity = 2; DigitalSquelch = 3
     def key(self) -> int: ...
     def selector(self) -> str: ...
     def choices(self, holder: DecodedRecord) -> list[int]: ...
@@ -94,8 +94,8 @@ class FrequencyOutcome:
     def set_first(self, value: NumericOutcome) -> None: ...
     def second_snapshot(self) -> NumericOutcome | None: ...
     def set_second(self, value: NumericOutcome | None) -> None: ...
-class ChannelEnum:
-    Mode: ClassVar[ChannelEnum]; Data: ClassVar[ChannelEnum]; Filter: ClassVar[ChannelEnum]
+class ChannelEnum(Enum):
+    Mode = 0; Data = 1; Filter = 2
     def key(self) -> int: ...
     def choices(self, holder: DecodedRecord) -> list[int]: ...
 class EnumOutcome:
@@ -103,8 +103,8 @@ class EnumOutcome:
     def __init__(self, context_state: int | None, warning_bits: int | None, choice: ChoiceOutcome) -> None: ...
     def choice_snapshot(self) -> ChoiceOutcome: ...
     def set_choice(self, value: ChoiceOutcome) -> None: ...
-class ToneField:
-    Tone: ClassVar[ToneField]; Tx: ClassVar[ToneField]; Rx: ClassVar[ToneField]; Dtcs: ClassVar[ToneField]
+class ToneField(Enum):
+    Tone = 0; Tx = 1; Rx = 2; Dtcs = 3
     def key(self) -> int: ...
 class ToneEffect:
     stored: bool; candidate: int | None; mode_blocked: bool; popup_requested: bool; state_out: int; shared_input: bytes; inline_text: bytes | None

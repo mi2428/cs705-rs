@@ -15,10 +15,14 @@ fn load_channel_image_into(
     holder: &DecodedRecord,
 ) -> PyResult<bool> {
     let (kind, index) = (ChannelKind::input(kind)?, strict_u32(index)?);
-    let image = image.take()?;
-    let mut holder = holder.take()?;
-    py.detach(|| {
-        core::load_channel_image_into(&image, kind, index, &mut holder).map_err(errors::icf)
+    // Both arguments may be live callback loans. This adapter invokes no Python
+    // producer, so checked reborrows can stay active through the detached codec.
+    image.with_ref(|image| {
+        holder.with_mut(|holder| {
+            py.detach(|| {
+                core::load_channel_image_into(image, kind, index, holder).map_err(errors::icf)
+            })
+        })
     })
 }
 
@@ -31,10 +35,12 @@ fn store_channel_image_into(
     holder: &DecodedRecord,
 ) -> PyResult<()> {
     let (kind, index) = (ChannelKind::input(kind)?, strict_u32(index)?);
-    let mut image = image.take()?;
-    let mut holder = holder.take()?;
-    py.detach(|| {
-        core::store_channel_image_into(&mut image, kind, index, &mut holder).map_err(errors::icf)
+    image.with_mut(|image| {
+        holder.with_mut(|holder| {
+            py.detach(|| {
+                core::store_channel_image_into(image, kind, index, holder).map_err(errors::icf)
+            })
+        })
     })
 }
 

@@ -1,4 +1,8 @@
-"""Native normalization values and operations."""
+"""Normalization retains completed writes on failure; it does not roll back.
+
+ReferenceImage.Working reads the live target. Separate retains an explicit byte
+source even when its contents equal the target. No image role is inferred.
+"""
 from .._native import icf as _icf
 
 TypedCounts = _icf.normalizer.TypedCounts

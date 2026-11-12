@@ -11,31 +11,31 @@ use cs705_core::icf::rows::ur as core;
 use pyo3::{PyTraverseError, PyVisit, prelude::*, types::PyList};
 use std::cell::RefCell;
 
-#[pyclass(module = "cs705.icf.rows.ur", eq, eq_int)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Field {
-    Name,
-    Call,
-}
-impl Field {
-    fn native(self) -> core::Field {
-        match self {
-            Self::Name => core::Field::Name,
-            Self::Call => core::Field::Call,
+impl Input<'_> for core::Field {
+    fn input(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        match crate::icf::enum_value(value, "cs705.icf.rows.ur", "Field")? {
+            0 => Ok(Self::Name),
+            1 => Ok(Self::Call),
+            _ => Err(pyo3::exceptions::PyValueError::new_err("invalid UR field")),
         }
     }
 }
-#[pymethods]
-impl Field {
-    fn key(&self) -> u32 {
-        self.native().key()
+impl Output for core::Field {
+    fn output<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        crate::icf::enum_result(py, "cs705.icf.rows.ur", "Field", self as i64)
     }
+}
+#[pyfunction]
+fn _field_key(value: &Bound<'_, PyAny>) -> PyResult<u32> {
+    Ok(core::Field::input(value)?.key())
 }
 macro_rules! value{($name:ident{$($field:ident:$ty:ty=>$set:ident,)*}snapshots{$($nested:ident:$nty:ty=>$get:ident,$nset:ident,)*}methods{$($methods:tt)*})=>{
     #[pyclass(module="cs705.icf.rows.ur",frozen)]pub struct $name{state:Value<core::$name>}
     impl $name{fn from_core(v:core::$name)->Self{Self{state:Value::new(v)}}}
     #[pymethods]impl $name{
-        #[new]fn new($($field:&Bound<'_,PyAny>,)*$($nested:&Bound<'_,PyAny>,)*)->PyResult<Self>{Ok(Self::from_core(core::$name{$($field:<$ty as Input>::input($field)?,)*$($nested:<$nty as Input>::input($nested)?,)*}))}
+        #[new]
+        #[expect(clippy::too_many_arguments, reason = "UR frame and effect constructors expose all independent native editor fields")]
+        fn new($($field:&Bound<'_,PyAny>,)*$($nested:&Bound<'_,PyAny>,)*)->PyResult<Self>{Ok(Self::from_core(core::$name{$($field:<$ty as Input>::input($field)?,)*$($nested:<$nty as Input>::input($nested)?,)*}))}
         $(#[getter]fn $field<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=self.state.read(py,|v|Ok(v.$field.clone()))?;v.output(py)}
         #[setter]fn $set(&self,py:Python<'_>,value:&Bound<'_,PyAny>)->PyResult<()>{let v=<$ty as Input>::input(value)?;self.state.edit(py,|o|{o.$field=v;Ok(())})})*
         $(fn $get<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyAny>>{let v=self.state.read(py,|v|Ok(v.$nested.clone()))?;v.output(py)}
@@ -59,7 +59,7 @@ value!(Effect{stored:bool=>set_stored,inserted:bool=>set_inserted,full_warning:b
 #[pyclass(module = "cs705.icf.rows.ur")]
 pub struct Request {
     index: u32,
-    field: Field,
+    field: core::Field,
     alignment: u32,
     #[pyo3(get, set)]
     input: Py<FixedTextInput>,
@@ -71,14 +71,14 @@ impl Request {
     #[new]
     fn new(
         index: &Bound<'_, PyAny>,
-        field: &Field,
+        field: &Bound<'_, PyAny>,
         input: Py<FixedTextInput>,
         alignment: &Bound<'_, PyAny>,
         generation: Py<ReferenceImage>,
     ) -> PyResult<Self> {
         Ok(Self {
             index: strict_u32(index)?,
-            field: *field,
+            field: core::Field::input(field)?,
             input,
             alignment: strict_u32(alignment)?,
             generation,
@@ -94,12 +94,13 @@ impl Request {
         Ok(())
     }
     #[getter]
-    fn field(&self) -> Field {
-        self.field
+    fn field<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.field.output(py)
     }
     #[setter]
-    fn set_field(&mut self, value: &Field) {
-        self.field = *value;
+    fn set_field(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.field = core::Field::input(value)?;
+        Ok(())
     }
     #[getter]
     fn alignment(&self) -> u32 {
@@ -147,7 +148,7 @@ fn run(
                     let errors = RefCell::new(CallbackError::default());
                     let request = core::Request {
                         index: r.index,
-                        field: r.field.native(),
+                        field: r.field,
                         input,
                         alignment: r.alignment,
                         generation,
@@ -212,7 +213,10 @@ fn native_text_with_nls(
 
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "ur")?;
-    m.add_class::<Field>()?;
+    crate::icf::add_enum(&m, "Field", &[("Name", 0), ("Call", 1)])?;
+    m.getattr("Field")?
+        .setattr("__module__", "cs705.icf.rows.ur")?;
+    m.add_function(wrap_pyfunction!(_field_key, &m)?)?;
     m.add_class::<Frame>()?;
     m.add_class::<Request>()?;
     m.add_class::<Effect>()?;

@@ -31,6 +31,10 @@ fn index(value: &Bound<'_, PyAny>, length: usize) -> PyResult<Index> {
     Ok(Index::One(at as usize))
 }
 
+/// Live fixed-size 616-byte record storage, obtained from as_mut_bytes().
+///
+/// Keeps its owner alive; callback loans still expire with the frame. Slice
+/// writes must preserve length. No buffer protocol or public constructor exists.
 #[pyclass(module = "cs705.icf.record", frozen)]
 pub struct RecordBytes {
     parent: Py<DecodedRecord>,

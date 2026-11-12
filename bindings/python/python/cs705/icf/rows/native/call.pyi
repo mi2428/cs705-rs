@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 from .... import MutableBytes
 from ...frequency import Ranges
 from ...normalizer import ReferenceImage

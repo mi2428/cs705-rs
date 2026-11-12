@@ -22,6 +22,11 @@ use cs705_core::icf::*;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+/// Editable image with unchanged original file bytes and header metadata.
+///
+/// Callback instances borrow live state: read-only loans cannot be edited, and
+/// all loans raise ReferenceError after their callback returns. Ordinary owners
+/// remain busy during native operations; into_owned consumes the old wrapper.
 #[pyclass(module = "cs705.icf", frozen)]
 pub struct Icf {
     state: IcfState,
@@ -107,6 +112,9 @@ existing {
         self.with_ref(|value| Ok(value.extra_data()))
     }
 
+    /// Move ordinary state into a new owner; the old wrapper becomes unusable.
+    /// Callback loans cannot be consumed, even while their frame is active.
+    #[expect(clippy::wrong_self_convention, reason = "Python retains the wrapper while the native Icf owner is consumed")]
     fn into_owned(&self) -> PyResult<Self> {
         match &self.state {
             IcfState::Owned(owner) => Ok(Self::from_core(owner.take()?.consume().into_owned())),
@@ -119,6 +127,9 @@ existing {
         self.with_mut(|core| core.delete_gps_rows(&rows).map_err(crate::errors::icf))
     }
 
+    /// Apply a finite sequence of (offset, bytes) patches atomically in order.
+    /// All windows are checked first; overlaps use the last patch. Original file
+    /// bytes and metadata stay unchanged. Inputs are bytes, not text or bytearray.
     fn patch_memory(&self, patches: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)>) -> PyResult<()> {
         let patches = patches.iter().map(|(at,bytes)| Ok((crate::conversion::strict_usize(at)?, crate::conversion::strict_bytes(bytes)?))).collect::<PyResult<Vec<_>>>()?;
         self.with_mut(|core| core.patch_memory(&patches).map_err(crate::errors::icf))

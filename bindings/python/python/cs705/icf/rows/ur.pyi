@@ -1,13 +1,13 @@
-from typing import ClassVar
+from enum import Enum
 from collections.abc import Callable, Iterable
 from cs705.csv.nls import Bytes
 from cs705.icf.normalizer import ReferenceImage
 from cs705.icf.settings.extended import FixedTextInput
 from . import WorkingUr
 
-class Field:
-    Name: ClassVar[Field]
-    Call: ClassVar[Field]
+class Field(Enum):
+    Name = 0
+    Call = 1
     def key(self) -> int: ...
 class Frame:
     code: int

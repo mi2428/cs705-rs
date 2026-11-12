@@ -1,4 +1,8 @@
-"""Native working-image holder load/store boundaries."""
+"""Codecs use immutable bytes for reads and MutableBytes for image writes.
+
+Stores preserve earlier commits and holder corrections if a writer raises.
+Readonly ChannelWrite callback payloads expire when that callback returns.
+"""
 from .._native import icf as _icf
 
 load_into = _icf.record_image.load_into

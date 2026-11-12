@@ -371,18 +371,20 @@ fn load_history_storage_into(
 ) -> PyResult<()> {
     let kind = strict_u32(kind)?;
     let index = strict_usize(index)?;
-    let image = image.get().take()?;
-    let mut holder = holder.get().take()?;
-    repeaters.inner.with_ref(|repeaters| {
-        ur.with_ref(|ur| {
-            py.detach(|| {
-                core::load_history_storage_into(&image, kind, index, repeaters, ur, &mut holder)
-                    .map_err(errors::icf)
+    image.get().with_ref(|image| {
+        holder.get().with_mut(|holder| {
+            repeaters.inner.with_ref(|repeaters| {
+                ur.with_ref(|ur| {
+                    py.detach(|| {
+                        core::load_history_storage_into(image, kind, index, repeaters, ur, holder)
+                            .map_err(errors::icf)
+                    })
+                })
             })
         })
     })
 }
-macro_rules! loader{($($name:ident),*)=>{$(#[pyfunction]fn $name(py:Python<'_>,image:Py<Icf>,index:&Bound<'_,PyAny>,holder:Py<DecodedRecord>)->PyResult<()>{let index=strict_u32(index)?;let image=image.get().take()?;let mut holder=holder.get().take()?;py.detach(||core::$name(&image,index,&mut holder).map_err(errors::icf))})*}}
+macro_rules! loader{($($name:ident),*)=>{$(#[pyfunction]fn $name(py:Python<'_>,image:Py<Icf>,index:&Bound<'_,PyAny>,holder:Py<DecodedRecord>)->PyResult<()>{let index=strict_u32(index)?;image.get().with_ref(|image|holder.get().with_mut(|holder|py.detach(||core::$name(image,index,holder).map_err(errors::icf))))})*}}
 loader!(
     load_reflector_storage_into,
     load_receive_history_storage_into
@@ -396,8 +398,9 @@ fn history_selection_present(
     last: &Bound<'_, PyAny>,
 ) -> PyResult<bool> {
     let (kind, first, last) = (strict_u32(kind)?, strict_usize(first)?, strict_usize(last)?);
-    let image = image.get().take()?;
-    py.detach(|| core::history_selection_present(&image, kind, first, last).map_err(errors::icf))
+    image.get().with_ref(|image| {
+        py.detach(|| core::history_selection_present(image, kind, first, last).map_err(errors::icf))
+    })
 }
 #[pyfunction]
 fn delete_history_storage(
@@ -408,8 +411,9 @@ fn delete_history_storage(
     last: &Bound<'_, PyAny>,
 ) -> PyResult<bool> {
     let (kind, first, last) = (strict_u32(kind)?, strict_usize(first)?, strict_usize(last)?);
-    let mut image = image.get().take()?;
-    py.detach(|| core::delete_history_storage(&mut image, kind, first, last).map_err(errors::icf))
+    image.get().with_mut(|image| {
+        py.detach(|| core::delete_history_storage(image, kind, first, last).map_err(errors::icf))
+    })
 }
 #[pyfunction]
 fn receive_history_raw(

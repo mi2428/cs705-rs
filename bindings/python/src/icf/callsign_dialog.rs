@@ -644,6 +644,7 @@ macro_rules! dialog_fields {
     ($($field:ident:$ty:ty=>$set:ident;)*)=>{
         #[pymethods] impl Dialog {
             #[new]
+            #[expect(clippy::too_many_arguments, reason = "The constructor exposes every public native Dialog field, including both records and preview sources")]
             fn new(holder:&DecodedRecord,other:&DecodedRecord,$($field:&Bound<'_,PyAny>,)*candidates:&Bound<'_,PyAny>,preview:&Bound<'_,PyAny>)->PyResult<Self>{
                 let holder=holder.with_ref(|h|Ok(h.clone()))?;let other=other.with_ref(|h|Ok(h.clone()))?;
                 let candidates=byte_rows(candidates)?;let preview=byte_rows(preview)?.try_into().map_err(|_|pyo3::exceptions::PyValueError::new_err("preview requires exactly three rows"))?;
@@ -682,6 +683,10 @@ fn prepare_metadata(py: Python<'_>, s: &Sources, h: &DecodedRecord) -> PyResult<
     })
 }
 #[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The native request operation distinguishes both holders, three selections, raw bytes and explicit read sources"
+)]
 fn apply_requests(
     py: Python<'_>,
     s: &Sources,
