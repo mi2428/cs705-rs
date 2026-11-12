@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin==1.16.0"]
+build-backend = "maturin"
+
+[project]
+name = "cs705"
+version = "1.0.0"
+requires-python = ">=3.15"
+
+[tool.maturin]
+bindings = "pyo3"
+manifest-path = "Cargo.toml"
+python-source = "python"
+module-name = "cs705._native"
