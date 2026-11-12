@@ -277,6 +277,7 @@ impl SearchData {
 }
 #[pyclass(module = "cs705.clone.information", frozen)]
 #[derive(Clone)]
+/// Copied observations; returned lists contain live owner-backed elements.
 pub struct SearchSource {
     inner: Handle<SearchData>,
 }
@@ -608,6 +609,9 @@ impl InformationSource {
 }
 
 #[pyclass(module = "cs705.clone.information", frozen)]
+/// Owned state; collection getters return snapshot lists, not membership editors.
+/// Mutable candidate/event elements are live views; rebuilding expires old views.
+/// Earlier committed controller changes remain visible after an operation raises.
 pub struct Controller {
     pub(crate) inner: Handle<native::Controller>,
 }

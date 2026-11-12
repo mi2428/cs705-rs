@@ -11,12 +11,15 @@ type Access<T> = dyn Fn(&mut dyn FnMut(&mut T) -> PyResult<()>) -> PyResult<()> 
 pub(crate) struct Handle<T> {
     access: Arc<Access<T>>,
     epoch: Arc<AtomicU64>,
+    path: Vec<Arc<AtomicU64>>,
 }
+
 impl<T> Clone for Handle<T> {
     fn clone(&self) -> Self {
         Self {
             access: self.access.clone(),
             epoch: self.epoch.clone(),
+            path: self.path.clone(),
         }
     }
 }
@@ -26,6 +29,7 @@ impl<T: Send + 'static> Handle<T> {
         Self {
             access: Arc::new(move |f| owner.with_mut(f)),
             epoch: Arc::new(AtomicU64::new(0)),
+            path: Vec::new(),
         }
     }
     pub(crate) fn with<R>(&self, f: impl FnOnce(&mut T) -> PyResult<R>) -> PyResult<R> {
@@ -39,9 +43,16 @@ impl<T: Send + 'static> Handle<T> {
     }
     pub(crate) fn edit<R>(&self, f: impl FnOnce(&mut T) -> PyResult<R>) -> PyResult<R> {
         self.with(|value| {
-            self.epoch
+            let previous = self
+                .epoch
                 .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_add(1))
                 .map_err(|_| PyRuntimeError::new_err("clone view generations exhausted"))?;
+            // Rebuilding a field invalidates descendants and other aliases, not
+            // the edited object or its ancestors. The root Owner is exclusive
+            // here, so this path can advance before the next native mutation.
+            for expected in &self.path {
+                expected.store(previous + 1, Ordering::SeqCst);
+            }
             f(value)
         })
     }
@@ -51,11 +62,13 @@ impl<T: Send + 'static> Handle<T> {
     ) -> Handle<U> {
         let parent = self.clone();
         let epoch = self.epoch.clone();
-        let expected = epoch.load(Ordering::SeqCst);
+        let expected = Arc::new(AtomicU64::new(epoch.load(Ordering::SeqCst)));
+        let mut path = self.path.clone();
+        path.push(expected.clone());
         Handle {
             access: Arc::new(move |f| {
                 parent.with(|value| {
-                    if parent.epoch.load(Ordering::SeqCst) != expected {
+                    if parent.epoch.load(Ordering::SeqCst) != expected.load(Ordering::SeqCst) {
                         return Err(PyReferenceError::new_err(
                             "clone field view was invalidated",
                         ));
@@ -64,6 +77,22 @@ impl<T: Send + 'static> Handle<T> {
                 })
             }),
             epoch,
+            path,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_exhaustion_precedes_mutation() {
+        let handle = Handle::new(1usize);
+        handle.epoch.store(u64::MAX, Ordering::SeqCst);
+        for _ in 0..2 {
+            assert!(handle.edit::<()>(|_| panic!("must not mutate")).is_err());
+        }
+        assert_eq!(handle.with(|value| Ok(*value)).unwrap(), 1);
     }
 }

@@ -223,6 +223,10 @@ impl<T: ?Sized + 'static> Loan<T> {
         })
     }
 
+    /// Native callbacks may synchronously register their supplied shared reborrow
+    /// in a fresh Frame after checked reattachment on this thread/interpreter.
+    /// The outer read reservation remains active; derived views stay read-only,
+    /// and the child Frame must expire before native execution resumes.
     pub fn with_ref<R>(&self, py: Python<'_>, f: impl FnOnce(&T) -> PyResult<R>) -> PyResult<R> {
         self.read_pointer(py, |pointer| {
             // SAFETY: read_pointer holds the common shared borrow reservation.
@@ -254,6 +258,11 @@ impl<T: ?Sized + 'static> Loan<T> {
         f(pointer)
     }
 
+    /// A synchronous native callback may register exactly its supplied reborrow
+    /// in a fresh Frame after checked reattachment on this thread/interpreter.
+    /// The outer reservation blocks conflicting old aliases throughout f. No
+    /// registry/RefCell/PyO3 guard may span Python execution; the child Frame must
+    /// expire before the native reborrow ends, including on error or unwind.
     pub fn with_mut<R>(
         &self,
         py: Python<'_>,

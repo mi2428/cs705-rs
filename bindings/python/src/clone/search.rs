@@ -51,6 +51,7 @@ fn missing() -> PyErr {
 
 #[pyclass(module = "cs705.clone.search", frozen)]
 #[derive(Clone)]
+/// slots is a snapshot list of live elements; replace it to edit membership.
 pub struct SearchRecord {
     pub(crate) inner: Handle<native::SearchRecord>,
 }
@@ -150,6 +151,7 @@ impl SearchRecord {
 }
 #[pyclass(module = "cs705.clone.search", frozen)]
 #[derive(Clone)]
+/// Inputs are copied; ports reads a snapshot list of owner-backed elements.
 pub struct Observation {
     pub(crate) inner: Handle<native::Observation>,
 }
@@ -158,6 +160,7 @@ macro_rules! observation_impl {
         #[pymethods] impl Observation {
             fn __copy__(&self)->PyResult<Self>{self.inner.with(|v|Ok(Self{inner:Handle::new(v.clone())}))}
             fn __deepcopy__(&self,_memo:&Bound<'_,PyAny>)->PyResult<Self>{self.__copy__()}
+            #[expect(clippy::too_many_arguments, reason = "The Python constructor exposes all nine native Observation fields.")]
             #[new] fn new($($byte:&Bound<'_,PyAny>,)*parent_path:&Bound<'_,PyAny>,ports:Vec<Py<Port>>,wave_in:&Bound<'_,PyAny>,wave_out:&Bound<'_,PyAny>)->PyResult<Self>{let ports=ports.into_iter().map(|v|v.get().inner.with(|v|Ok(v.clone()))).collect::<PyResult<Vec<_>>>()?;Ok(Self{inner:Handle::new(native::Observation{$($byte:strict_bytes($byte)?.to_vec(),)*parent_path:strict_bool(parent_path)?,ports,wave_in:strict_i32(wave_in)?,wave_out:strict_i32(wave_out)?})})}
             $(#[getter] fn $byte<'py>(&self,py:Python<'py>)->PyResult<Bound<'py,PyBytes>>{self.inner.with(|v|Ok(PyBytes::new(py,&v.$byte)))}
               #[setter] fn $set(&self,v:&Bound<'_,PyAny>)->PyResult<()>{let n=strict_bytes(v)?.to_vec();self.inner.with(|v|{v.$byte=n;Ok(())})})*
@@ -176,6 +179,7 @@ observation_impl!(
     key, set_key, base, set_base, com, set_com, hub, set_hub, audio, set_audio
 );
 #[pyclass(module = "cs705.clone.search", frozen)]
+/// Result lists are snapshots of live records; rebuilding expires old elements.
 pub struct SearchContext {
     inner: Handle<native::SearchContext>,
 }
@@ -223,6 +227,7 @@ impl SearchContext {
         self.inner
             .edit(|v| py.detach(|| v.search(&f, &o)).map_err(errors::clone))
     }
+    /// Write into RECORD_BYTES-sized MutableBytes; false leaves output unchanged.
     fn get(&self, index: &Bound<'_, PyAny>, out: &MutableBytes) -> PyResult<bool> {
         let index = strict_usize(index)?;
         out.with_mut(|out| {

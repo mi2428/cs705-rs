@@ -125,6 +125,7 @@ macro_rules! config_impl {
 }
 #[pyclass(module = "cs705.clone", frozen)]
 #[derive(Clone)]
+/// Own configuration; settings and expected_context are live nested views.
 pub struct SessionConfig {
     pub(crate) inner: Handle<core::SessionConfig>,
 }
@@ -138,6 +139,7 @@ config_impl! {
 
 #[pyclass(module = "cs705.clone", frozen)]
 #[derive(Clone)]
+/// Immutable factory-created error value; exception() returns without raising.
 pub struct ErrorData {
     pub(crate) inner: core::Error,
 }
@@ -233,6 +235,7 @@ impl ErrorData {
 }
 #[pyclass(module = "cs705.clone", frozen)]
 #[derive(Clone)]
+/// Immutable failure value; with_* methods return replacements, not mutations.
 pub struct Failure {
     pub(crate) inner: core::Failure,
 }
@@ -299,6 +302,9 @@ failure_impl!(
 
 #[pyclass(module = "cs705.clone", frozen)]
 #[derive(Clone)]
+/// Native-produced failure-prefix report; there is no public constructor.
+/// Editing public data cannot forge query proof. Nested identity fields are
+/// live views; image and coverage are immutable byte snapshots.
 pub struct Outcome {
     pub(crate) inner: Handle<core::Outcome>,
 }
@@ -515,6 +521,7 @@ pub(crate) fn cancelled(
     })
 }
 #[pyclass(module = "cs705.clone", frozen)]
+/// Factory-created one-shot engine; run consumes it even after provider failure.
 pub struct Session {
     inner: Owner<core::Session>,
 }
@@ -597,6 +604,12 @@ impl Session {
             })
         })
     }
+    /// Consume this engine after validating that cancelled_callback is callable.
+    ///
+    /// Transport calls are synchronous on this thread, with the interpreter
+    /// detached between calls. Native exit attempts close once. Protocol failure,
+    /// timeout, and true cancellation return an Outcome. Provider exceptions keep
+    /// their identity and traceback, with Outcome in __context__.exceptions.
     fn run(
         &self,
         py: Python<'_>,

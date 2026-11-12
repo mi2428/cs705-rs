@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import Callable, Iterable, Protocol, Self
+from collections.abc import Callable, Iterable
+from typing import Protocol, Self
 from . import search as search, information as information
 from .. import Error as Error
 
@@ -7,7 +8,7 @@ IMAGE_CAPACITY: int
 class Direction(Enum):
     ToRadio = 0
     FromRadio = 1
-Echo = Enum("Echo", ["None", "Known", "Auto"])
+Echo = Enum("Echo", {"None": 0, "Known": 1, "Auto": 2})
 class Operation(Enum):
     Query = 0
     Read = 1
@@ -28,16 +29,60 @@ class WriteDisposition(Enum):
     NotStarted = 0
     Unconfirmed = 1
     Acknowledged = 2
-ErrorKind = Enum("ErrorKind", ["NotFound", "PermissionDenied", "ConnectionRefused", "ConnectionReset", "HostUnreachable", "NetworkUnreachable", "ConnectionAborted", "NotConnected", "AddrInUse", "AddrNotAvailable", "NetworkDown", "BrokenPipe", "AlreadyExists", "WouldBlock", "NotADirectory", "IsADirectory", "DirectoryNotEmpty", "ReadOnlyFilesystem", "StaleNetworkFileHandle", "InvalidInput", "InvalidData", "TimedOut", "WriteZero", "StorageFull", "NotSeekable", "QuotaExceeded", "FileTooLarge", "ResourceBusy", "ExecutableFileBusy", "Deadlock", "CrossesDevices", "TooManyLinks", "InvalidFilename", "ArgumentListTooLong", "Interrupted", "Unsupported", "UnexpectedEof", "OutOfMemory", "Other"])
+class ErrorKind(Enum):
+    NotFound = 0
+    PermissionDenied = 1
+    ConnectionRefused = 2
+    ConnectionReset = 3
+    HostUnreachable = 4
+    NetworkUnreachable = 5
+    ConnectionAborted = 6
+    NotConnected = 7
+    AddrInUse = 8
+    AddrNotAvailable = 9
+    NetworkDown = 10
+    BrokenPipe = 11
+    AlreadyExists = 12
+    WouldBlock = 13
+    NotADirectory = 14
+    IsADirectory = 15
+    DirectoryNotEmpty = 16
+    ReadOnlyFilesystem = 17
+    StaleNetworkFileHandle = 18
+    InvalidInput = 19
+    InvalidData = 20
+    TimedOut = 21
+    WriteZero = 22
+    StorageFull = 23
+    NotSeekable = 24
+    QuotaExceeded = 25
+    FileTooLarge = 26
+    ResourceBusy = 27
+    ExecutableFileBusy = 28
+    Deadlock = 29
+    CrossesDevices = 30
+    TooManyLinks = 31
+    InvalidFilename = 32
+    ArgumentListTooLong = 33
+    Interrupted = 34
+    Unsupported = 35
+    UnexpectedEof = 36
+    OutOfMemory = 37
+    Other = 38
 
 class Transport(Protocol):
-    def read(self, maximum: int) -> bytes: ...
-    def write(self, data: bytes) -> int: ...
+    """Bounded binary I/O; positional calls, prefix counts, and a monotonic u64 clock.
+
+    Empty reads mean no data for this poll. pending_output includes OS queues.
+    Sessions attempt close once on native exit, including provider failure.
+    """
+    def read(self, maximum: int, /) -> bytes: ...
+    def write(self, data: bytes, /) -> int: ...
     def flush(self) -> None: ...
     def now_ms(self) -> int: ...
-    def wait_ms(self, milliseconds: int) -> None: ...
+    def wait_ms(self, milliseconds: int, /) -> None: ...
     def pending_output(self) -> int: ...
-    def reconfigure(self, settings_token: bytes) -> None: ...
+    def reconfigure(self, settings_token: bytes, /) -> None: ...
     def close(self) -> None: ...
 class Profile:
     def __copy__(self) -> Self: ...
@@ -46,9 +91,13 @@ class Profile:
     def selector(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
 class ContextFields:
+    """Twelve checked u32 values; read a snapshot or assign a complete iterable."""
     def __copy__(self) -> Self: ...
     def __deepcopy__(self, _memo: dict[int, object]) -> Self: ...
-    values: list[int]
+    @property
+    def values(self) -> list[int]: ...
+    @values.setter
+    def values(self, values: Iterable[int]) -> None: ...
     def __init__(self, values: Iterable[int]) -> None: ...
     @staticmethod
     def from_tail(tail: bytes) -> ContextFields: ...
@@ -72,6 +121,7 @@ class IdentityGate:
     def __init__(self) -> None: ...
     def apply(self, identity: Identity, context: ContextFields | None, saved_selector: int, flag57: int) -> int: ...
 class Frame:
+    """Use variant factories; unrelated variant fields raise ValueError."""
     def __copy__(self) -> Self: ...
     def __deepcopy__(self, _memo: dict[int, object]) -> Self: ...
     @property
@@ -151,6 +201,7 @@ class SessionConfig:
     def __init__(self) -> None: ...
     def set_block_cap(self, cap: int) -> None: ...
 class ErrorData:
+    """Immutable factory-created error value; exception() returns without raising."""
     @staticmethod
     def Invalid(reason: str) -> ErrorData: ...
     @staticmethod
@@ -174,7 +225,7 @@ class ErrorData:
     def command(self) -> int | None: ...
     @property
     def status(self) -> int | None: ...
-    def exception(self) -> Exception: ...
+    def exception(self) -> Error: ...
 class Failure:
     """Value object: with_* returns a replacement; the original is unchanged."""
     def with_error(self, error: ErrorData) -> Failure: ...
@@ -231,7 +282,11 @@ class Failure:
     def result_code(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
 class Outcome:
-    """Native-produced result; there is no public constructor or restoration."""
+    """Native-produced failure-prefix report, not a public constructor or restoration.
+
+    Editing public data cannot forge successful-query proof. Nested identity
+    fields are live views; image and coverage are immutable byte snapshots.
+    """
     def __copy__(self) -> Self: ...
     def __deepcopy__(self, _memo: dict[int, object]) -> Self: ...
     operation: Operation
@@ -254,6 +309,7 @@ class Outcome:
     def result_code(self) -> int: ...
     def acquired(self, address: int) -> bool: ...
 class Session:
+    """Factory-created one-shot engine; run consumes it even after provider failure."""
     @staticmethod
     def query(config: SessionConfig) -> Session: ...
     @staticmethod
@@ -264,4 +320,11 @@ class Session:
     def write(config: SessionConfig, profile: Profile, mask: int, image: bytes) -> Session: ...
     @staticmethod
     def write_after_query(config: SessionConfig, profile: Profile, mask: int, image: bytes, query: Outcome) -> Session: ...
-    def run(self, transport: Transport, cancelled_callback: Callable[[], bool]) -> Outcome: ...
+    def run(self, transport: Transport, cancelled_callback: Callable[[], bool]) -> Outcome:
+        """Close once on native exit; preserve provider exceptions and failure prefixes.
+
+        Protocol failure, timeout, or true cancellation returns an Outcome.
+        Raised provider exceptions retain their Outcome in __context__.exceptions.
+        An invalid non-callable cancellation argument does not consume the engine.
+        """
+        ...

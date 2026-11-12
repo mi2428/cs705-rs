@@ -19,6 +19,9 @@ struct References {
     busy: Arc<crate::owner::Owner<()>>,
 }
 #[pyclass(module = "cs705.clone.information")]
+/// Retains owner handles or active callback loans without consuming their state.
+/// Document/session/initial require mutable access; recent stays read-only during
+/// calls. Scoped targets retain their original frame, thread, and interpreter.
 pub struct DocumentReceiver {
     document: Option<Py<Document>>,
     session: Option<Py<Session>>,
@@ -62,19 +65,26 @@ pub(crate) fn run<R: Send>(
 ) -> PyResult<(CallbackError, PyResult<R>)> {
     let refs = receiver.bind(py).try_borrow()?.references(py)?;
     let _busy = refs.busy.take()?;
-    let mut document = refs.document.get().take()?;
-    let mut session = refs.session.get().take()?;
-    let mut initial = refs.initial.get().target.take()?;
-    let mut ui = refs.ui.get().owner.take()?;
-    let recent = refs.recent.get().target.take()?;
     CallbackError::scoped(py, || {
-        py.detach(move || {
-            f(&mut native::DocumentReceiver {
-                document: &mut document,
-                session: &mut session,
-                initial: &mut initial,
-                ui: &mut ui,
-                recent: &recent,
+        // Keep each checked reservation across the native call. Nested Python
+        // callbacks receive fresh Frames from the native reborrows, never from
+        // these old handles; conflicting old aliases remain busy throughout.
+        refs.document.get().with_mut(|document| {
+            refs.session.get().with_mut(|session| {
+                refs.initial.get().with_mut(|initial| {
+                    let mut ui = refs.ui.get().owner.take()?;
+                    refs.recent.get().with_ref(|recent| {
+                        py.detach(move || {
+                            f(&mut native::DocumentReceiver {
+                                document,
+                                session,
+                                initial,
+                                ui: &mut ui,
+                                recent,
+                            })
+                        })
+                    })
+                })
             })
         })
     })

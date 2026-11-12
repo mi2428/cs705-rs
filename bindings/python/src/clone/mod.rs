@@ -98,6 +98,7 @@ impl Profile {
 }
 #[pyclass(module = "cs705.clone", frozen)]
 #[derive(Clone)]
+/// Twelve checked u32 values; read a snapshot or assign a complete iterable.
 pub struct ContextFields {
     pub(crate) inner: Handle<core::ContextFields>,
 }
@@ -317,6 +318,7 @@ impl IdentityGate {
 }
 
 #[pyclass(module = "cs705.clone", frozen)]
+/// Use variant factories; unrelated variant fields raise ValueError.
 pub struct Frame {
     inner: Handle<core::Frame>,
 }

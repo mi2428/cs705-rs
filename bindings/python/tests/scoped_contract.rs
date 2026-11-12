@@ -288,6 +288,44 @@ fn borrowed_icf_and_slice_are_live() {
 }
 
 #[test]
+fn scoped_readonly_aliases_and_reborrow_unwind_fail_closed() {
+    Python::initialize();
+    Python::attach(|py| {
+        let mut data = vec![1usize];
+        scoped::Frame::with_mut(py, &mut data, |root| {
+            let readonly = root.project_ref(py, |value| value)?;
+            assert!(readonly.project_mut(py, |v| &v[0], |v| &mut v[0]).is_err());
+            let reader = readonly.project_ref(py, |v| &v[0])?;
+            let writer = root.project_mut(py, |v| &v[0], |v| &mut v[0])?;
+            reader.with_ref(py, |_| {
+                assert!(
+                    writer
+                        .with_mut::<()>(py, |_| panic!("must reject alias"))
+                        .is_err()
+                );
+                Ok(())
+            })?;
+            let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                writer.with_mut::<()>(py, |value| {
+                    *value = 8;
+                    panic!("reborrow unwind")
+                })
+            }));
+            assert!(unwind.is_err());
+            // A caught callback unwind releases the reservation in this still-live
+            // frame; it must neither roll back the prefix nor poison later access.
+            assert_eq!(reader.with_ref(py, |value| Ok(*value))?, 8);
+            writer.with_mut(py, |value| {
+                *value = 9;
+                Ok(())
+            })
+        })
+        .unwrap();
+        assert_eq!(data, [9]);
+    });
+}
+
+#[test]
 fn detach_and_unwind_restore_without_copyback() {
     Python::initialize();
     Python::attach(|py| {
