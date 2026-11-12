@@ -112,7 +112,7 @@ pub fn edit_non_channel(
                     side,
                     input,
                     reset,
-                    |frequency| ranges.eb64(q, frequency),
+                    |frequency| Ok(ranges.eb64(q, frequency)),
                 )?
             } else {
                 icf::special::edit_user_frequency(
@@ -120,8 +120,8 @@ pub fn edit_non_channel(
                     index,
                     side,
                     input,
-                    |frequency| ranges.f32c(q, frequency),
-                    |frequency| ranges.ed70(frequency),
+                    |frequency| Ok(ranges.f32c(q, frequency)),
+                    |frequency| Ok(ranges.ed70(frequency)),
                 )?
             };
             Ok((effect.writes != 0, effect.callback_flags))

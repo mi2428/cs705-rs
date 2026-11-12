@@ -575,37 +575,41 @@ impl ScanEdge {
         b[11..].copy_from_slice(&self.name);
         write(0xa368 + 27 * row, &b)
     }
-    pub fn warnings(&self, side: EdgeSide, mut bad: impl FnMut(u32) -> bool) -> u32 {
+    pub fn warnings(
+        &self,
+        side: EdgeSide,
+        mut bad: impl FnMut(u32) -> Result<bool, Error>,
+    ) -> Result<u32, Error> {
         if !self.valid {
-            return 0;
+            return Ok(0);
         }
         let value = match side {
             EdgeSide::Low => self.low_hz,
             EdgeSide::High => self.high_hz,
         };
         let specific = match side {
-            EdgeSide::Low => bad(value),
-            EdgeSide::High => bad(value) || (!bad(self.low_hz) && self.low_hz > self.high_hz),
+            EdgeSide::Low => bad(value)?,
+            EdgeSide::High => bad(value)? || (!bad(self.low_hz)? && self.low_hz > self.high_hz),
         };
-        (u32::from(specific) << 2) | (u32::from(!(30_000..=470_000_000).contains(&value)) << 3)
+        Ok((u32::from(specific) << 2) | (u32::from(!(30_000..=470_000_000).contains(&value)) << 3))
     }
     pub fn suitable(
         &self,
         allow_empty: bool,
         allow_equal: bool,
         check_specific: bool,
-        mut bad: impl FnMut(u32) -> bool,
-    ) -> bool {
-        (allow_empty || self.valid)
+        mut bad: impl FnMut(u32) -> Result<bool, Error>,
+    ) -> Result<bool, Error> {
+        Ok((allow_empty || self.valid)
             && (allow_equal || !self.valid || self.low_hz != self.high_hz)
             && (!self.valid
                 || ((30_000..=470_000_000).contains(&self.low_hz)
                     && (30_000..=470_000_000).contains(&self.high_hz)
                     && (!check_specific
-                        || (!bad(self.high_hz)
-                            && !bad(self.low_hz)
+                        || (!bad(self.high_hz)?
+                            && !bad(self.low_hz)?
                             && self.low_hz <= self.high_hz
-                            && self.mode != 0x18))))
+                            && self.mode != 0x18)))))
     }
 }
 
@@ -627,14 +631,14 @@ pub fn scan_suitable_rows(
     allow_empty: bool,
     allow_equal: bool,
     check_specific: bool,
-    mut bad: impl FnMut(u32) -> bool,
+    mut bad: impl FnMut(u32) -> Result<bool, Error>,
 ) -> Result<Vec<usize>, Error> {
     let mut rows = Vec::new();
     for row in 0..25 {
         let h = ScanEdge::read(source, row)?;
         if (allow_empty || h.valid)
             && (allow_equal || !h.valid || h.low_hz != h.high_hz)
-            && ScanEdge::read(live_current, row)?.suitable(true, true, check_specific, &mut bad)
+            && ScanEdge::read(live_current, row)?.suitable(true, true, check_specific, &mut bad)?
         {
             rows.push(row);
         }
@@ -692,7 +696,7 @@ pub fn edit_scan_frequency(
     side: EdgeSide,
     input: FrequencyInput,
     reset: bool,
-    mut bad: impl FnMut(u32) -> bool,
+    mut bad: impl FnMut(u32) -> Result<bool, Error>,
 ) -> Result<Effects, Error> {
     let mut h = ScanEdge::read(image.memory(), row)?;
     let mut effects = Effects {
@@ -730,7 +734,7 @@ pub fn edit_scan_frequency(
         }
         h = ScanEdge::read(image.memory(), row)?;
     }
-    effects.warning_bits = h.warnings(side, bad);
+    effects.warning_bits = h.warnings(side, bad)?;
     Ok(effects)
 }
 
@@ -835,25 +839,26 @@ impl UserEdge {
         &self,
         side: EdgeSide,
         prior: u32,
-        bad: &mut impl FnMut(u32) -> bool,
-        classify: &mut impl FnMut(u32) -> u32,
-    ) -> bool {
+        bad: &mut impl FnMut(u32) -> Result<bool, Error>,
+        classify: &mut impl FnMut(u32) -> Result<u32, Error>,
+    ) -> Result<bool, Error> {
         let f = match side {
             EdgeSide::Low => self.low_hz,
             EdgeSide::High => self.high_hz,
         };
-        bad(f)
+        Ok(bad(f)?
             || (side == EdgeSide::High
-                && !bad(self.low_hz)
-                && (self.low_hz > self.high_hz || classify(self.low_hz) != classify(self.high_hz)))
-            || f <= prior
+                && !bad(self.low_hz)?
+                && (self.low_hz > self.high_hz
+                    || classify(self.low_hz)? != classify(self.high_hz)?))
+            || f <= prior)
     }
     pub fn warnings(
         source: &[u8],
         row: usize,
         side: EdgeSide,
-        mut bad: impl FnMut(u32) -> bool,
-        mut classify: impl FnMut(u32) -> u32,
+        mut bad: impl FnMut(u32) -> Result<bool, Error>,
+        mut classify: impl FnMut(u32) -> Result<u32, Error>,
     ) -> Result<(u32, bool), Error> {
         let h = Self::read(source, row)?;
         if !h.valid {
@@ -863,14 +868,14 @@ impl UserEdge {
             EdgeSide::Low => h.low_hz,
             EdgeSide::High => h.high_hz,
         };
-        let mut specific = h.bad(side, 0, &mut bad, &mut classify);
+        let mut specific = h.bad(side, 0, &mut bad, &mut classify)?;
         let mut prior = 0;
         if !specific {
             for i in 0..row {
                 let p = Self::read(source, i)?;
                 if p.valid
-                    && !p.bad(EdgeSide::Low, prior, &mut bad, &mut classify)
-                    && !p.bad(EdgeSide::High, prior, &mut bad, &mut classify)
+                    && !p.bad(EdgeSide::Low, prior, &mut bad, &mut classify)?
+                    && !p.bad(EdgeSide::High, prior, &mut bad, &mut classify)?
                 {
                     if p.high_hz >= f {
                         specific = true;
@@ -891,8 +896,8 @@ pub fn edit_user_frequency(
     row: usize,
     side: EdgeSide,
     input: FrequencyInput,
-    bad: impl FnMut(u32) -> bool,
-    classify: impl FnMut(u32) -> u32,
+    bad: impl FnMut(u32) -> Result<bool, Error>,
+    classify: impl FnMut(u32) -> Result<u32, Error>,
 ) -> Result<Effects, Error> {
     let mut h = UserEdge::read(image.memory(), row)?;
     let mut e = Effects {
@@ -2216,7 +2221,8 @@ mod tests {
             second_value: 30_000,
             second_accepted: false,
         };
-        let e = edit_scan_frequency(&mut i, &[], 7, EdgeSide::Low, input, true, |_| false).unwrap();
+        let e =
+            edit_scan_frequency(&mut i, &[], 7, EdgeSide::Low, input, true, |_| Ok(false)).unwrap();
         assert_eq!(e.warning_bits, 0);
         let a = 0xa368 + 27 * 7;
         let mut literal = vec![0x30, 0x75, 0, 0, 0x30, 0x75, 0, 0, 255, 0, 255];
@@ -2232,7 +2238,7 @@ mod tests {
                 ..input
             },
             true,
-            |_| false,
+            |_| Ok(false),
         )
         .unwrap();
         assert_eq!(e.writes, 1);
@@ -2250,7 +2256,7 @@ mod tests {
                 ..input
             },
             true,
-            |_| false,
+            |_| Ok(false),
         )
         .unwrap();
         assert_eq!(e.writes, 0);
@@ -2266,7 +2272,7 @@ mod tests {
                 ..input
             },
             true,
-            |_| false,
+            |_| Ok(false),
         );
         assert!(err.is_err());
         assert_eq!(ScanEdge::read(i.memory(), 7).unwrap().high_hz, 70_000);
@@ -2275,8 +2281,8 @@ mod tests {
         let mut h = ScanEdge::read(i.memory(), 7).unwrap();
         h.low_hz = 100;
         h.high_hz = 50;
-        assert_eq!(h.warnings(EdgeSide::High, |f| f == 100), 8); // Bad low skips high ordering.
-        assert_eq!(h.warnings(EdgeSide::High, |_| false), 12);
+        assert_eq!(h.warnings(EdgeSide::High, |f| Ok(f == 100)).unwrap(), 8); // Bad low skips high ordering.
+        assert_eq!(h.warnings(EdgeSide::High, |_| Ok(false)).unwrap(), 12);
         assert!(h.mode_candidate_allowed(h.mode));
         assert!(!h.mode_candidate_allowed(0x18));
         h.mode = 0xf;
@@ -2320,7 +2326,7 @@ mod tests {
         let mut live = source.memory().to_vec();
         dword(&mut live, 0xa368 + 27 * 4, 1);
         assert!(
-            scan_suitable_rows(source.memory(), &live, false, false, false, |_| false)
+            scan_suitable_rows(source.memory(), &live, false, false, false, |_| Ok(false))
                 .unwrap()
                 .is_empty()
         );
@@ -2331,7 +2337,7 @@ mod tests {
                 false,
                 false,
                 false,
-                |_| false
+                |_| Ok(false)
             )
             .unwrap(),
             [4]
@@ -2349,7 +2355,8 @@ mod tests {
             second_accepted: false,
         };
         let before = i.memory().to_vec();
-        let e = edit_user_frequency(&mut i, 2, EdgeSide::Low, input, |_| false, |_| 0).unwrap();
+        let e =
+            edit_user_frequency(&mut i, 2, EdgeSide::Low, input, |_| Ok(false), |_| Ok(0)).unwrap();
         assert_eq!(e.callback_flags, 0x28);
         assert_eq!(e.writes, 0);
         assert_eq!(i.memory(), before);
@@ -2357,7 +2364,8 @@ mod tests {
             second_value: 50_000,
             ..input
         };
-        let e = edit_user_frequency(&mut i, 2, EdgeSide::Low, input, |_| false, |_| 0).unwrap();
+        let e =
+            edit_user_frequency(&mut i, 2, EdgeSide::Low, input, |_| Ok(false), |_| Ok(0)).unwrap();
         assert!(!e.gray);
         assert_eq!(
             UserEdge::read(i.memory(), 2).unwrap(),
@@ -2368,7 +2376,7 @@ mod tests {
             }
         );
         assert!(
-            UserEdge::warnings(i.memory(), 2, EdgeSide::High, |_| false, |_| 0)
+            UserEdge::warnings(i.memory(), 2, EdgeSide::High, |_| Ok(false), |_| Ok(0))
                 .unwrap()
                 .1
         );
@@ -2389,7 +2397,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(
-            UserEdge::warnings(i.memory(), 2, EdgeSide::Low, |_| false, |_| 0)
+            UserEdge::warnings(i.memory(), 2, EdgeSide::Low, |_| Ok(false), |_| Ok(0))
                 .unwrap()
                 .0,
             0
@@ -2804,7 +2812,7 @@ mod tests {
             assert_eq!(state, RowState::default());
         }
         assert!(
-            scan_suitable_rows(image().memory(), &[], false, false, false, |_| false)
+            scan_suitable_rows(image().memory(), &[], false, false, false, |_| Ok(false))
                 .unwrap()
                 .is_empty()
         );
@@ -2958,6 +2966,31 @@ mod tests {
         );
     }
     #[test]
+    fn predicate_failure_keeps_the_saved_frequency_and_stops_before_later_reads() {
+        let mut i = image();
+        let mut calls = Vec::new();
+        let error = edit_user_frequency(
+            &mut i,
+            2,
+            EdgeSide::High,
+            FrequencyInput {
+                first_accepted: true,
+                second_value: 145_000_000,
+                second_accepted: true,
+            },
+            |hz| {
+                calls.push(hz);
+                Err(Error::Operation("injected predicate failure".into()))
+            },
+            |_| panic!("classification after predicate failure"),
+        )
+        .unwrap_err();
+        assert_eq!(error, Error::Operation("injected predicate failure".into()));
+        assert_eq!(calls, [145_000_000]);
+        assert_eq!(UserEdge::read(i.memory(), 2).unwrap().high_hz, 145_000_000);
+    }
+
+    #[test]
     fn checked_indices_reject_before_mutation_and_unknown_values_remain_readable() {
         let mut i = preset_fixture(0);
         let before = i.memory().to_vec();
@@ -2974,8 +3007,8 @@ mod tests {
                     second_value: 1,
                     second_accepted: true
                 },
-                |_| false,
-                |_| 0
+                |_| Ok(false),
+                |_| Ok(0)
             )
             .is_err()
         );

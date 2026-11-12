@@ -196,8 +196,8 @@ fn central(
             true,
             true,
             true,
-            |f| r.ranges.eb64(r.context, f),
-        );
+            |f| Ok(r.ranges.eb64(r.context, f)),
+        )?;
     let reset_scan = no_valid || !suitable;
     copy_field(image, defaults, 0x37818, 1)?;
     normalizer::stage9_filter_bits(image, defaults, r.context)?;

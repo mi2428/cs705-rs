@@ -4159,11 +4159,9 @@ pub struct ProgramScanEffect {
 
 /// AA658's actual 0/0/0/0/1 caller always checks broad bounds, not B/Q warnings.
 fn program_scan_bounds_ok(current: &[u8], row: usize) -> Result<bool, Error> {
-    Ok(
-        crate::icf::special::ScanEdge::read(current, row)?.suitable(true, true, false, |_| {
-            unreachable!("AA658 does not request the machine-specific predicate")
-        }),
-    )
+    crate::icf::special::ScanEdge::read(current, row)?.suitable(true, true, false, |_| {
+        unreachable!("AA658 does not request the machine-specific predicate")
+    })
 }
 
 pub fn program_scan_choices(image: &Icf<'_>, current: &[u8]) -> Result<Vec<i64>, Error> {

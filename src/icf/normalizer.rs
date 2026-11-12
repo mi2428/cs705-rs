@@ -812,12 +812,12 @@ pub fn typed_bad(
             if numeric_only {
                 return Ok(!h.suitable(true, true, false, |_| {
                     unreachable!("numeric scan does not query B/Q")
-                }));
+                })?);
             }
             let bit = if numeric_only { 8 } else { 4 };
             Ok(
-                h.warnings(EdgeSide::High, |hz| ranges.eb64(q, hz)) & bit != 0
-                    || h.warnings(EdgeSide::Low, |hz| ranges.eb64(q, hz)) & bit != 0
+                h.warnings(EdgeSide::High, |hz| Ok(ranges.eb64(q, hz)))? & bit != 0
+                    || h.warnings(EdgeSide::Low, |hz| Ok(ranges.eb64(q, hz)))? & bit != 0
                     || (!numeric_only && h.valid && holder.mode() == 0x18),
             )
         }
@@ -836,8 +836,8 @@ pub fn typed_bad(
                 image,
                 holder.index() as usize,
                 EdgeSide::High,
-                |hz| ranges.f32c(q, hz),
-                |hz| ranges.ed70(hz),
+                |hz| Ok(ranges.f32c(q, hz)),
+                |hz| Ok(ranges.ed70(hz)),
             )?
             .0 & bit
                 != 0
@@ -845,8 +845,8 @@ pub fn typed_bad(
                     image,
                     holder.index() as usize,
                     EdgeSide::Low,
-                    |hz| ranges.f32c(q, hz),
-                    |hz| ranges.ed70(hz),
+                    |hz| Ok(ranges.f32c(q, hz)),
+                    |hz| Ok(ranges.ed70(hz)),
                 )?
                 .0 & bit
                     != 0)
@@ -940,7 +940,7 @@ pub fn reset_operating_state(
         if typed_bad(image, &h, false, q, ranges, system_langid)? {
             let suitable =
                 super::special::scan_suitable_rows(image, image, false, false, false, |hz| {
-                    ranges.eb64(q, hz)
+                    Ok(ranges.eb64(q, hz))
                 })?;
             if suitable.len() == 1 {
                 let reset = super::special::scan_reset_enabled(image, 0)?;

@@ -573,7 +573,7 @@ fn compact(args: CompactArgs, kind: lib::CompactKind) -> Result<u8> {
 
 /// This call is unreachable by contract: broad-only suitability never invokes
 /// a specific band predicate. It is not a fabricated all-frequency permission.
-fn specific_disabled(_: u32) -> bool {
+fn specific_disabled(_: u32) -> std::result::Result<bool, icf::Error> {
     unreachable!("specific predicate disabled by library call flags")
 }
 
@@ -671,7 +671,7 @@ fn scan(args: ScanArgs) -> Result<u8> {
                             },
                             input,
                             reset,
-                            |f| context.ranges.eb64(&context.live_q, f),
+                            |f| Ok(context.ranges.eb64(&context.live_q, f)),
                         );
                         let e = checked(result, &image, &before)?;
                         effects.push(effect_json(&e));
@@ -784,7 +784,7 @@ fn scan(args: ScanArgs) -> Result<u8> {
             write,
         } => {
             let h = lib::ScanEdge::read(image.memory(), index)?;
-            if !h.suitable(false, false, false, specific_disabled) {
+            if !h.suitable(false, false, false, specific_disabled)? {
                 return Err(AppError::invalid(
                     "typed scan selection requires a nonempty, unequal, broad-range row",
                 ));
@@ -950,8 +950,8 @@ fn user(args: UserArgs) -> Result<u8> {
                         lib::EdgeSide::High
                     },
                     input,
-                    |f| native.ranges.f32c(&native.live_q, f),
-                    |f| native.ranges.ed70(f),
+                    |f| Ok(native.ranges.f32c(&native.live_q, f)),
+                    |f| Ok(native.ranges.ed70(f)),
                 );
                 effects.push(effect_json(&checked(result, &image, &before)?));
             }

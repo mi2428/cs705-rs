@@ -1324,7 +1324,9 @@ fn post_scan(
         false,
         false,
         false,
-        |_| unreachable!("scan CSV post never queries a specific frequency range"),
+        |_| -> Result<bool, icf::Error> {
+            unreachable!("scan CSV post never queries a specific frequency range")
+        },
     )?;
     if (rows.is_empty() && selected == 0) || selected < selection.first || selected > selection.last
     {
