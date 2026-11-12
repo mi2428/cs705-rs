@@ -23,9 +23,9 @@ impl Icf<'_> {
             });
         }
         Ok(Icf {
-            source: &[],
+            source: (&[][..]).into(),
             memory,
-            comment: &[],
+            comment: (&[][..]).into(),
             extra_data: 0,
         })
     }
@@ -59,6 +59,32 @@ pub(super) fn apply_patches(image: &mut [u8], patches: &[(usize, &[u8])]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ownership_keeps_original_metadata_and_current_edits_separate() {
+        let mut memory = vec![0; IMAGE_BYTES];
+        memory[INTERNAL_MAP_REV] = 6;
+        memory[IMAGE_BYTES - IMAGE_SIGNATURE.len()..].copy_from_slice(IMAGE_SIGNATURE);
+        let source = super::super::format::write_storage(
+            &memory,
+            super::super::format::Layout::from_map_revision(6),
+            b"raw\x82\xa0",
+            0,
+        )
+        .unwrap();
+        let mut borrowed = Icf::parse(&source).unwrap();
+        assert_eq!(borrowed.original_bytes().as_ptr(), source.as_ptr());
+        borrowed.patch_memory(&[(0, &[0x73])]).unwrap();
+        let owned = borrowed.into_owned();
+        assert_eq!(owned.original_bytes(), source);
+        drop(source);
+        assert_eq!(owned.comment_bytes(), b"raw\x82\xa0");
+        assert_eq!(owned.extra_data(), 0);
+        assert_eq!(owned.memory()[0], 0x73);
+        let serialized = owned.to_bytes();
+        assert_ne!(serialized, owned.original_bytes());
+        assert_eq!(Icf::parse(&serialized).unwrap().memory(), owned.memory());
+    }
 
     #[test]
     fn checked_raw_boundary_preserves_unknowns_and_has_one_commit_point() {

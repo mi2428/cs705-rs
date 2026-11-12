@@ -156,7 +156,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// A verified canonical image, borrowing its unchanged source text.
+/// A verified canonical image, borrowing or owning its unchanged source text.
 ///
 /// The model is 4075, file revision 0001, MapRev 6. The format's MD5 detects
 /// accidental record changes; it provides no authenticity or metadata integrity.
@@ -172,9 +172,9 @@ impl std::error::Error for Error {}
 /// with original-software saves remain pending.
 #[derive(Clone)]
 pub struct Icf<'a> {
-    source: &'a [u8],
+    source: Cow<'a, [u8]>,
     memory: Vec<u8>,
-    comment: &'a [u8],
+    comment: Cow<'a, [u8]>,
     extra_data: u32,
 }
 
@@ -195,9 +195,9 @@ pub fn convert_map_rev5_to6(source: &[u8]) -> Result<Vec<u8>, Error> {
     memory[0x39724] = 0;
     memory[0x3a318..0x3a31b].fill(0);
     Ok(Icf {
-        source,
+        source: Cow::Borrowed(source),
         memory,
-        comment,
+        comment: Cow::Borrowed(comment),
         extra_data,
     }
     .to_bytes())
@@ -231,9 +231,9 @@ impl<'a> Icf<'a> {
     pub fn parse(source: &'a [u8]) -> Result<Self, Error> {
         let (memory, comment, extra_data) = Self::parse_image(source, 6)?;
         Ok(Self {
-            source,
+            source: Cow::Borrowed(source),
             memory,
-            comment,
+            comment: Cow::Borrowed(comment),
             extra_data,
         })
     }
@@ -378,14 +378,24 @@ impl<'a> Icf<'a> {
         })
     }
 
+    /// Own the original source and comment without serializing current edits.
+    pub fn into_owned(self) -> Icf<'static> {
+        Icf {
+            source: Cow::Owned(self.source.into_owned()),
+            memory: self.memory,
+            comment: Cow::Owned(self.comment.into_owned()),
+            extra_data: self.extra_data,
+        }
+    }
+
     /// Return every current memory byte, including uninterpreted regions, in order.
     pub fn memory(&self) -> &[u8] {
         &self.memory
     }
 
     /// Return the exact original file, without normalization or subsequent edits.
-    pub fn original_bytes(&self) -> &'a [u8] {
-        self.source
+    pub fn original_bytes(&self) -> &[u8] {
+        &self.source
     }
 
     /// Serialize the verified image using uppercase hexadecimal and CRLF lines.
@@ -397,15 +407,15 @@ impl<'a> Icf<'a> {
         format::write_storage(
             &self.memory,
             format::Layout::from_map_revision(6),
-            self.comment,
+            &self.comment,
             self.extra_data,
         )
         .expect("Icf always owns an exact MapRev 6 storage image")
     }
 
     /// Return the raw comment bytes without assuming UTF-8 or changing CP932 data.
-    pub fn comment_bytes(&self) -> &'a [u8] {
-        self.comment
+    pub fn comment_bytes(&self) -> &[u8] {
+        &self.comment
     }
 
     /// Return EtcData unchanged; integrity bits are checked, other bits uninterpreted.

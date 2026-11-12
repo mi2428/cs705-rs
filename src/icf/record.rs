@@ -2660,9 +2660,9 @@ mod tests {
         memory[0x355a1] = 6;
         memory[0x3c9b0..].copy_from_slice(b"IcomCloneFormat3");
         let mut image = super::super::Icf::from_memory(memory).unwrap();
-        image.comment = b"retained comment";
+        image.comment = b"retained comment".as_slice().into();
         image.extra_data = 99;
-        image.source = b"retained source token";
+        image.source = b"retained source token".as_slice().into();
         let mut channel = reset_holder(3, 0, 7);
         load_channel_image_into(
             &image,

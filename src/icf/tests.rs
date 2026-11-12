@@ -244,14 +244,14 @@ fn scalar_error(
     operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) -> Error {
     let before = image.memory().to_vec();
-    let source = image.source;
+    let source = image.source.clone();
     let error = operation(image).unwrap_err();
     assert!(if invalid {
         matches!(error, Error::Invalid { .. })
     } else {
         matches!(error, Error::Unsupported { .. })
     });
-    assert_setting_state(image, source, &before);
+    assert_setting_state(image, &source, &before);
     error
 }
 
@@ -262,10 +262,10 @@ fn scalar_replace(
     operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) {
     let mut expected = image.memory().to_vec();
-    let source = image.source;
+    let source = image.source.clone();
     expected[at..at + bytes.len()].copy_from_slice(bytes);
     operation(image).unwrap();
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
@@ -1714,7 +1714,7 @@ fn dsp_change(
 ) {
     operation(image).unwrap();
     expected[at] = raw;
-    assert_setting_state(image, image.source, expected);
+    assert_setting_state(image, &image.source, expected);
 }
 
 fn dsp_roundtrip(image: &Icf<'_>, expected: &[u8], cd: &str, file_md5: &str) {
@@ -2875,16 +2875,16 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     for (raw, &value) in values.iter().enumerate() {
         write(image, value).unwrap();
         expected[offset] = raw as u8;
         assert_eq!(read(image), Ok(value));
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
         write(image, values[0]).unwrap();
         expected[offset] = 0;
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
     }
     for unknown in [values.len() as u8, 255] {
         image.memory[offset] = unknown;
@@ -2896,13 +2896,13 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
             write(image, value).unwrap();
             expected[offset] = raw as u8;
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
     image.memory[offset] = 0;
     write(image, *values.last().unwrap()).unwrap();
     expected[offset] = (values.len() - 1) as u8;
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
@@ -3169,7 +3169,7 @@ fn check_numeric_values<T: Copy + fmt::Debug + PartialEq, const N: usize>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     // Repeat edits to prove setters accept every supported current value.
     for _ in 0..2 {
@@ -3177,7 +3177,7 @@ fn check_numeric_values<T: Copy + fmt::Debug + PartialEq, const N: usize>(
             write(image, value).unwrap();
             expected[offset..offset + N].copy_from_slice(&bytes);
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
 }
@@ -3360,12 +3360,12 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let original = image.memory().to_vec();
     let serialized = image.to_bytes();
     for &value in invalid {
         assert!(matches!(write(image,value), Err(Error::Invalid {line,..}) if line==5+offset/32));
-        assert_setting_state(image, source, &original);
+        assert_setting_state(image, &source, &original);
     }
     assert_eq!(image.to_bytes(), serialized);
     for bytes in current {
@@ -3375,20 +3375,20 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
         let serialized = image.to_bytes();
         let error = read(image).unwrap_err();
         assert!(matches!(error,Error::Unsupported {line,..} if line==5+offset/32));
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
         // Invalid new input wins even when the stored current value is invalid.
         for &value in invalid {
             assert!(
                 matches!(write(image,value),Err(Error::Invalid {line,..}) if line==5+offset/32)
             );
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
         assert_eq!(image.to_bytes(), serialized);
         write(image, valid).unwrap();
         assert_eq!(read(image), Ok(valid));
         assert_eq!(&image.memory()[..offset], &original[..offset]);
         assert_eq!(&image.memory()[offset + N..], &original[offset + N..]);
-        assert_eq!(image.original_bytes(), source);
+        assert_eq!(image.original_bytes(), source.as_ref());
     }
     image.memory[offset..offset + N].copy_from_slice(&original[offset..offset + N]);
 }
@@ -4243,7 +4243,7 @@ fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
     let (offset, mask, shift) = field;
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     for original in 0..=u8::MAX {
         let code = usize::from((original & mask) >> shift);
@@ -4261,7 +4261,7 @@ fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
             write(image, value).unwrap();
             expected[offset] = (original & !mask) | ((new_code as u8) << shift);
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
 }
@@ -5461,14 +5461,14 @@ fn message_rejected(
     error: (bool, usize),
     call: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let expected = image.memory().to_vec();
     match call(image).unwrap_err() {
         Error::Invalid { line, .. } if error.0 => assert_eq!(line, error.1),
         Error::Unsupported { line, .. } if !error.0 => assert_eq!(line, error.1),
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
