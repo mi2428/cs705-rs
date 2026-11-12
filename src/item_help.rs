@@ -2,6 +2,7 @@
 //! Requests/effects are headless calculations, not native window delivery.
 
 use crate::csv::{self, Error, history::pe_tail};
+use std::borrow::Cow;
 
 const NAMES: u32 = 0x3f2b44;
 const TOPICS: u32 = 0x3db93f;
@@ -212,9 +213,10 @@ pub struct Api {
     pub style: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Call {
-    pub api: &'static str,
+    /// Native observations borrow literals; callers may own arbitrary API names.
+    pub api: Cow<'static, str>,
     pub command: Option<u32>,
 }
 
@@ -238,7 +240,10 @@ pub struct Effects {
 }
 impl Effects {
     fn call(&mut self, api: &'static str, command: Option<u32>) {
-        self.calls.push(Call { api, command });
+        self.calls.push(Call {
+            api: api.into(),
+            command,
+        });
     }
 }
 fn observed<T: Copy>(value: Option<T>, name: &'static str) -> Result<T, Error> {

@@ -135,10 +135,10 @@ pub enum Message {
 }
 
 /// Semantic identity stays available alongside the translated label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldText {
     pub key: u16,
-    pub name: &'static str,
+    pub name: std::borrow::Cow<'static, str>,
     pub label: &'static str,
 }
 
@@ -193,7 +193,7 @@ impl Presenter {
     pub fn setting(self, setting: &settings::Setting) -> Result<FieldText, Error> {
         Ok(FieldText {
             key: setting.key,
-            name: setting.name,
+            name: setting.name.clone(),
             label: self.field_label(setting.key)?,
         })
     }
@@ -213,7 +213,7 @@ impl Presenter {
             && raw >= d.min
             && raw <= d.max
             && (i128::from(raw) - i128::from(d.min)) % i128::from(d.step) == 0;
-        let message = match (setting.kind, in_domain) {
+        let message = match (&setting.kind, in_domain) {
             (settings::Kind::Integer(_), true) => Message::Number(raw),
             (settings::Kind::Integer(_), false) => Message::OutOfRange(raw),
             (settings::Kind::Selector, true) => Message::Code(raw),

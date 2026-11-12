@@ -6,7 +6,7 @@
 //! text and coupled handlers must not be inferred from these simple entries.
 //! Source: A4 `facts.tsv`, accepted BA04/BA14 normal group-25 Basic routes.
 
-use std::sync::OnceLock;
+use std::{borrow::Cow, sync::OnceLock};
 
 use super::{Error, Icf};
 
@@ -27,12 +27,12 @@ pub struct Domain {
 }
 
 /// One semantic stored setting, not a raw offset exposed as a CLI key.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Setting {
     /// Stable ASCII semantic property name, using source names where established.
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     /// Original inventory help-feature ID; multiple controls can share one ID.
-    pub feature_id: &'static str,
+    pub feature_id: Cow<'static, str>,
     /// Original resource/dispatch key, distinct from the feature ID.
     pub key: u16,
     /// Popup selection-node key, not the outer setting dispatch key (normally 1).
@@ -51,12 +51,12 @@ pub struct Setting {
 }
 
 /// Semantic value interpretation, independently of the storage width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     /// Contiguous raw choice codes; use `select` for the original simple handler.
     Selector,
     /// Integer in the explicitly named units, not a display percentage conversion.
-    Integer(&'static str),
+    Integer(Cow<'static, str>),
 }
 
 /// The two immediate keyboard selector edits; Enter only opens the native popup.
@@ -127,8 +127,8 @@ pub fn catalog() -> &'static [Setting] {
                     .map_or(1, |s| u16::from_str_radix(s, 16).unwrap());
                 assert!(cells.next().is_none());
                 Setting {
-                    feature_id,
-                    name,
+                    feature_id: Cow::Borrowed(feature_id),
+                    name: Cow::Borrowed(name),
                     key,
                     selection_key,
                     offset,
@@ -393,8 +393,8 @@ macro_rules! integer {
     ($id:literal, $name:literal, $key:literal, $at:literal, $width:literal, $signed:literal,
      $bias:literal, $min:literal, $max:literal, $step:literal, $unit:literal) => {
         Setting {
-            feature_id: $id,
-            name: $name,
+            feature_id: Cow::Borrowed($id),
+            name: Cow::Borrowed($name),
             key: $key,
             selection_key: 1,
             offset: $at,
@@ -408,7 +408,7 @@ macro_rules! integer {
                 max: $max,
                 step: $step,
             },
-            kind: Kind::Integer($unit),
+            kind: Kind::Integer(Cow::Borrowed($unit)),
         }
     };
 }
@@ -799,6 +799,21 @@ fn numeric_catalog() -> Vec<Setting> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn owned_metadata_clone_preserves_private_storage() {
+        let source = find("lcd_backlight_raw").unwrap();
+        assert!(matches!(source.name, Cow::Borrowed(_)));
+        let mut descriptor = source.clone();
+        descriptor.name = Cow::Owned("custom numeric name".to_owned());
+        descriptor.feature_id = Cow::Owned("custom feature".to_owned());
+        descriptor.kind = Kind::Integer(Cow::Owned("custom unit".to_owned()));
+        let mut edited = image();
+        descriptor.store_numeric_raw(&mut edited, 0, 73).unwrap();
+        assert_eq!(source.read_numeric_raw(&edited, 0).unwrap(), 73);
+        assert_eq!(source.name, "lcd_backlight_raw");
+        assert_eq!(descriptor.kind, Kind::Integer(Cow::Borrowed("custom unit")));
+    }
+
     fn image() -> Icf<'static> {
         let mut memory = vec![0xe7; 0x3c9c0];
         memory[0x355a1] = 6;
@@ -818,7 +833,7 @@ mod tests {
                 expected[0x39313..0x39315].copy_from_slice(&[2, 0]);
             }
             assert!(keys.insert(setting.key));
-            assert_eq!(find(setting.name).unwrap(), setting);
+            assert_eq!(find(&setting.name).unwrap(), setting);
             if setting.kind == Kind::Selector {
                 assert_eq!(
                     setting.read(&image, 0).unwrap(),
@@ -1008,7 +1023,7 @@ mod tests {
                 "CL_Common_Network_ConnectionType",
                 "CL_Common_Network_DHCP",
             ]
-            .contains(&setting.name)
+            .contains(&setting.name.as_ref())
             {
                 0x20
             } else {

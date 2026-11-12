@@ -376,7 +376,7 @@ pub fn edit_non_channel(
     {
         let effect = e::edit_number_at(
             image,
-            field.name,
+            &field.name,
             index,
             e::NumberInput::Text(&source),
             if key == 0x307 {

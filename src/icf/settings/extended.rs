@@ -6,6 +6,7 @@
 
 use super::{Kind, Value};
 use crate::icf::{Error, Icf};
+use std::borrow::Cow;
 
 /// Input from a normal editor invocation; display and cancellation are distinct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,15 +40,15 @@ pub struct NumberEffect {
 }
 
 /// Implemented numeric editor metadata, reusing the parent's storage descriptor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NumberField {
-    pub feature_id: &'static str,
-    pub name: &'static str,
+    pub feature_id: Cow<'static, str>,
+    pub name: Cow<'static, str>,
     pub key: u16,
     pub minimum: i64,
     pub maximum: i64,
     pub step: i64,
-    pub unit: &'static str,
+    pub unit: Cow<'static, str>,
     pub count: usize,
     /// Typed text multiplied by 10^text_scale before storage-unit rounding.
     pub text_scale: u32,
@@ -81,8 +82,8 @@ const fn number(
     axis: (usize, usize),
 ) -> super::Setting {
     super::Setting {
-        feature_id: id,
-        name,
+        feature_id: Cow::Borrowed(id),
+        name: Cow::Borrowed(name),
         key,
         selection_key: 1,
         domain: super::Domain {
@@ -91,7 +92,7 @@ const fn number(
             step: domain.2,
         },
         count: axis.0,
-        kind: Kind::Integer(domain.3),
+        kind: Kind::Integer(Cow::Borrowed(domain.3)),
         offset: at,
         width: encoding.0,
         signed: false,
@@ -319,17 +320,17 @@ pub fn number_fields() -> Vec<NumberField> {
     number_settings()
         .into_iter()
         .filter_map(|field| {
-            let Kind::Integer(unit) = field.kind else {
+            let Kind::Integer(unit) = &field.kind else {
                 return None;
             };
             Some(NumberField {
-                feature_id: field.feature_id,
-                name: field.name,
+                feature_id: field.feature_id.clone(),
+                name: field.name.clone(),
                 key: field.key,
                 minimum: field.domain.min,
                 maximum: field.domain.max,
                 step: field.domain.step,
-                unit,
+                unit: unit.clone(),
                 count: field.count,
                 text_scale: number_scale(field.key),
                 selected_raw_bypass: number_selected(field.key),
@@ -957,9 +958,8 @@ pub fn edit_pbt(
     }
     let raw_candidate = (candidate / step) as i32;
     if accepted {
-        const RAW: super::Setting = super::Setting {
-            signed: true,
-            ..number(
+        const RAW: super::Setting = {
+            let mut raw = number(
                 "A2-H56057-02",
                 "pbt_raw",
                 0x12b,
@@ -967,7 +967,9 @@ pub fn edit_pbt(
                 (1, 0),
                 (-128, 127, 1, "raw PBT code"),
                 (30, 1),
-            )
+            );
+            raw.signed = true;
+            raw
         };
         RAW.store_numeric_raw(image, 2 * index + side as usize, raw_candidate)?;
     }
@@ -1089,7 +1091,7 @@ pub fn edit_bandwidth(
 
 /// Full-byte selector cases. Private parent storage metadata stays private;
 /// this child module supplies compiled schema and reuses its read/select codec.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChoiceField {
     storage: super::Setting,
     pub first_index: usize,
@@ -1106,8 +1108,8 @@ const fn choice(
 ) -> ChoiceField {
     ChoiceField {
         storage: super::Setting {
-            feature_id: id,
-            name,
+            feature_id: Cow::Borrowed(id),
+            name: Cow::Borrowed(name),
             key,
             selection_key: 1,
             domain: super::Domain {
@@ -1606,8 +1608,8 @@ impl ConditionalField {
             ),
         }
     }
-    pub fn feature_id(self) -> &'static str {
-        self.descriptor().feature_id()
+    pub fn feature_id(self) -> Cow<'static, str> {
+        self.descriptor().storage.feature_id
     }
     pub fn key(self) -> u16 {
         self.descriptor().key()
@@ -1666,7 +1668,7 @@ impl ConditionalField {
         };
         Ok(ConditionalCatalog {
             field: self,
-            selector,
+            selector: Cow::Borrowed(selector),
             values,
         })
     }
@@ -1683,7 +1685,7 @@ pub struct SelectorRuntime<'a> {
 #[derive(Debug, Clone)]
 pub struct ConditionalCatalog {
     field: ConditionalField,
-    pub selector: &'static str,
+    pub selector: Cow<'static, str>,
     values: &'static [i64],
 }
 impl ConditionalCatalog {
@@ -1956,11 +1958,11 @@ impl AmplifierField {
 }
 
 impl ChoiceField {
-    pub fn feature_id(&self) -> &'static str {
-        self.storage.feature_id
+    pub fn feature_id(&self) -> &str {
+        &self.storage.feature_id
     }
-    pub fn name(&self) -> &'static str {
-        self.storage.name
+    pub fn name(&self) -> &str {
+        &self.storage.name
     }
     pub fn key(&self) -> u16 {
         self.storage.key
@@ -4354,7 +4356,7 @@ mod tests {
             for raw in [0, if field.width == 2 { 0xffff } else { 0xff }] {
                 field.store_numeric_raw(&mut image, 0, raw).unwrap();
                 let effect =
-                    edit_number_at(&mut image, field.name, 0, NumberInput::Display, b'.').unwrap();
+                    edit_number_at(&mut image, &field.name, 0, NumberInput::Display, b'.').unwrap();
                 let mut expected = effect.candidate.to_string().into_bytes();
                 expected.extend_from_slice(&effect.suffix);
                 let before = image.memory().to_vec();
@@ -4884,7 +4886,7 @@ mod tests {
                 if !field.accepts_index(index) {
                     let before = image.memory().to_vec();
                     assert!(
-                        edit_number_at(&mut image, field.name, index, NumberInput::Next, b'.')
+                        edit_number_at(&mut image, &field.name, index, NumberInput::Next, b'.')
                             .is_err()
                     );
                     assert_eq!(image.memory(), before);
@@ -4894,23 +4896,29 @@ mod tests {
                     .into_iter()
                     .find(|s| s.name == field.name)
                     .unwrap();
-                let effect =
-                    edit_number_at(&mut image, field.name, index, NumberInput::Text(b"0"), b'.')
-                        .unwrap();
+                let effect = edit_number_at(
+                    &mut image,
+                    &field.name,
+                    index,
+                    NumberInput::Text(b"0"),
+                    b'.',
+                )
+                .unwrap();
                 assert!(effect.stored);
                 assert_eq!(
-                    edit_number_at(&mut image, field.name, index, NumberInput::Display, b'.')
+                    edit_number_at(&mut image, &field.name, index, NumberInput::Display, b'.')
                         .unwrap()
                         .candidate,
                     field.minimum.max(0)
                 );
                 let before = image.memory().to_vec();
                 let cancelled =
-                    edit_number_at(&mut image, field.name, index, NumberInput::Cancel, b'.')
+                    edit_number_at(&mut image, &field.name, index, NumberInput::Cancel, b'.')
                         .unwrap();
                 assert!(!cancelled.accepted);
-                let begin = edit_number_at(&mut image, field.name, index, NumberInput::Begin, b'.')
-                    .unwrap();
+                let begin =
+                    edit_number_at(&mut image, &field.name, index, NumberInput::Begin, b'.')
+                        .unwrap();
                 assert_eq!(begin.state_out, 2);
                 assert!(begin.suffix.is_empty());
                 assert_eq!(image.memory(), before);
@@ -4923,29 +4931,36 @@ mod tests {
                         .write(&mut image, index, &Value::Number(field.maximum))
                         .unwrap();
                 }
-                edit_number_at(&mut image, field.name, index, NumberInput::Next, b'.').unwrap();
+                edit_number_at(&mut image, &field.name, index, NumberInput::Next, b'.').unwrap();
                 assert_eq!(
-                    edit_number_at(&mut image, field.name, index, NumberInput::Display, b'.')
+                    edit_number_at(&mut image, &field.name, index, NumberInput::Display, b'.')
                         .unwrap()
                         .candidate,
                     field.minimum
                 );
-                edit_number_at(&mut image, field.name, index, NumberInput::Previous, b'.').unwrap();
+                edit_number_at(&mut image, &field.name, index, NumberInput::Previous, b'.')
+                    .unwrap();
                 assert_eq!(
-                    edit_number_at(&mut image, field.name, index, NumberInput::Display, b'.')
+                    edit_number_at(&mut image, &field.name, index, NumberInput::Display, b'.')
                         .unwrap()
                         .candidate,
                     field.maximum
                 );
                 let before = image.memory().to_vec();
                 assert!(
-                    edit_number_at(&mut image, field.name, field.count, NumberInput::Next, b'.')
-                        .is_err()
+                    edit_number_at(
+                        &mut image,
+                        &field.name,
+                        field.count,
+                        NumberInput::Next,
+                        b'.'
+                    )
+                    .is_err()
                 );
                 assert!(
                     edit_number_at(
                         &mut image,
-                        field.name,
+                        &field.name,
                         usize::MAX,
                         NumberInput::Text(b"1"),
                         b'.'
