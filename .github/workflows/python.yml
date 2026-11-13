@@ -1,0 +1,79 @@
+name: Python bindings
+
+'on':
+  push:
+    branches: [main]
+    paths: &paths
+      # The core is a path dependency; the binding has its own lockfile.
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'bindings/python/**'
+      - 'LICENSE-MIT'
+      - 'LICENSE-APACHE'
+      - 'Makefile'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'rustfmt.toml'
+      - '.rustfmt.toml'
+      - 'clippy.toml'
+      - '.clippy.toml'
+      - '.github/workflows/python.yml'
+      - '.github/workflows/actions.lock'
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Python bindings
+    runs-on: ubuntu-latest-self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
+        with:
+          cache: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version-file: bindings/python/pyproject.toml
+      - name: Create an isolated Python environment
+        run: |
+          venv="$RUNNER_TEMP/python-venv"
+          python -m venv "$venv"
+          printf 'PYTHON=%s\nPYO3_PYTHON=%s\n' "$venv/bin/python" "$venv/bin/python" >> "$GITHUB_ENV"
+          printf 'PYTHON_TARGET_DIR=%s\n' "$RUNNER_TEMP/python-target" >> "$GITHUB_ENV"
+      - name: Install the declared build backend
+        run: |
+          "$PYTHON" - <<'PY'
+          import subprocess
+          import sys
+          import tomllib
+
+          with open("bindings/python/pyproject.toml", "rb") as source:
+              requirements = tomllib.load(source)["build-system"]["requires"]
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *requirements])
+          PY
+      - name: Fetch locked binding dependencies
+        run: cargo fetch --locked --manifest-path bindings/python/Cargo.toml
+      - name: Check native formatting, Clippy, tests, and documentation
+        run: make quality TARGETS=python
+      - name: Build the wheel
+        run: make build TARGETS=python
+      - name: Install the wheel
+        run: '"$PYTHON" -m pip install --no-deps "$PYTHON_TARGET_DIR"/wheels/*.whl'
+      - name: Test the installed wheel
+        run: |
+          "$PYTHON" -I -c 'import cs705; print(cs705.__file__)'
+          make test TARGETS=python TESTS=wheel
