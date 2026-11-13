@@ -30,6 +30,7 @@ html(lang="ja")
           li メモリー、レピーター、GPS、コールサイン、スキャンエッジのCSV入出力。CS-705の変換規則に基づく周波数・オフセット・トーン・座標・固定長の名前の処理
           li クローンフレームの符号化・復号、識別応答とプロファイルの照合、読出し・書込みセッション、転送範囲の選択、パケットのチェックサムと受信範囲の検査、完了・失敗結果の取得。#[code Transport] による接続済み通信路の読み書き・時刻・待機・送信残量・再設定・切断の提供と、OSのシリアル実装・プロトコル処理の分離
         p コアライブラリの外部依存は #[code md5] のみで、GUIやシリアルドライバーには依存しません。リバースエンジニアリングで得たデータ構造・処理順序・通信形式は #[a(href="https://github.com/mi2428/cs705-rs/blob/main/NOTES.md") NOTES.md] で公開しています。
+        p #[code PyO3] によるPythonバインディングも備え、同じRustコアをインプロセスの #[code cs705] CPython拡張として利用できます。バイト列中心のデータ表現とネイティブのエラー情報を保持したまま、サブプロセスの起動やファイル形式の再実装なしにJupyter・Pandas・Matplotlibと組み合わせられます。
 
       div(lang="en")
         p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs] is a Rust library for configuration files and clone transfers on the #[a(href="https://www.icomjapan.com/lineup/products/IC-705/") Icom IC-705]. It reconstructs settings images, record encoding, edit-time corrections, document I/O and transfer sessions by reverse engineering the executable of the Windows programming software #[a(href="https://www.icomjapan.com/support/firmware_driver/4423/") CS-705 v1.30]. Its APIs operate on byte arrays and typed values rather than automating the original GUI.
