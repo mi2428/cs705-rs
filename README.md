@@ -200,6 +200,10 @@ $ make test TARGETS=python TESTS=wheel PYTHON="$PYTHON"
 The Makefile defaults to the Rust library; use `TARGETS=rust,python` to check both components.
 If Cargo's offline checks lack dependencies, run `cargo fetch --locked --manifest-path bindings/python/Cargo.toml` first.
 
+>[!TIP]
+> Prebuilt wheels for Linux AMD64 are available on [PyPI](https://pypi.org/project/cs705/).
+> Install with `python3 -m pip install cs705`; no Rust toolchain is required.
+
 ## License
 
 Licensed under either the [MIT](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-MIT) or the [Apache-2.0](https://github.com/mi2428/cs705-rs/blob/main/LICENSE-APACHE), at your option.
