@@ -4,7 +4,7 @@ html(lang="ja")
     meta(charset="utf-8")
     meta(name="viewport" content="width=device-width, initial-scale=1")
     meta(name="google-site-verification" content="y3QMeZq4x1X9mwjZc0PIqNrkrwHsfXA89HKB87lfH7c")
-    meta(name="description" content="A Rust library for IC-705 ICF files, configuration editing, CSV conversion and clone transfers.")
+    meta(name="description" content="A Rust library for Icom IC-705 configuration files, CSV conversion and clone transfers. Build tools for Linux and macOS without running Windows CS-705.")
     title cs705-rs — IC-705 Configuration Library
     style.
       body { max-width: 48rem; margin: 4rem auto; padding: 0 1.25rem; font: 1rem/1.7 system-ui, sans-serif; color: #222; background: #fff; overflow-wrap: anywhere; }
@@ -20,7 +20,7 @@ html(lang="ja")
       h1 cs705-rs
 
       div(lang="ja")
-        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs]は、#[a(href="https://www.icom.co.jp/lineup/products/IC-705/") Icom IC-705] の設定ファイルとクローン通信を扱うRustライブラリです。Windows用プログラミングソフトウェア #[a(href="https://www.icom.co.jp/support/drivers/8597/") CS-705 v1.30] の実行ファイルをリバースエンジニアリングし、設定イメージ、レコードの符号化、編集時の補正、文書の読込・保存、転送セッションをRustで再構成しています。CS-705のGUIを自動操作するのではなく、バイト列と型付きの値を入出力するライブラリとして利用できます。
+        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs]は、#[a(href="https://www.icom.co.jp/lineup/products/IC-705/") Icom IC-705] の設定ファイルとクローン通信を扱うRustライブラリです。Windows用プログラミングソフトウェア #[a(href="https://www.icom.co.jp/support/drivers/8597/") CS-705 v1.30] の実行ファイルをリバースエンジニアリングし、設定イメージ、レコードの符号化、編集時の補正、文書の読込・保存、転送セッションをRustで再構成しています。CS-705のGUIを自動操作するのではなく、バイト列と型付きの値を入出力するライブラリとして利用できます。LinuxやmacOSで、Windows版CS-705に頼らずIC-705の設定ファイルを編集したり、設定ツールを自作したりするためのライブラリとして利用できます。
         p 目的は、運用中の周波数を切り替えるリグコントロールではなく、メモリーや各種設定をまとめた設定イメージの編集・変換・転送です。保存したICFを読み込み、レピーターの周波数やトーンを一括更新する、運用地別にグループを組み直す、フィルターやCW設定を揃える、といった処理をプログラムに組み込めます。ファイル処理と通信処理は分離されており、無線機を接続せずに編集結果をICFとして生成できます。
         ul
           li ICFのパース・書出し、内部リビジョンとデータ範囲の検査、正規形式のCD（MD5）検証と再生成。正規形式のMapRev 6パーサーとCS-705の読込動作を再構成したリーダーの個別提供、および専用APIによるMapRev 1〜6のイメージ変換
@@ -33,7 +33,7 @@ html(lang="ja")
         p #[code PyO3] によるPythonバインディングも備え、同じRustコアをインプロセスの #[code cs705] CPython拡張として利用できます。バイト列中心のデータ表現とネイティブのエラー情報を保持したまま、サブプロセスの起動やファイル形式の再実装なしにJupyter・Pandas・Matplotlibと組み合わせられます。
 
       div(lang="en")
-        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs] is a Rust library for configuration files and clone transfers on the #[a(href="https://www.icomjapan.com/lineup/products/IC-705/") Icom IC-705]. It reconstructs settings images, record encoding, edit-time corrections, document I/O and transfer sessions by reverse engineering the executable of the Windows programming software #[a(href="https://www.icomjapan.com/support/firmware_driver/4423/") CS-705 v1.30]. Its APIs operate on byte arrays and typed values rather than automating the original GUI.
+        p #[a(href="https://github.com/mi2428/cs705-rs") cs705-rs] is a Rust library for configuration files and clone transfers on the #[a(href="https://www.icomjapan.com/lineup/products/IC-705/") Icom IC-705]. It reconstructs settings images, record encoding, edit-time corrections, document I/O and transfer sessions by reverse engineering the executable of the Windows programming software #[a(href="https://www.icomjapan.com/support/firmware_driver/4423/") CS-705 v1.30]. Its APIs operate on byte arrays and typed values rather than automating the original GUI. Use it to edit IC-705 configuration files or build your own configuration tools on Linux and macOS without running Windows CS-705.
         p The scope is editing, converting and transferring configuration images, rather than live rig control. Applications can load a saved ICF, batch-update repeater frequencies and tones, reorganize groups for different operating locations, or apply consistent filter and CW preferences. File processing is independent of the transport, so edited ICF files can be generated without a connected radio.
         ul
           li ICF parsing and serialization, internal revision and coverage checks, and CD (MD5) verification and regeneration for canonical files. The canonical MapRev 6 parser and the reconstructed CS-705 reader are separate entry points; dedicated APIs convert images between MapRev 1–6 layouts.
