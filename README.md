@@ -167,10 +167,10 @@ Never retry a failed or unconfirmed write automatically; acknowledgement is not 
 Use a Python interpreter supported by [`bindings/python/pyproject.toml`](bindings/python/pyproject.toml) and the Rust toolchain declared in [`rust-toolchain.toml`](rust-toolchain.toml).
 From the repository root, build and install the bindings into a virtual environment:
 
-```sh
-python3 -m venv bindings/python/target/venv
-PYTHON="$PWD/bindings/python/target/venv/bin/python"
-"$PYTHON" -m pip install ./bindings/python
+```console
+$ python3 -m venv bindings/python/target/venv
+$ PYTHON="$PWD/bindings/python/target/venv/bin/python"
+$ "$PYTHON" -m pip install ./bindings/python
 ```
 
 List the saved logical channels in a canonical MapRev 6 ICF file without radio I/O.
@@ -192,9 +192,9 @@ for group, bank in enumerate(image.memory_groups()):
 
 To check the native bindings and the installed package, run:
 
-```sh
-make quality TARGETS=python PYTHON="$PYTHON"
-make test TARGETS=python TESTS=wheel PYTHON="$PYTHON"
+```console
+$ make quality TARGETS=python PYTHON="$PYTHON"
+$ make test TARGETS=python TESTS=wheel PYTHON="$PYTHON"
 ```
 
 The Makefile defaults to the Rust library; use `TARGETS=rust,python` to check both components.
