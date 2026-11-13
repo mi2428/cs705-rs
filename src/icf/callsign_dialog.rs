@@ -71,7 +71,10 @@ pub struct ListOutcome {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn window(bytes: &[u8], at: usize, len: usize) -> Result<&[u8], Error> {
     bytes
@@ -908,9 +911,9 @@ mod tests {
         assert!(matches!(
             error,
             Error::Invalid {
-                reason: "Area CQ native AnsiString index9 unavailable",
+                reason,
                 ..
-            }
+            } if reason == "Area CQ native AnsiString index9 unavailable"
         ));
         assert_eq!(h.channel_field(C::FrequencyHz), 145_200_000);
         assert_eq!(h.mode(), 0x11);

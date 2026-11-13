@@ -250,7 +250,7 @@ mod tests {
         fn compare(&mut self, _: &[u8], _: &[u8]) -> Result<i32, crate::icf::Error> {
             Err(crate::icf::Error::Invalid {
                 line: 0,
-                reason: "unexpected native path comparison",
+                reason: "unexpected native path comparison".into(),
             })
         }
     }

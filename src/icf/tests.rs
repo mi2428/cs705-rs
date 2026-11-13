@@ -124,7 +124,7 @@ fn converts_rev5_with_independent_expected_delta_and_checksums() {
         convert_map_rev5_to6(&output),
         Err(Error::Unsupported {
             line: 3,
-            reason: "MapRev other than 5",
+            reason: "MapRev other than 5".into(),
         })
     );
     let lf: Vec<_> = source.iter().copied().filter(|b| *b != b'\r').collect();
@@ -159,7 +159,7 @@ fn rejects_invalid_rev5_before_conversion_without_mutating_input() {
             rev5_fixture(&memory, revision, b"R1 synthetic"),
             Error::Unsupported {
                 line: 3,
-                reason: "MapRev other than 5",
+                reason: "MapRev other than 5".into(),
             },
         );
     }
@@ -172,7 +172,7 @@ fn rejects_invalid_rev5_before_conversion_without_mutating_input() {
             rev5_fixture(&changed, "5", b"R1 synthetic"),
             Error::Unsupported {
                 line: 6834,
-                reason: "internal MapRev other than 5",
+                reason: "internal MapRev other than 5".into(),
             },
         );
     }
@@ -182,7 +182,7 @@ fn rejects_invalid_rev5_before_conversion_without_mutating_input() {
         rev5_fixture(&changed, "5", b"R1 synthetic"),
         Error::Invalid {
             line: 7762,
-            reason: "image signature",
+            reason: "image signature".into(),
         },
     );
     let mut changed = source.clone();
@@ -196,7 +196,7 @@ fn rejects_invalid_rev5_before_conversion_without_mutating_input() {
         changed,
         Error::Invalid {
             line: 4,
-            reason: "EtcData integrity bits",
+            reason: "EtcData integrity bits".into(),
         },
     );
     let mut changed = source.clone();
@@ -244,14 +244,14 @@ fn scalar_error(
     operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) -> Error {
     let before = image.memory().to_vec();
-    let source = image.source;
+    let source = image.source.clone();
     let error = operation(image).unwrap_err();
     assert!(if invalid {
         matches!(error, Error::Invalid { .. })
     } else {
         matches!(error, Error::Unsupported { .. })
     });
-    assert_setting_state(image, source, &before);
+    assert_setting_state(image, &source, &before);
     error
 }
 
@@ -262,10 +262,10 @@ fn scalar_replace(
     operation: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) {
     let mut expected = image.memory().to_vec();
-    let source = image.source;
+    let source = image.source.clone();
     expected[at..at + bytes.len()].copy_from_slice(bytes);
     operation(image).unwrap();
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
@@ -1714,7 +1714,7 @@ fn dsp_change(
 ) {
     operation(image).unwrap();
     expected[at] = raw;
-    assert_setting_state(image, image.source, expected);
+    assert_setting_state(image, &image.source, expected);
 }
 
 fn dsp_roundtrip(image: &Icf<'_>, expected: &[u8], cd: &str, file_md5: &str) {
@@ -2652,7 +2652,7 @@ fn rejects_invalid_logical_links_and_flags_without_mutation() {
                 error,
                 Error::Unsupported {
                     line: 5 + if offset == 0x36114 { base + 1 } else { offset } / 32,
-                    reason
+                    reason: reason.into(),
                 }
             );
         });
@@ -2670,7 +2670,7 @@ fn rejects_invalid_logical_links_and_flags_without_mutation() {
             image.memory_groups().err(),
             Some(Error::Unsupported {
                 line: 5 + (0x35d2c + 2 * 99) / 32,
-                reason: "logical memory link remains after 100 rows",
+                reason: "logical memory link remains after 100 rows".into(),
             })
         );
     });
@@ -2752,7 +2752,7 @@ fn rejects_checksum_valid_foreign_profiles_and_corrupt_metadata() {
             Icf::parse(&source).err(),
             Some(Error::Unsupported {
                 line: 6834,
-                reason: "internal MapRev other than 6",
+                reason: "internal MapRev other than 6".into(),
             })
         );
     }
@@ -2761,7 +2761,7 @@ fn rejects_checksum_valid_foreign_profiles_and_corrupt_metadata() {
         Icf::parse(&source).err(),
         Some(Error::Invalid {
             line: 7762,
-            reason: "image signature",
+            reason: "image signature".into(),
         })
     );
 
@@ -2775,7 +2775,7 @@ fn rejects_checksum_valid_foreign_profiles_and_corrupt_metadata() {
             Icf::parse(&changed).err(),
             Some(Error::Invalid {
                 line: 4,
-                reason: "EtcData integrity bits",
+                reason: "EtcData integrity bits".into(),
             })
         );
     }
@@ -2875,16 +2875,16 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     for (raw, &value) in values.iter().enumerate() {
         write(image, value).unwrap();
         expected[offset] = raw as u8;
         assert_eq!(read(image), Ok(value));
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
         write(image, values[0]).unwrap();
         expected[offset] = 0;
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
     }
     for unknown in [values.len() as u8, 255] {
         image.memory[offset] = unknown;
@@ -2896,13 +2896,13 @@ fn check_expanded_setting<T: Copy + fmt::Debug + PartialEq>(
             write(image, value).unwrap();
             expected[offset] = raw as u8;
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
     image.memory[offset] = 0;
     write(image, *values.last().unwrap()).unwrap();
     expected[offset] = (values.len() - 1) as u8;
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
@@ -3169,7 +3169,7 @@ fn check_numeric_values<T: Copy + fmt::Debug + PartialEq, const N: usize>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     // Repeat edits to prove setters accept every supported current value.
     for _ in 0..2 {
@@ -3177,7 +3177,7 @@ fn check_numeric_values<T: Copy + fmt::Debug + PartialEq, const N: usize>(
             write(image, value).unwrap();
             expected[offset..offset + N].copy_from_slice(&bytes);
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
 }
@@ -3360,12 +3360,12 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
     read: impl Fn(&Icf<'_>) -> Result<T, Error>,
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let original = image.memory().to_vec();
     let serialized = image.to_bytes();
     for &value in invalid {
         assert!(matches!(write(image,value), Err(Error::Invalid {line,..}) if line==5+offset/32));
-        assert_setting_state(image, source, &original);
+        assert_setting_state(image, &source, &original);
     }
     assert_eq!(image.to_bytes(), serialized);
     for bytes in current {
@@ -3375,20 +3375,20 @@ fn check_numeric_errors<T: Copy + fmt::Debug + PartialEq, const N: usize>(
         let serialized = image.to_bytes();
         let error = read(image).unwrap_err();
         assert!(matches!(error,Error::Unsupported {line,..} if line==5+offset/32));
-        assert_setting_state(image, source, &expected);
+        assert_setting_state(image, &source, &expected);
         // Invalid new input wins even when the stored current value is invalid.
         for &value in invalid {
             assert!(
                 matches!(write(image,value),Err(Error::Invalid {line,..}) if line==5+offset/32)
             );
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
         assert_eq!(image.to_bytes(), serialized);
         write(image, valid).unwrap();
         assert_eq!(read(image), Ok(valid));
         assert_eq!(&image.memory()[..offset], &original[..offset]);
         assert_eq!(&image.memory()[offset + N..], &original[offset + N..]);
-        assert_eq!(image.original_bytes(), source);
+        assert_eq!(image.original_bytes(), source.as_ref());
     }
     image.memory[offset..offset + N].copy_from_slice(&original[offset..offset + N]);
 }
@@ -4243,7 +4243,7 @@ fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
     write: impl Fn(&mut Icf<'_>, T) -> Result<(), Error>,
 ) {
     let (offset, mask, shift) = field;
-    let source = image.source;
+    let source = image.source.clone();
     let mut expected = image.memory().to_vec();
     for original in 0..=u8::MAX {
         let code = usize::from((original & mask) >> shift);
@@ -4261,7 +4261,7 @@ fn check_masked_selector<T: Copy + fmt::Debug + PartialEq>(
             write(image, value).unwrap();
             expected[offset] = (original & !mask) | ((new_code as u8) << shift);
             assert_eq!(read(image), Ok(value));
-            assert_setting_state(image, source, &expected);
+            assert_setting_state(image, &source, &expected);
         }
     }
 }
@@ -5461,14 +5461,14 @@ fn message_rejected(
     error: (bool, usize),
     call: impl FnOnce(&mut Icf<'_>) -> Result<(), Error>,
 ) {
-    let source = image.source;
+    let source = image.source.clone();
     let expected = image.memory().to_vec();
     match call(image).unwrap_err() {
         Error::Invalid { line, .. } if error.0 => assert_eq!(line, error.1),
         Error::Unsupported { line, .. } if !error.0 => assert_eq!(line, error.1),
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_setting_state(image, source, &expected);
+    assert_setting_state(image, &source, &expected);
 }
 
 #[test]
@@ -6534,7 +6534,7 @@ fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
         "A7D39FCCDFB74B874D4FA6780B294292",
         Error::Unsupported {
             line: 7324,
-            reason: "beep-level limit value other than OFF or ON",
+            reason: "beep-level limit value other than OFF or ON".into(),
         },
         |image| image.beep_level_limit(),
         |image, value| image.set_beep_level_limit(value),
@@ -6548,7 +6548,7 @@ fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
         "CF82DEF9D62FB7462650E4B5AB0BBA79",
         Error::Unsupported {
             line: 7324,
-            reason: "home-channel beep value other than OFF or ON",
+            reason: "home-channel beep value other than OFF or ON".into(),
         },
         |image| image.home_channel_beep(),
         |image, value| image.set_home_channel_beep(value),
@@ -6576,7 +6576,7 @@ fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
         "E5CCFE4749DCDFCA01BF2754C5535BC2",
         Error::Unsupported {
             line: 7324,
-            reason: "band-edge beep selection outside 0 through 3",
+            reason: "band-edge beep selection outside 0 through 3".into(),
         },
         |image| image.band_edge_beep(),
         |image, value| image.set_band_edge_beep(value),
@@ -6609,7 +6609,7 @@ fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
         "2635A6B6CD5E53A3886D920395BAF954",
         Error::Unsupported {
             line: 7325,
-            reason: "auto power-off selection outside 0 through 4",
+            reason: "auto power-off selection outside 0 through 4".into(),
         },
         |image| image.auto_power_off(),
         |image, value| image.set_auto_power_off(value),
@@ -6625,7 +6625,7 @@ fn edits_common_settings_and_explicitly_replaces_every_unknown_current_value() {
         "CA308E2BEEB3478BDF8EF26F6B3AF0F8",
         Error::Unsupported {
             line: 7325,
-            reason: "power-save selection outside 0 through 3",
+            reason: "power-save selection outside 0 through 3".into(),
         },
         |image| image.power_save(),
         |image, value| image.set_power_save(value),
@@ -6650,7 +6650,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "3A4AA85B7E60E01232E077B2094951F6",
         Error::Unsupported {
             line: 7325,
-            reason: "quick-split value other than OFF or ON",
+            reason: "quick-split value other than OFF or ON".into(),
         },
         |image| image.quick_split(),
         |image, value| image.set_quick_split(value),
@@ -6664,7 +6664,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "8F564D7A79F0ED4C5175F8F8AA345A56",
         Error::Unsupported {
             line: 7325,
-            reason: "split-lock value other than OFF or ON",
+            reason: "split-lock value other than OFF or ON".into(),
         },
         |image| image.split_lock(),
         |image, value| image.set_split_lock(value),
@@ -6691,7 +6691,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "B4D4B00FDE7A7AF383892616E6452F9B",
         Error::Unsupported {
             line: 7325,
-            reason: "received callsign speech selection outside 0 through 2",
+            reason: "received callsign speech selection outside 0 through 2".into(),
         },
         |image| image.received_callsign_speech(),
         |image, value| image.set_received_callsign_speech(value),
@@ -6705,7 +6705,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "55A1B22FE54F866D1E4F1FF4A1963E18",
         Error::Unsupported {
             line: 7325,
-            reason: "RX-to-CS speech value other than OFF or ON",
+            reason: "RX-to-CS speech value other than OFF or ON".into(),
         },
         |image| image.rx_cs_speech(),
         |image, value| image.set_rx_cs_speech(value),
@@ -6719,7 +6719,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "93614F7F028691D292C80FC439E4810E",
         Error::Unsupported {
             line: 7325,
-            reason: "MIC Up/Down speech value other than OFF or ON",
+            reason: "MIC Up/Down speech value other than OFF or ON".into(),
         },
         |image| image.mic_up_down_speech(),
         |image, value| image.set_mic_up_down_speech(value),
@@ -6733,7 +6733,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "57D2C2802A250384820ABAE71F326765",
         Error::Unsupported {
             line: 7325,
-            reason: "S-meter level speech value other than OFF or ON",
+            reason: "S-meter level speech value other than OFF or ON".into(),
         },
         |image| image.s_meter_level_speech(),
         |image, value| image.set_s_meter_level_speech(value),
@@ -6747,7 +6747,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "D3D9A18FE74837AECEB0DBA66D175035",
         Error::Unsupported {
             line: 7325,
-            reason: "mode speech value other than OFF or ON",
+            reason: "mode speech value other than OFF or ON".into(),
         },
         |image| image.mode_speech(),
         |image, value| image.set_mode_speech(value),
@@ -6769,7 +6769,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "14040B1BCC5DF1541DB5A6996405C388",
         Error::Unsupported {
             line: 7325,
-            reason: "speech language selection outside 0 through 1",
+            reason: "speech language selection outside 0 through 1".into(),
         },
         |image| image.speech_language(),
         |image, value| image.set_speech_language(value),
@@ -6791,7 +6791,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "F8C3E5BF1AFFB2EDDE1874941800E6E4",
         Error::Unsupported {
             line: 7325,
-            reason: "speech alphabet selection outside 0 through 1",
+            reason: "speech alphabet selection outside 0 through 1".into(),
         },
         |image| image.speech_alphabet(),
         |image, value| image.set_speech_alphabet(value),
@@ -6805,7 +6805,7 @@ fn edits_split_speech_settings_and_explicitly_replaces_every_unknown_current_val
         "12A654387530F5BDD0AB642ABFC690EE",
         Error::Unsupported {
             line: 7325,
-            reason: "speech speed selection outside 0 through 1",
+            reason: "speech speed selection outside 0 through 1".into(),
         },
         |image| image.speech_speed(),
         |image, value| image.set_speech_speed(value),

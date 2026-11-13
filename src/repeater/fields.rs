@@ -176,7 +176,9 @@ pub fn paint_meta(
     key: u16,
 ) -> Result<PaintMeta, Error> {
     if holder.kind() != 0x0c {
-        return Err(Error::Invalid("repeater paint requires a type0C holder"));
+        return Err(Error::Invalid(
+            "repeater paint requires a type0C holder".into(),
+        ));
     }
     paint_meta_bytes(holder.as_bytes(), key)
 }
@@ -184,7 +186,7 @@ pub fn paint_meta(
 pub(crate) fn paint_meta_bytes(bytes: &[u8; 616], key: u16) -> Result<PaintMeta, Error> {
     if !(0x144..=0x153).contains(&key) {
         return Err(Error::Invalid(
-            "repeater paint key outside native row fields",
+            "repeater paint key outside native row fields".into(),
         ));
     }
     let k = super::staging::classify_bytes(bytes);
@@ -245,7 +247,7 @@ pub fn candidate_allowed(
     }
     if candidate > 3 {
         return Err(Error::SourceUnavailable(
-            "repeater candidate table outside finite domain",
+            "repeater candidate table outside finite domain".into(),
         ));
     }
     let k = classify(row);
@@ -263,7 +265,11 @@ pub fn candidate_allowed(
             4 => candidate == 3,
             _ => false,
         },
-        _ => return Err(Error::Invalid("candidate filter requires Mode or Duplex")),
+        _ => {
+            return Err(Error::Invalid(
+                "candidate filter requires Mode or Duplex".into(),
+            ));
+        }
     })
 }
 
@@ -498,7 +504,7 @@ mod tests {
                 },
                 source(),
                 &mut e,
-                || Err(Error::SourceUnavailable("injected seed failure")),
+                || Err(Error::SourceUnavailable("injected seed failure".into())),
                 |_| panic!()
             )
             .is_err()
@@ -638,7 +644,7 @@ mod tests {
                     candidate: 2
                 },
                 &mut e,
-                |_| Err(Error::Operation("injected typed save failure")),
+                |_| Err(Error::Operation("injected typed save failure".into())),
                 |_| panic!()
             )
             .is_err()
@@ -752,7 +758,7 @@ mod tests {
                 600051,
                 &mut e,
                 |_| Ok(()),
-                |_| Err(Error::Operation("injected offset save failure"))
+                |_| Err(Error::Operation("injected offset save failure".into()))
             )
             .is_err()
         );

@@ -123,6 +123,14 @@ impl Staging {
         names: [[u8; 16]; 50],
         old_reference: u16,
     ) -> Result<Self, Error> {
+        Self::preload_fallible(rows.into_iter().map(Ok), names, old_reference)
+    }
+    /// Stop a supplied fallible iterator at its first failure or native row cap.
+    pub fn preload_fallible(
+        rows: impl IntoIterator<Item = Result<Record, Error>>,
+        names: [[u8; 16]; 50],
+        old_reference: u16,
+    ) -> Result<Self, Error> {
         let mut s = Self {
             arena: Vec::new(),
             order: Vec::new(),
@@ -134,9 +142,10 @@ impl Staging {
             old_reference_existed: old_reference != u16::MAX,
             counts: Counts::default(),
         };
-        for (index, mut row) in rows.into_iter().enumerate() {
+        for (index, row) in rows.into_iter().enumerate() {
+            let mut row = row?;
             if index >= 2500 {
-                return Err(Error::Limit("repeater preload exceeds 2500 rows"));
+                return Err(Error::Limit("repeater preload exceeds 2500 rows".into()));
             }
             if row.bytes[12] & 1 == 0 {
                 continue;
@@ -144,7 +153,7 @@ impl Staging {
             let g = usize::try_from(row.group())
                 .ok()
                 .filter(|g| *g < 50)
-                .ok_or(Error::Invalid("repeater group outside 0..50"))?;
+                .ok_or(Error::Invalid("repeater group outside 0..50".into()))?;
             row.bytes[0x134] = 0;
             row.bytes[0x135] = u8::from(index == usize::from(old_reference));
             s.initial_empty[g] = false;
@@ -194,7 +203,9 @@ impl Staging {
         delta: u32,
     ) -> Result<u32, Error> {
         if group >= 50 {
-            return Err(Error::Invalid("selected repeater group outside 0..50"));
+            return Err(Error::Invalid(
+                "selected repeater group outside 0..50".into(),
+            ));
         }
         input.bytes[0x134] = 1;
         let mut append = true;
@@ -300,7 +311,7 @@ impl Staging {
             .ok()
             .filter(|g| *g < 50)
             .ok_or(Error::Invalid(
-                "whole CSV group outside normal 0..50 domain",
+                "whole CSV group outside normal 0..50 domain".into(),
             ))?;
         let code = self.whole_match(input, name);
         if code == 0 {
@@ -352,7 +363,7 @@ impl Staging {
         } else {
             if self.pending.len() >= 100000 {
                 return Err(Error::Limit(
-                    "whole import pending queue exceeds safe bound",
+                    "whole import pending queue exceeds safe bound".into(),
                 ));
             }
             let id = self.allocate(input.cloned_with_header(clone_header));
@@ -429,7 +440,7 @@ impl Staging {
                 .checked_add(old_count)
                 .is_none_or(|end| end > 2500)
         {
-            return Err(Error::Invalid("selected flush bounds").into());
+            return Err(Error::Invalid("selected flush bounds".into()).into());
         }
         for _ in 0..old_count {
             apply(Commit::Delete {
@@ -442,16 +453,18 @@ impl Staging {
             let row = &self.arena[*id];
             if row.group() == group as u32 {
                 if position >= 2500 {
-                    return Err(Error::Invalid("selected flush insertion outside 0..2500").into());
+                    return Err(
+                        Error::Invalid("selected flush insertion outside 0..2500".into()).into(),
+                    );
                 }
                 apply(Commit::Insert {
                     absolute: Some(position),
                     group,
                     record: row,
                 })?;
-                position = position
-                    .checked_add(1)
-                    .ok_or_else(|| E::from(Error::Invalid("selected flush insertion overflow")))?;
+                position = position.checked_add(1).ok_or_else(|| {
+                    E::from(Error::Invalid("selected flush insertion overflow".into()))
+                })?;
                 restore |= row.bytes[0x135] != 0;
             }
         }
@@ -467,7 +480,7 @@ impl Staging {
         mut apply: impl FnMut(Commit<'_>) -> Result<(), E>,
     ) -> Result<(), E> {
         if old_total > 2500 {
-            return Err(Error::Invalid("whole flush old total").into());
+            return Err(Error::Invalid("whole flush old total".into()).into());
         }
         for _ in 0..old_total {
             apply(Commit::Delete { absolute: 0 })?;
@@ -553,7 +566,7 @@ pub fn restore_use(
         let mut at = source.first;
         loop {
             if reads >= read_budget {
-                return Err(Error::Limit("explicit preserve source read budget"));
+                return Err(Error::Limit("explicit preserve source read budget".into()));
             }
             reads += 1;
             let old = read(source.raw, at)?;
@@ -583,6 +596,37 @@ pub fn restored_reference(rows: &[Record], new_absolute_start: u32, old_referenc
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fallible_preload_stops_at_the_native_failure_and_row_cap() {
+        let blank = Record {
+            bytes: Box::new([0; 616]),
+            frequency_class: 0,
+        };
+        let mut calls = 0;
+        let source = std::iter::from_fn(|| {
+            calls += 1;
+            Some(match calls {
+                1 => Ok(blank.clone()),
+                2 => Err(Error::Operation("preload source failed".into())),
+                _ => panic!("preload continued after source failure"),
+            })
+        });
+        assert!(matches!(
+            Staging::preload_fallible(source, [[b' '; 16]; 50], u16::MAX),
+            Err(Error::Operation(reason)) if reason == "preload source failed"
+        ));
+        assert_eq!(calls, 2);
+        let mut calls = 0;
+        let source = std::iter::repeat_with(|| {
+            calls += 1;
+            Ok(blank.clone())
+        });
+        assert!(matches!(
+            Staging::preload_fallible(source, [[b' '; 16]; 50], u16::MAX),
+            Err(Error::Limit(_))
+        ));
+        assert_eq!(calls, 2501);
+    }
     fn row(group: u32, key: u8, k: u32, use_value: u32) -> Record {
         let mut r = Record {
             bytes: Box::new([0; 616]),
@@ -650,7 +694,9 @@ mod tests {
         let failure = s.flush_selected(2, 10, 2, |a| {
             match a {
                 Commit::Delete { absolute } => actions.push(absolute),
-                Commit::Insert { .. } => return Err(Error::Operation("injected typed failure")),
+                Commit::Insert { .. } => {
+                    return Err(Error::Operation("injected typed failure".into()));
+                }
                 _ => panic!(),
             }
             Ok(())
@@ -696,7 +742,7 @@ mod tests {
                 if let Commit::Insert { .. } = event {
                     inserts += 1;
                     if inserts == 2 {
-                        return Err(Error::Operation("injected second insertion failure"));
+                        return Err(Error::Operation("injected second insertion failure".into()));
                     }
                 }
                 Ok(())
@@ -776,7 +822,9 @@ mod tests {
                 &mut rows,
                 source,
                 2,
-                |_, _| Err(Error::SourceUnavailable("unwritten source unreadable")),
+                |_, _| Err(Error::SourceUnavailable(
+                    "unwritten source unreadable".into()
+                )),
                 |_, _| panic!()
             )
             .is_err()

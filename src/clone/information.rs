@@ -9,6 +9,7 @@ use crate::icf::document::{
     self,
     lifecycle::{RecentFiles, UiState},
 };
+use std::borrow::Cow;
 
 /// Receivers borrow the real document and shared session, never a copied image.
 pub struct DocumentReceiver<'a> {
@@ -37,7 +38,7 @@ pub enum Life {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     pub argument: i64,
     pub bytes: Vec<u8>,
 }
@@ -219,7 +220,7 @@ mod tests {
         let values = [
             Ok(b"COM300".to_vec()),
             Ok(b"COM2".to_vec()),
-            Err(Error::Invalid("captured native exception")),
+            Err(Error::Invalid("captured native exception".into())),
         ];
         c.events.clear();
         assert!(c.refresh(&registry(&values)).is_err());
@@ -314,7 +315,7 @@ mod tests {
             c.events
                 .iter()
                 .filter(|e| e.name != "native_return_ignored")
-                .map(|e| (e.name, e.argument))
+                .map(|e| (e.name.as_ref(), e.argument))
                 .collect::<Vec<_>>(),
             [
                 ("cancel_close_request", 0),
@@ -489,7 +490,7 @@ mod tests {
         assert!(
             c.select(&ReadMode::Captured(vec![
                 Ok(0),
-                Err(Error::Invalid("captured getter error"))
+                Err(Error::Invalid("captured getter error".into()))
             ]))
             .is_err()
         );
@@ -642,14 +643,14 @@ impl Controller {
     }
     fn event(&mut self, name: &'static str, argument: i64) {
         self.events.push(Event {
-            name,
+            name: name.into(),
             argument,
             bytes: Vec::new(),
         });
     }
     fn set_text(&mut self, text: Vec<u8>) {
         self.events.push(Event {
-            name: "set_text",
+            name: "set_text".into(),
             argument: 0,
             bytes: text.clone(),
         });
@@ -660,7 +661,7 @@ impl Controller {
             ReadMode::Current => Ok(self.com),
             ReadMode::Captured(values) => values
                 .get(position)
-                .ok_or(Error::Invalid("captured COM read unavailable"))?
+                .ok_or(Error::Invalid("captured COM read unavailable".into()))?
                 .clone(),
         }
     }
@@ -669,7 +670,7 @@ impl Controller {
             ReadMode::Current => self.selected.map_or(-1, |index| index as i32),
             ReadMode::Captured(values) => values
                 .get(position)
-                .ok_or(Error::Invalid("captured ItemIndex read unavailable"))?
+                .ok_or(Error::Invalid("captured ItemIndex read unavailable".into()))?
                 .clone()?,
         };
         self.last_item_index = Some(value);
@@ -686,7 +687,7 @@ impl Controller {
             || (index >= 0 && index as usize >= self.candidates.len())
         {
             return Err(Error::Invalid(
-                "selection gesture outside current popup generation",
+                "selection gesture outside current popup generation".into(),
             ));
         }
         self.selected = if index < 0 {
@@ -702,7 +703,7 @@ impl Controller {
     pub fn input_text(&mut self, text: &[u8]) -> Result<(), Error> {
         if self.form != Life::Open || text.len() > 4 {
             return Err(Error::Invalid(
-                "COM input requires open form and at most four bytes",
+                "COM input requires open form and at most four bytes".into(),
             ));
         }
         self.set_text(text.to_vec());
@@ -712,7 +713,7 @@ impl Controller {
         let saved = self
             .text
             .clone()
-            .ok_or(Error::Invalid("actual COM text source unavailable"))?;
+            .ok_or(Error::Invalid("actual COM text source unavailable".into()))?;
         self.event("save_text", 0);
         self.dropdown.clear();
         self.text = None;
@@ -724,19 +725,19 @@ impl Controller {
             // The existing scale 0/step 1 primitive's i32 bounds never clamp it.
             let number = crate::icf::settings::extended::numeric_text(
                 value,
-                source
-                    .crt_point
-                    .ok_or(Error::Invalid("COM registry numeric source unavailable"))?,
+                source.crt_point.ok_or(Error::Invalid(
+                    "COM registry numeric source unavailable".into(),
+                ))?,
                 0,
                 i64::from(i32::MIN),
                 i64::from(i32::MAX),
                 1,
             )
-            .map_err(|_| Error::Invalid("COM registry numeric source unavailable"))?
+            .map_err(|_| Error::Invalid("COM registry numeric source unavailable".into()))?
             .0 as i32;
             self.dropdown.push(number);
             self.events.push(Event {
-                name: "dropdown_add",
+                name: "dropdown_add".into(),
                 argument: i64::from(number),
                 bytes: number.to_string().into_bytes(),
             });
@@ -752,7 +753,7 @@ impl Controller {
         reads: &ReadMode,
     ) -> Result<(), Error> {
         if self.form == Life::Open {
-            return Err(Error::Invalid("COM form already open"));
+            return Err(Error::Invalid("COM form already open".into()));
         }
         self.form = Life::Open;
         self.event("create_com_maxlength", 4);
@@ -780,7 +781,7 @@ impl Controller {
         self.generation = self
             .generation
             .checked_add(1)
-            .ok_or(Error::Invalid("search generation overflow"))?;
+            .ok_or(Error::Invalid("search generation overflow".into()))?;
         self.event("search_generation", self.generation as i64);
         if source.ready != 1 {
             return Ok(());
@@ -788,7 +789,7 @@ impl Controller {
         self.event("open_dll", 0);
         if !source
             .opened
-            .ok_or(Error::Invalid("OpenDll observation unavailable"))?
+            .ok_or(Error::Invalid("OpenDll observation unavailable".into()))?
         {
             return Ok(());
         }
@@ -812,7 +813,7 @@ impl Controller {
     }
     pub fn rescan(&mut self, source: &SearchSource<'_>) -> Result<(), Error> {
         if self.popup != Life::Open {
-            return Err(Error::Invalid("search popup not open"));
+            return Err(Error::Invalid("search popup not open".into()));
         }
         self.generate_candidates(source)
     }
@@ -820,10 +821,9 @@ impl Controller {
         if index < 0 {
             return Ok(-1);
         }
-        let value = self
-            .candidates
-            .get(index as usize)
-            .ok_or(Error::Invalid("live candidate index outside generation"))?;
+        let value = self.candidates.get(index as usize).ok_or(Error::Invalid(
+            "live candidate index outside generation".into(),
+        ))?;
         search::label_number(&value.label)
     }
     pub fn startup(&mut self, source: Option<&SearchSource<'_>>) -> Result<(), Error> {
@@ -832,7 +832,7 @@ impl Controller {
         }
         self.previous = self.com as u32;
         self.generate_candidates(
-            source.ok_or(Error::Invalid("startup search source unavailable"))?,
+            source.ok_or(Error::Invalid("startup search source unavailable".into()))?,
         )?;
         let number = self.label(self.selected.map_or(-1, |i| i as i32))?;
         if number != -1 {
@@ -860,7 +860,7 @@ impl Controller {
     }
     pub fn select(&mut self, reads: &ReadMode) -> Result<(), Error> {
         if self.popup != Life::Open {
-            return Err(Error::Invalid("search popup not open"));
+            return Err(Error::Invalid("search popup not open".into()));
         }
         self.search_result = -1;
         self.event("reset_search_result", -1);
@@ -876,7 +876,7 @@ impl Controller {
     }
     pub fn popup_close(&mut self) -> Result<(), Error> {
         if !matches!(self.popup, Life::Open | Life::ReleaseRequested) {
-            return Err(Error::Invalid("search popup not alive"));
+            return Err(Error::Invalid("search popup not alive".into()));
         }
         self.event("popup_close", 0);
         self.event("popup_release_request", 0);
@@ -889,7 +889,7 @@ impl Controller {
     }
     pub fn return_search(&mut self, registry: &RegistrySource<'_>) -> Result<(), Error> {
         if self.form != Life::Open {
-            return Err(Error::Invalid("COM form not open"));
+            return Err(Error::Invalid("COM form not open".into()));
         }
         self.refresh(registry)?;
         if self.search_result > 0 {
@@ -901,7 +901,7 @@ impl Controller {
         let text = self
             .text
             .clone()
-            .ok_or(Error::Invalid("current COM text source unavailable"))?;
+            .ok_or(Error::Invalid("current COM text source unavailable".into()))?;
         self.manual_commit(&text, busy_reads)
     }
     /// Explicit captured getter entry. It may contain more than keyboard 4 bytes.
@@ -918,7 +918,7 @@ impl Controller {
         let text = getter_text
             .map(ToOwned::to_owned)
             .or_else(|| self.text.clone())
-            .ok_or(Error::Invalid("current COM text source unavailable"))?;
+            .ok_or(Error::Invalid("current COM text source unavailable".into()))?;
         self.commit_body(&text, busy_reads, Some(receiver))
     }
     fn commit_body(
@@ -928,10 +928,10 @@ impl Controller {
         receiver: Option<&mut DocumentReceiver<'_>>,
     ) -> Result<(), Error> {
         if self.form != Life::Open || self.com_mode != Some(0) {
-            return Err(Error::Invalid("COM-mode form not open"));
+            return Err(Error::Invalid("COM-mode form not open".into()));
         }
         self.events.push(Event {
-            name: "get_com_text",
+            name: "get_com_text".into(),
             argument: 0,
             bytes: getter_text.to_vec(),
         });
@@ -956,7 +956,7 @@ impl Controller {
     ) -> Result<(), Error> {
         let first = *busy_reads
             .first()
-            .ok_or(Error::Invalid("document busy read unavailable"))?;
+            .ok_or(Error::Invalid("document busy read unavailable".into()))?;
         self.event("read_document_busy", i64::from(first));
         if let Some(receiver) = receiver.as_mut() {
             receiver.ui.sync28(receiver.document, first);
@@ -970,7 +970,7 @@ impl Controller {
         self.event("prepare_reidentify", 0);
         let second = *busy_reads
             .get(1)
-            .ok_or(Error::Invalid("wrapper busy read unavailable"))?;
+            .ok_or(Error::Invalid("wrapper busy read unavailable".into()))?;
         self.event("read_wrapper_busy", i64::from(second));
         if second {
             return Ok(());
@@ -980,7 +980,7 @@ impl Controller {
             receiver
                 .ui
                 .sync2f(receiver.document)
-                .map_err(|_| Error::Invalid("main form is absent"))?;
+                .map_err(|_| Error::Invalid("main form is absent".into()))?;
         }
         self.reidentify_requested = true;
         self.event("reidentify_request", i64::from(self.com));
@@ -1008,7 +1008,7 @@ impl Controller {
         mut receiver: Option<&mut DocumentReceiver<'_>>,
     ) -> Result<(), Error> {
         if self.form != Life::Open {
-            return Err(Error::Invalid("COM form not open"));
+            return Err(Error::Invalid("COM form not open".into()));
         }
         if cancel {
             self.event("cancel_close_request", 0);
@@ -1035,14 +1035,14 @@ impl Controller {
                         receiver
                             .ui
                             .sync29(receiver.document)
-                            .map_err(|_| Error::Invalid("COM return receiver failed"))?;
+                            .map_err(|_| Error::Invalid("COM return receiver failed".into()))?;
                         continue;
                     }
                     3 => {
                         receiver
                             .ui
                             .sync02(receiver.document, receiver.session, receiver.recent)
-                            .map_err(|_| Error::Invalid("COM menu receiver failed"))?;
+                            .map_err(|_| Error::Invalid("COM menu receiver failed".into()))?;
                         continue;
                     }
                     _ => {}
@@ -1056,9 +1056,13 @@ impl Controller {
             match returns.get(native_index) {
                 Some(NativeReturn::Returned(value)) => self.event("native_return_ignored", *value),
                 Some(NativeReturn::Exception) => {
-                    return Err(Error::Invalid("native Close call raised exception"));
+                    return Err(Error::Invalid("native Close call raised exception".into()));
                 }
-                None => return Err(Error::Invalid("native Close return source unavailable")),
+                None => {
+                    return Err(Error::Invalid(
+                        "native Close return source unavailable".into(),
+                    ));
+                }
             }
         }
         Ok(())
@@ -1086,7 +1090,7 @@ impl Controller {
             && identity.tail.len() == usize::from(identity.tail[0])
         {
             return Err(Error::Invalid(
-                "actual saved/live gate context source unavailable",
+                "actual saved/live gate context source unavailable".into(),
             ));
         }
         if result == 0 && source.operation == 1 {
@@ -1100,16 +1104,16 @@ impl Controller {
         &mut self,
         mut config: SessionConfig,
         transport: &mut impl Transport,
-        cancelled: impl FnMut() -> bool,
+        cancelled: impl FnMut() -> std::io::Result<bool>,
     ) -> Result<Outcome, Error> {
         if !self.reidentify_requested {
-            return Err(Error::Invalid("no pending reidentify request"));
+            return Err(Error::Invalid("no pending reidentify request".into()));
         }
         config.saved_selector = self.selector;
         if self.fc != 0 {
             config.expected_context = None;
         } else if config.expected_context.is_none() {
-            return Err(Error::Invalid("live query gate context unavailable"));
+            return Err(Error::Invalid("live query gate context unavailable".into()));
         }
         let query = Session::query(config)?;
         self.reidentify_requested = false;
@@ -1128,7 +1132,7 @@ impl Controller {
         &mut self,
         mut config: SessionConfig,
         transport: &mut impl Transport,
-        cancelled: impl FnMut() -> bool,
+        cancelled: impl FnMut() -> std::io::Result<bool>,
         receiver: &mut DocumentReceiver<'_>,
     ) -> Result<Outcome, document::CloneError> {
         config.expected_context = Some(receiver.session.context.fields());
@@ -1136,7 +1140,7 @@ impl Controller {
             .ui
             .form
             .as_ref()
-            .ok_or(Error::Invalid("main form is absent"))?
+            .ok_or(Error::Invalid("main form is absent".into()))?
             .visible57;
         let outcome = self.query_requested(config, transport, cancelled)?;
         self.event("sync", 0x30);
@@ -1144,7 +1148,7 @@ impl Controller {
             .ui
             .form
             .as_ref()
-            .ok_or(Error::Invalid("main form is absent"))?
+            .ok_or(Error::Invalid("main form is absent".into()))?
             .visible57
             == 1
         {
@@ -1161,7 +1165,7 @@ impl Controller {
         source: ReturnSource<'_>,
     ) -> Result<(), document::CloneError> {
         if outcome.operation != super::Operation::Query {
-            return Err(Error::Invalid("information return requires query outcome").into());
+            return Err(Error::Invalid("information return requires query outcome".into()).into());
         }
         if outcome.failure.is_some() {
             return Ok(());
@@ -1169,7 +1173,7 @@ impl Controller {
         let identity = outcome
             .identity
             .as_ref()
-            .ok_or(Error::Invalid("successful query has no identity"))?;
+            .ok_or(Error::Invalid("successful query has no identity".into()))?;
         self.event("sync", 0x2a);
         if let Some(request) = document::InitialRequest::information(receiver.session, identity, 0)?
         {
@@ -1177,13 +1181,12 @@ impl Controller {
                 .ui
                 .form
                 .as_ref()
-                .ok_or(Error::Invalid("main form is absent"))?
+                .ok_or(Error::Invalid("main form is absent".into()))?
                 .visible57;
             let accepted = if visible != 0 {
-                source
-                    .profile_return
-                    .ok_or(Error::Invalid("profile confirmation source unavailable"))?
-                    as u8
+                source.profile_return.ok_or(Error::Invalid(
+                    "profile confirmation source unavailable".into(),
+                ))? as u8
                     == 1
             } else {
                 true
@@ -1204,7 +1207,7 @@ impl Controller {
             .ui
             .form
             .as_ref()
-            .ok_or(Error::Invalid("main form is absent"))?
+            .ok_or(Error::Invalid("main form is absent".into()))?
             .visible57;
         self.finish_information(
             0,
@@ -1230,14 +1233,12 @@ impl Controller {
     ) -> Result<(), Error> {
         if source.display_flag == 1 {
             self.event("compare_information_context", 0);
-            let tail = self
-                .identity
-                .cached_tail
-                .as_ref()
-                .ok_or(Error::Invalid("live information identity tail unavailable"))?;
-            let display = source
-                .display_context
-                .ok_or(Error::Invalid("actual live display Q source unavailable"))?;
+            let tail = self.identity.cached_tail.as_ref().ok_or(Error::Invalid(
+                "live information identity tail unavailable".into(),
+            ))?;
+            let display = source.display_context.ok_or(Error::Invalid(
+                "actual live display Q source unavailable".into(),
+            ))?;
             let comparison = if ContextFields::from_tail(tail)? == display {
                 0
             } else {
@@ -1246,7 +1247,7 @@ impl Controller {
             self.event("information_comparison", comparison);
             if result == 0 && comparison == 0 {
                 self.captions = Some(source.captions.ok_or(Error::Invalid(
-                    "actual information resource captions unavailable",
+                    "actual information resource captions unavailable".into(),
                 ))?);
                 self.information = Life::Open;
                 self.event("create_information_2_by_2", 0x19);
@@ -1256,7 +1257,7 @@ impl Controller {
                     receiver
                         .ui
                         .owner_enabled(0)
-                        .map_err(|_| Error::Invalid("main form is absent"))?;
+                        .map_err(|_| Error::Invalid("main form is absent".into()))?;
                 }
                 self.event("document_views_request", 0x24528);
                 if let Some(receiver) = receiver.as_mut() {
@@ -1267,7 +1268,7 @@ impl Controller {
                     receiver
                         .ui
                         .sync25(receiver.document, receiver.session)
-                        .map_err(|_| Error::Invalid("information tree receiver failed"))?;
+                        .map_err(|_| Error::Invalid("information tree receiver failed".into()))?;
                 }
             }
         } else if result == 0 && source.operation == 1 {
@@ -1289,7 +1290,7 @@ impl Controller {
             return Ok(false);
         }
         if self.form != Life::Open {
-            return Err(Error::Invalid("registered COM form is not open"));
+            return Err(Error::Invalid("registered COM form is not open".into()));
         }
         let ready = receiver.ui.form2_profile(receiver.session);
         self.event("profile_ready", i64::from(ready));
@@ -1298,7 +1299,7 @@ impl Controller {
             receiver
                 .ui
                 .sync2b(receiver.document, receiver.session)
-                .map_err(|_| Error::Invalid("profile-ready document receiver failed"))?;
+                .map_err(|_| Error::Invalid("profile-ready document receiver failed".into()))?;
         }
         self.close_com_document(false, close_returns, receiver)?;
         Ok(true)
@@ -1310,12 +1311,12 @@ impl Controller {
         let captions = self
             .captions
             .as_ref()
-            .ok_or(Error::Invalid("information captions unavailable"))?;
+            .ok_or(Error::Invalid("information captions unavailable".into()))?;
         let tail = self
             .identity
             .cached_tail
             .as_ref()
-            .ok_or(Error::Invalid("information tail unavailable"))?;
+            .ok_or(Error::Invalid("information tail unavailable".into()))?;
         let cell = |key, span, text| Cell {
             kind: 0x19,
             key,
@@ -1350,7 +1351,7 @@ impl Controller {
     }
     pub fn information_close(&mut self, click: bool) -> Result<(), Error> {
         if !matches!(self.information, Life::Open | Life::ReleaseRequested) {
-            return Err(Error::Invalid("information form not alive"));
+            return Err(Error::Invalid("information form not alive".into()));
         }
         self.event(
             if click {
@@ -1368,9 +1369,9 @@ impl Controller {
         let life = self
             .retired_popups
             .get_mut(index)
-            .ok_or(Error::Invalid("retired popup identity unavailable"))?;
+            .ok_or(Error::Invalid("retired popup identity unavailable".into()))?;
         if !matches!(life, Life::Open | Life::ReleaseRequested) {
-            return Err(Error::Invalid("retired popup not alive"));
+            return Err(Error::Invalid("retired popup not alive".into()));
         }
         *life = Life::Destroyed;
         self.event("retired_popup_destroy_delivered", index as i64);
@@ -1393,7 +1394,7 @@ impl Controller {
                 self.event("owner_focus_request", 0);
                 if let Some(ui) = receiver {
                     ui.owner_destroyed()
-                        .map_err(|_| Error::Invalid("main form is absent"))?;
+                        .map_err(|_| Error::Invalid("main form is absent".into()))?;
                 }
                 self.event("destroy_information_unit", 0);
                 self.information = Life::Destroyed;
@@ -1402,7 +1403,7 @@ impl Controller {
             "search" => self.popup = Life::Destroyed,
             _ => {
                 return Err(Error::Invalid(
-                    "unknown information controller destroy target",
+                    "unknown information controller destroy target".into(),
                 ));
             }
         }

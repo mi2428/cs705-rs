@@ -33,7 +33,7 @@ impl Kind {
             13 => Ok(Self::Callsign),
             21 => Ok(Self::UserEdge),
             _ => Err(Error::Invalid(
-                "channel CSV runtime context is not registered",
+                "channel CSV runtime context is not registered".into(),
             )),
         }
     }
@@ -116,7 +116,7 @@ impl<'a> MemoryRows<'a> {
             Kind::FixedPair => ImportKind::FixedPair,
             _ => {
                 return Err(Error::Invalid(
-                    "memory reader requires normal or Call context",
+                    "memory reader requires normal or Call context".into(),
                 ));
             }
         };
@@ -139,14 +139,14 @@ impl<'a> MemoryRows<'a> {
             import,
         )?;
         if !binding.accepted {
-            return Err(Error::Invalid("memory CSV requires Frequency"));
+            return Err(Error::Invalid("memory CSV requires Frequency".into()));
         }
         let mut sequential = binding.positions[0].is_none();
         if !sequential && whole && kind == Kind::Memory && binding.positions[2].is_some() {
             // 80BC0 compares all Group No cells before clear. Different numeric
             // spellings of one group are equal; invalid text is a separate key.
             let mut first = None;
-            for &line in reader.rows() {
+            for line in reader.rows() {
                 let text = binding.cell(line, 2)?.expect("present Group No header");
                 let value = memory_group(text)?;
                 let key = (
@@ -181,10 +181,19 @@ impl<'a> MemoryRows<'a> {
     pub fn sequential(&self) -> bool {
         self.sequential
     }
-    pub fn next_source(&mut self) -> Option<&'a [u8]> {
-        let line = *self.reader.rows().get(self.next)?;
+    pub fn next_source(&mut self) -> Option<&[u8]> {
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some(line)
+    }
+    pub fn into_owned(self) -> MemoryRows<'static> {
+        MemoryRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            kind: self.kind,
+            sequential: self.sequential,
+        }
     }
 }
 
@@ -208,7 +217,9 @@ pub fn memory_default(
     system_langid: Option<u16>,
 ) -> Result<DecodedRecord, Failure> {
     if !ranges.is_complete() {
-        return Err(Error::SourceUnavailable("805B0 actual completed B source unavailable").into());
+        return Err(
+            Error::SourceUnavailable("805B0 actual completed B source unavailable".into()).into(),
+        );
     }
     let mut holder = record::reset_holder(0x1d, 0, 0);
     match kind {
@@ -223,15 +234,16 @@ pub fn memory_default(
         Kind::FixedPair => {
             let index = position
                 .ok_or(Error::SourceUnavailable(
-                    "Call lower parser-local No is unwritten",
+                    "Call lower parser-local No is unwritten".into(),
                 ))?
                 .wrapping_sub(1);
             record_image::load_into(generation, 3, index, &mut holder)?;
         }
         _ => {
-            return Err(
-                Error::Invalid("memory initializer requires normal or Call context").into(),
-            );
+            return Err(Error::Invalid(
+                "memory initializer requires normal or Call context".into(),
+            )
+            .into());
         }
     }
     if matches!(holder.mode(), 0 | 1) {
@@ -253,7 +265,7 @@ impl MemoryOptions<'_> {
         self.ranges
             .filter(|ranges| ranges.is_complete())
             .ok_or(Error::SourceUnavailable(
-                "CSV actual completed B range source unavailable",
+                "CSV actual completed B range source unavailable".into(),
             ))
     }
 }
@@ -360,7 +372,7 @@ impl MemoryRows<'_> {
                 default
                     .as_ref()
                     .ok_or(Error::SourceUnavailable(
-                        "mode repair lacks actual frequency initializer",
+                        "mode repair lacks actual frequency initializer".into(),
                     ))?
                     .mode(),
             );
@@ -384,7 +396,7 @@ impl MemoryRows<'_> {
                 default
                     .as_ref()
                     .ok_or(Error::SourceUnavailable(
-                        "DATA repair lacks actual frequency initializer",
+                        "DATA repair lacks actual frequency initializer".into(),
                     ))?
                     .data(),
             );
@@ -666,12 +678,12 @@ fn memory_put(image: &mut [u8], at: usize, bytes: &[u8]) -> Result<(), icf::Erro
         .get_mut(
             at..at.checked_add(bytes.len()).ok_or(icf::Error::Invalid {
                 line: 0,
-                reason: "CSV parent metadata overflow",
+                reason: "CSV parent metadata overflow".into(),
             })?,
         )
         .ok_or(icf::Error::Invalid {
             line: 0,
-            reason: "CSV parent metadata unavailable",
+            reason: "CSV parent metadata unavailable".into(),
         })?
         .copy_from_slice(bytes);
     Ok(())
@@ -706,13 +718,13 @@ pub fn import_memory(
             Kind::FixedPair if group.is_none() => (4, 1),
             _ => {
                 return Err(Error::Invalid(
-                    "memory import requires normal or ungrouped Call context",
+                    "memory import requires normal or ungrouped Call context".into(),
                 )
                 .into());
             }
         };
         if normal && group.is_none() && selection.is_some() {
-            return Err(Error::Invalid("selected normal CSV rows require a group").into());
+            return Err(Error::Invalid("selected normal CSV rows require a group".into()).into());
         }
         let selection = selection.unwrap_or(Selection {
             first: 0,
@@ -720,7 +732,9 @@ pub fn import_memory(
             number_base: base,
         });
         if selection.number_base != base {
-            return Err(Error::Invalid("memory CSV number base differs from runtime kind").into());
+            return Err(
+                Error::Invalid("memory CSV number base differs from runtime kind".into()).into(),
+            );
         }
         edge_selection(selection, limit)?;
         let whole = normal && group.is_none();
@@ -739,7 +753,7 @@ pub fn import_memory(
             let groups = match group {
                 Some(g) if g < 100 => g..g + 1,
                 None => 0..count,
-                _ => return Err(Error::Invalid("normal group outside0..100").into()),
+                _ => return Err(Error::Invalid("normal group outside0..100".into()).into()),
             };
             (expanded, groups)
         } else {
@@ -795,7 +809,8 @@ pub fn import_memory(
         let mut call_cursor = base;
         let mut names: [Option<[u8; 16]>; 100] = [None; 100];
         let mut max_group = None;
-        while let Some(line) = reader.next_source() {
+        while let Some(line) = reader.reader.row(reader.next) {
+            reader.next += 1;
             out.report.rows_read += 1;
             let g = if !normal {
                 100
@@ -977,6 +992,16 @@ pub struct UserEdgeRows<'a> {
     cursor: u32,
 }
 impl<'a> UserEdgeRows<'a> {
+    pub fn into_owned(self) -> UserEdgeRows<'static> {
+        UserEdgeRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            selection: self.selection,
+            sequential: self.sequential,
+            cursor: self.cursor,
+        }
+    }
     /// 88AE4 receives whole byte from 89088. Only whole plus missing No uses
     /// sequential positions; selected import must retain its numeric No field.
     pub fn new(
@@ -994,7 +1019,7 @@ impl<'a> UserEdgeRows<'a> {
         )?;
         if !binding.accepted {
             return Err(Error::Invalid(
-                "user-edge CSV requires Frequency Low and Frequency High",
+                "user-edge CSV requires Frequency Low and Frequency High".into(),
             ));
         }
         let sequential = whole && binding.positions[0].is_none();
@@ -1011,7 +1036,7 @@ impl<'a> UserEdgeRows<'a> {
     /// empty low exits before high; empty high clears low's already-set valid.
     /// No ordering/suitability predicate is called by this CSV finalizer.
     pub fn next_row(&mut self) -> Option<Result<EdgeRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             let position = if self.sequential {
@@ -1083,6 +1108,16 @@ pub struct ScanRows<'a> {
     cursor: u32,
 }
 impl<'a> ScanRows<'a> {
+    pub fn into_owned(self) -> ScanRows<'static> {
+        ScanRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+            selection: self.selection,
+            sequential: self.sequential,
+            cursor: self.cursor,
+        }
+    }
     pub fn new(
         source: &'a [u8],
         locale: Locale,
@@ -1106,7 +1141,7 @@ impl<'a> ScanRows<'a> {
         )?;
         if !binding.accepted {
             return Err(Error::Invalid(
-                "scan CSV requires Frequency Low and Frequency High",
+                "scan CSV requires Frequency Low and Frequency High".into(),
             ));
         }
         let sequential = whole && binding.positions[0].is_none();
@@ -1124,12 +1159,12 @@ impl<'a> ScanRows<'a> {
         default: &DecodedRecord,
         crt_decimal: u8,
     ) -> Option<Result<EdgeRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             if default.kind() != 0x1f {
                 return Err(Error::Invalid(
-                    "scan parser requires the actual type1F initializer",
+                    "scan parser requires the actual type1F initializer".into(),
                 ));
             }
             let position = if self.sequential {
@@ -1289,7 +1324,9 @@ fn post_scan(
         false,
         false,
         false,
-        |_| unreachable!("scan CSV post never queries a specific frequency range"),
+        |_| -> Result<bool, icf::Error> {
+            unreachable!("scan CSV post never queries a specific frequency range")
+        },
     )?;
     if (rows.is_empty() && selected == 0) || selected < selection.first || selected > selection.last
     {
@@ -1375,7 +1412,7 @@ pub fn import_scan(
 
 fn edge_selection(selection: Selection, limit: u32) -> Result<(), Error> {
     if selection.first > selection.last || selection.last >= limit {
-        return Err(Error::Invalid("edge selection outside dataset"));
+        return Err(Error::Invalid("edge selection outside dataset".into()));
     }
     Ok(())
 }
@@ -1486,13 +1523,16 @@ pub fn export_memory(
             Kind::Memory => (2, 200, 0),
             Kind::FixedPair if group.is_none() => (3, 8, 1),
             _ => {
-                return Err(
-                    Error::Invalid("memory CSV requires normal or ungrouped Call source").into(),
-                );
+                return Err(Error::Invalid(
+                    "memory CSV requires normal or ungrouped Call source".into(),
+                )
+                .into());
             }
         };
         if kind == Kind::Memory && group.is_none() && selection.is_some() {
-            return Err(Error::Invalid("selected normal sides require an explicit group").into());
+            return Err(
+                Error::Invalid("selected normal sides require an explicit group".into()).into(),
+            );
         }
         let selection = selection.unwrap_or(Selection {
             first: 0,
@@ -1511,7 +1551,7 @@ pub fn export_memory(
             let groups = match group {
                 Some(g) if g < 100 => g..g + 1,
                 None => 0..normal.group_count(),
-                _ => return Err(Error::Invalid("memory group outside0..100").into()),
+                _ => return Err(Error::Invalid("memory group outside0..100".into()).into()),
             };
             for group in groups {
                 if normal.group_used_slots(group)? != 0 {
@@ -1543,7 +1583,7 @@ pub fn export_memory(
                 let mut holder = record::reset_holder(code, index, 0);
                 if let Err(error) = record_image::load_into(source, code, index, &mut holder) {
                     load_failure = Some(error);
-                    return Err(Error::Operation("memory typed source load failed"));
+                    return Err(Error::Operation("memory typed source load failed".into()));
                 }
                 if !holder.valid() {
                     return Ok(None);
@@ -1567,7 +1607,7 @@ pub fn export_memory(
                     context,
                     |_| {
                         Err(Error::SourceUnavailable(
-                            "unexpected memory runtime formatter",
+                            "unexpected memory runtime formatter".into(),
                         ))
                     },
                 )?;
@@ -1667,7 +1707,7 @@ fn export_edges(image: &Icf<'_>, selection: Selection, locale: Locale, scan: boo
                 context,
                 |_| {
                     Err(Error::SourceUnavailable(
-                        "unexpected edge runtime formatter",
+                        "unexpected edge runtime formatter".into(),
                     ))
                 },
             )?;
@@ -1703,12 +1743,20 @@ pub fn export_history(
                 &[b"Call Sign", b"Name", b"Frequency", b"Dup", b"Offset"],
             ),
             0x12 => (20, &[b"Call Sign", b"Name"]),
-            _ => return Err(Error::Invalid("history CSV root requires FromDV/FromFM/ToDV").into()),
+            _ => {
+                return Err(
+                    Error::Invalid("history CSV root requires FromDV/FromFM/ToDV".into()).into(),
+                );
+            }
         };
         let range = match selection {
             None => 0..limit,
             Some(s) if s.first <= s.last && s.last < limit => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("history CSV selected range outside dataset").into()),
+            _ => {
+                return Err(
+                    Error::Invalid("history CSV selected range outside dataset".into()).into(),
+                );
+            }
         };
         let repeaters = crate::repeater::working::Working::from_icf(image, defaults)?;
         let ur = icf::rows::WorkingUr::from_icf(image)?;
@@ -1752,7 +1800,7 @@ pub fn export_history(
                 context,
                 |_| {
                     Err(Error::SourceUnavailable(
-                        "unexpected From/To runtime formatter",
+                        "unexpected From/To runtime formatter".into(),
                     ))
                 },
             )?);
@@ -1776,7 +1824,9 @@ pub fn export_receive_history(
     datetime: &super::datetime::Context<'_>,
 ) -> Export {
     export_receive_history_with_date(image, selection, locale, datetime, |_| {
-        Err(Error::SourceUnavailable("Rx native calendar token output"))
+        Err(Error::SourceUnavailable(
+            "Rx native calendar token output".into(),
+        ))
     })
 }
 
@@ -1797,7 +1847,7 @@ pub fn export_receive_history_with_date(
         let range = match selection {
             None => 0..50,
             Some(s) if s.first <= s.last && s.last < 50 => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("Rx CSV rank range outside0..50").into()),
+            _ => return Err(Error::Invalid("Rx CSV rank range outside0..50".into()).into()),
         };
         let labels: [&[u8]; 37] = [
             b"Type",
@@ -1874,7 +1924,7 @@ fn receive_row(
         image
             .get(0x396ff..0x39701)
             .ok_or(Error::SourceUnavailable(
-                "Rx live UTC offset word unavailable",
+                "Rx live UTC offset word unavailable".into(),
             ))?
             .try_into()
             .expect("checked UTC word"),
@@ -1929,7 +1979,9 @@ pub fn import_callsign(
             Some(s) if s.first <= s.last && (s.last as usize) < count => {
                 (s.last - s.first + 1) as usize
             }
-            _ => return Err(Error::Invalid("UR selected range outside current rows").into()),
+            _ => {
+                return Err(Error::Invalid("UR selected range outside current rows".into()).into());
+            }
         };
         // Keep the reconstructed prefix even if a later per-field NLS fails.
         let operation = (|| -> Result<(), Failure> {
@@ -1950,7 +2002,9 @@ pub fn import_callsign(
                     break;
                 }
                 if !working.insert_one(cursor, defaults)? {
-                    return Err(Error::Operation("UR capacity changed during typed insert").into());
+                    return Err(
+                        Error::Operation("UR capacity changed during typed insert".into()).into(),
+                    );
                 }
                 working.save(cursor, &row.holder)?;
                 cursor += 1;
@@ -1984,7 +2038,7 @@ pub fn export_callsign(image: &Icf<'_>, selection: Option<Selection>, locale: Lo
         let range = match selection {
             None => 0..count as u32,
             Some(s) if s.first <= s.last && s.last < 300 => s.first..s.last + 1,
-            _ => return Err(Error::Invalid("UR export range outside 0..300").into()),
+            _ => return Err(Error::Invalid("UR export range outside 0..300".into()).into()),
         };
         out.bytes = super::join(
             &[b"No".to_vec(), b"Name".to_vec(), b"Call Sign".to_vec()],
@@ -2034,6 +2088,13 @@ pub struct CallsignRows<'a> {
     next: usize,
 }
 impl<'a> CallsignRows<'a> {
+    pub fn into_owned(self) -> CallsignRows<'static> {
+        CallsignRows {
+            reader: self.reader.into_owned(),
+            binding: self.binding,
+            next: self.next,
+        }
+    }
     pub fn new(source: &'a [u8], locale: Locale) -> Result<Self, Error> {
         let reader = Reader::new(source, locale)?;
         let binding = Binding::builtin(
@@ -2043,7 +2104,7 @@ impl<'a> CallsignRows<'a> {
             ImportKind::Callsign,
         )?;
         if !binding.accepted {
-            return Err(Error::Invalid("UR CSV requires Call Sign"));
+            return Err(Error::Invalid("UR CSV requires Call Sign".into()));
         }
         Ok(Self {
             reader,
@@ -2061,7 +2122,7 @@ impl<'a> CallsignRows<'a> {
         default: &DecodedRecord,
         native: impl FnMut(&[u8], &mut [u8]) -> Result<i32, Error>,
     ) -> Option<Result<CallsignRow, Error>> {
-        let line = *self.reader.rows().get(self.next)?;
+        let line = self.reader.row(self.next)?;
         self.next += 1;
         Some((|| {
             let mut holder = record::reset_holder(0x0d, 0, default.binding());
@@ -2345,8 +2406,8 @@ mod tests {
         // CP932 fullwidth A/B/1 maps to the literal ASCII call on Windows.
         let source = b"CH No,Frequency,Mode,Your Call Sign,RPT1 Call Sign,RPT2 Call Sign\n0,145,DV,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50,\x82\x60\x82\x61\x82\x50\n";
         let mut rows = MemoryRows::new(source, Kind::Memory, options.locale, false).unwrap();
-        let line = rows.next_source().unwrap();
-        let row = rows.side(line, 0, false, 0, &options);
+        let line = rows.next_source().unwrap().to_vec();
+        let row = rows.side(&line, 0, false, 0, &options);
         #[cfg(windows)]
         {
             let row = row.unwrap();
@@ -2382,8 +2443,8 @@ mod tests {
             );
             let mut reader =
                 MemoryRows::new(csv.as_bytes(), Kind::Memory, options.locale, false).unwrap();
-            let line = reader.next_source().unwrap();
-            let row = reader.side(line, 0, false, 0, &options).unwrap();
+            let line = reader.next_source().unwrap().to_vec();
+            let row = reader.side(&line, 0, false, 0, &options).unwrap();
             assert_eq!(
                 (row.corrections, row.discard),
                 (corrections, discard),
@@ -2402,8 +2463,8 @@ mod tests {
         csv.extend_from_slice(&[b'A'; 15]);
         csv.extend_from_slice(&[0x81, 0x41, b'\n']);
         let mut reader = MemoryRows::new(&csv, Kind::Memory, options.locale, false).unwrap();
-        let line = reader.next_source().unwrap();
-        let row = reader.side(line, 0, false, 0, &options).unwrap();
+        let line = reader.next_source().unwrap().to_vec();
+        let row = reader.side(&line, 0, false, 0, &options).unwrap();
         assert_eq!(row.holder.name(), b"AAAAAAAAAAAAAAA ");
         assert_eq!(row.corrections, 2);
         // Captured B selects F1DC offset; live Q+12 alone gates MTON.
@@ -2427,8 +2488,8 @@ mod tests {
             let options = memory_options(g.memory(), &ranges, &live_q);
             let source = b"CH No,Frequency,Mode,Offset,Repeater Tone,TSQL Frequency\n0,145,FM,100,150.0Hz,150.0Hz\n";
             let mut reader = MemoryRows::new(source, Kind::Memory, options.locale, false).unwrap();
-            let line = reader.next_source().unwrap();
-            let row = reader.side(line, 0, false, 0, &options).unwrap();
+            let line = reader.next_source().unwrap().to_vec();
+            let row = reader.side(&line, 0, false, 0, &options).unwrap();
             assert!(row.holder.valid());
             assert_eq!(
                 (
@@ -3145,7 +3206,7 @@ mod tests {
             |_| {
                 seen += 1;
                 if seen > 6 {
-                    Err(Error::Operation("late native DateToken failure"))
+                    Err(Error::Operation("late native DateToken failure".into()))
                 } else {
                     Ok(b"TOKEN".to_vec())
                 }

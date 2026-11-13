@@ -100,8 +100,8 @@ impl Transport for Serial {
         self.port = Some(port);
         Ok(())
     }
-    fn now_ms(&self) -> u64 {
-        self.start.elapsed().as_millis().min(u64::MAX as u128) as u64
+    fn now_ms(&self) -> std::io::Result<u64> {
+        Ok(self.start.elapsed().as_millis().min(u64::MAX as u128) as u64)
     }
     fn wait_ms(&mut self, ms: u64) -> std::io::Result<()> {
         std::thread::sleep(Duration::from_millis(ms));
@@ -238,8 +238,8 @@ impl Transport for Mock {
             _ => Err(std::io::ErrorKind::InvalidData.into()),
         }
     }
-    fn now_ms(&self) -> u64 {
-        self.now
+    fn now_ms(&self) -> std::io::Result<u64> {
+        Ok(self.now)
     }
     fn wait_ms(&mut self, ms: u64) -> std::io::Result<()> {
         self.now = self.now.saturating_add(ms);
@@ -300,7 +300,7 @@ impl<T: Transport + ?Sized> Write for SequenceLease<'_, T> {
     }
 }
 impl<T: Transport + ?Sized> Transport for SequenceLease<'_, T> {
-    fn now_ms(&self) -> u64 {
+    fn now_ms(&self) -> std::io::Result<u64> {
         self.transport.now_ms()
     }
     fn wait_ms(&mut self, ms: u64) -> std::io::Result<()> {
@@ -402,7 +402,7 @@ mod tests {
             let mut lease = SequenceLease::new(&mut mock, true);
             let first = Session::query(config.clone())
                 .unwrap()
-                .run(&mut lease, || false);
+                .run(&mut lease, || Ok(false));
             assert_eq!(first.result_code(), 0);
             assert_eq!(
                 lease.write(&request).unwrap_err().kind(),
@@ -418,7 +418,7 @@ mod tests {
         assert!(!mock.closed);
         let second = Session::query(config)
             .unwrap()
-            .run(&mut SequenceLease::new(&mut mock, true), || false);
+            .run(&mut SequenceLease::new(&mut mock, true), || Ok(false));
         assert_eq!(second.result_code(), 0);
         assert_eq!(mock.writes, 2);
         mock.close().unwrap();
@@ -440,8 +440,8 @@ mod tests {
             }
         }
         impl Transport for Closing {
-            fn now_ms(&self) -> u64 {
-                0
+            fn now_ms(&self) -> std::io::Result<u64> {
+                Ok(0)
             }
             fn wait_ms(&mut self, _: u64) -> std::io::Result<()> {
                 unreachable!()

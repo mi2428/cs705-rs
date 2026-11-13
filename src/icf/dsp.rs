@@ -35,14 +35,14 @@ dsp_enum!(TransmitHigh, "Stored high endpoint selector, not raw Hz.", {Hz2500=0,
 fn unsupported(at: usize, reason: &'static str) -> Error {
     Error::Unsupported {
         line: 5 + at / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 
 fn invalid(at: usize, reason: &'static str) -> Error {
     Error::Invalid {
         line: 5 + at / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 

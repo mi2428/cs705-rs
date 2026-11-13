@@ -57,7 +57,10 @@ pub struct Outcome {
 }
 
 fn argument(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn word(image: &Icf<'_>, at: usize) -> u16 {
     u16::from_le_bytes([image.memory()[at], image.memory()[at + 1]])

@@ -103,11 +103,11 @@ impl FileImage {
     ) -> Result<Vec<u8>, crate::clone::Error> {
         if self.status != Status::Success {
             return Err(crate::clone::Error::Invalid(
-                "ICF outer gates did not accept the image",
+                "ICF outer gates did not accept the image".into(),
             ));
         }
         let source = self.layout.ok_or(crate::clone::Error::Invalid(
-            "accepted ICF image has no layout",
+            "accepted ICF image has no layout".into(),
         ))?;
         convert_image(
             &self.image,
@@ -136,7 +136,7 @@ pub fn read_bound(source: &[u8], image: Vec<u8>) -> Result<FileImage, Error> {
     if image.len() != IMAGE_CAPACITY {
         return Err(Error::Invalid {
             line: 0,
-            reason: "bound ICF reader requires exactly M bytes",
+            reason: "bound ICF reader requires exactly M bytes".into(),
         });
     }
     let fragments = text::fragments(source);
@@ -196,7 +196,7 @@ fn read_bound_fragments(
 pub fn validate_image(image: &[u8], layout: Layout) -> Result<bool, Error> {
     let revision = image.get(layout.revision_offset()).ok_or(Error::Invalid {
         line: 0,
-        reason: "image revision source unavailable",
+        reason: "image revision source unavailable".into(),
     })?;
     if !(1..=6).contains(revision) {
         return Ok(false);
@@ -205,7 +205,7 @@ pub fn validate_image(image: &[u8], layout: Layout) -> Result<bool, Error> {
         .get(layout.signature_offset()..layout.signature_offset() + IMAGE_SIGNATURE.len())
         .ok_or(Error::Invalid {
             line: 0,
-            reason: "image signature source unavailable",
+            reason: "image signature source unavailable".into(),
         })?;
     Ok(signature == IMAGE_SIGNATURE)
 }
@@ -237,7 +237,7 @@ pub fn write_storage_with_checksum(
     if image.len() != layout.storage_len() {
         return Err(Error::Invalid {
             line: 0,
-            reason: "writer requires the exact layout storage length",
+            reason: "writer requires the exact layout storage length".into(),
         });
     }
     let mut output = b"40750001\r\n#Comment=".to_vec();

@@ -18,21 +18,23 @@ impl Context {
     fn language(self) -> Result<bool, Error> {
         self.gui_language
             .map(|value| value == 1)
-            .ok_or(Error::SourceUnavailable("native Rx GUI language C00"))
+            .ok_or(Error::SourceUnavailable(
+                "native Rx GUI language C00".into(),
+            ))
     }
     fn extra(self) -> Result<bool, Error> {
         // 48B54 -> 48B28: Japanese GUI skips the SYSTEM LANGID read entirely.
         if self.language()? {
             return Ok(false);
         }
-        let langid = self
-            .system_langid
-            .ok_or(Error::SourceUnavailable("native Rx SYSTEM LANGID for48B54"))?;
+        let langid = self.system_langid.ok_or(Error::SourceUnavailable(
+            "native Rx SYSTEM LANGID for48B54".into(),
+        ))?;
         Ok(langid & 0x3ff != 0x11)
     }
     fn separators(self) -> Result<[u8; 2], Error> {
         self.time_separators.ok_or(Error::SourceUnavailable(
-            "native Rx live TimeSeparator reads",
+            "native Rx live TimeSeparator reads".into(),
         ))
     }
 }
@@ -80,7 +82,7 @@ fn date_time(
     separators: [u8; 2],
 ) -> Result<Vec<u8>, Error> {
     if !datetime::valid_time(time) {
-        return Err(Error::Conversion("native Rx clock time"));
+        return Err(Error::Conversion("native Rx clock time".into()));
     }
     let mask = date_mask(order);
     // Only the fixed numeric date tokens and forced slash are reachable. Other
@@ -98,7 +100,9 @@ fn date_time(
         eras: &[],
     };
     let mut out = datetime::format_date(date, mask, &frame, |_| {
-        Err(Error::SourceUnavailable("unexpected native Rx date token"))
+        Err(Error::SourceUnavailable(
+            "unexpected native Rx date token".into(),
+        ))
     })?;
     out.push(b' ');
     out.extend(datetime::fixed_time_separators(time, separators));
@@ -120,13 +124,13 @@ pub fn format(
             let raw = request
                 .source
                 .try_into()
-                .map_err(|_| Error::Invalid("native Rx date requires raw6"))?;
+                .map_err(|_| Error::Invalid("native Rx date requires raw6".into()))?;
             let (date, time) = datetime::decode_raw(raw);
             // A11A7 reaches EncodeTime before BOTH validity gates and all globals.
             let offset = datetime::effective_offset(request.utc_offset_minutes)?;
-            let order = context
-                .date_order
-                .ok_or(Error::SourceUnavailable("native Rx date order8648E0"))?;
+            let order = context.date_order.ok_or(Error::SourceUnavailable(
+                "native Rx date order8648E0".into(),
+            ))?;
             if datetime::valid_date(date) && datetime::valid_time(time) {
                 let (date, time) = datetime::shift_minutes(date, time, offset)?;
                 date_time(date, time, order, [b':'; 2])
@@ -145,7 +149,7 @@ pub fn format(
             let raw = request
                 .source
                 .try_into()
-                .map_err(|_| Error::Invalid("native Rx timestamp requires raw3"))?;
+                .map_err(|_| Error::Invalid("native Rx timestamp requires raw3".into()))?;
             // The shared pure primitive's empty result is precisely the invalid
             // hour/minute branch. Do not demand separator reads on that branch.
             if datetime::timestamp(raw, request.utc_offset_minutes, [0; 2]).is_empty() {
@@ -168,7 +172,9 @@ pub fn format(
             // Compact 0 preserves comma/semicolon; no B62E8 export pass follows.
             super::message(request.source, width, extra)
         }
-        _ => Err(Error::Invalid("request is not a native Rx paint formatter")),
+        _ => Err(Error::Invalid(
+            "request is not a native Rx paint formatter".into(),
+        )),
     }
 }
 
@@ -176,21 +182,21 @@ fn unit(current: &[u8], at: usize) -> Result<u8, Error> {
     current
         .get(at)
         .copied()
-        .ok_or(Error::SourceUnavailable("native Rx live unit byte"))
+        .ok_or(Error::SourceUnavailable("native Rx live unit byte".into()))
 }
 fn raw_word(source: &[u8]) -> Result<u16, Error> {
     Ok(u16::from_le_bytes(source.try_into().map_err(|_| {
-        Error::Invalid("native Rx field requires raw2")
+        Error::Invalid("native Rx field requires raw2".into())
     })?))
 }
 fn raw_dword(source: &[u8]) -> Result<u32, Error> {
     Ok(u32::from_le_bytes(source.try_into().map_err(|_| {
-        Error::Invalid("native Rx field requires raw4")
+        Error::Invalid("native Rx field requires raw4".into())
     })?))
 }
 fn raw_byte(source: &[u8]) -> Result<u8, Error> {
     let [value] = source else {
-        return Err(Error::Invalid("native Rx field requires raw1"));
+        return Err(Error::Invalid("native Rx field requires raw1".into()));
     };
     Ok(*value)
 }
@@ -204,22 +210,26 @@ fn degree(context: &Context) -> Result<u8, Error> {
 fn table_text(pe: Option<&[u8]>, base: u32, index: u8, count: u8) -> Result<Vec<u8>, Error> {
     if index >= count {
         return Err(Error::SourceUnavailable(
-            "native Rx table-outside pointer requires live memory source",
+            "native Rx table-outside pointer requires live memory source".into(),
         ));
     }
-    let pe = pe.ok_or(Error::SourceUnavailable("native Rx original caption asset"))?;
+    let pe = pe.ok_or(Error::SourceUnavailable(
+        "native Rx original caption asset".into(),
+    ))?;
     let pointer = super::dword(super::pe_tail(pe, base + 4 * u32::from(index))?, 0)?;
     let rva = pointer
         .checked_sub(0x400000)
         .ok_or(Error::SourceUnavailable(
-            "native Rx caption pointer outside asset",
+            "native Rx caption pointer outside asset".into(),
         ))?;
     let text = super::pe_tail(pe, rva)?;
     let end = text
         .iter()
         .take(4097)
         .position(|b| *b == 0)
-        .ok_or(Error::SourceUnavailable("native Rx caption bounded NUL"))?;
+        .ok_or(Error::SourceUnavailable(
+            "native Rx caption bounded NUL".into(),
+        ))?;
     Ok(text[..end].to_vec())
 }
 
@@ -241,7 +251,7 @@ pub fn format_field(
             let status = raw_byte(source)?;
             if status > 3 {
                 return Err(Error::SourceUnavailable(
-                    "native Rx Status outside reader0..3",
+                    "native Rx Status outside reader0..3".into(),
                 ));
             }
             resource(b"GI_CsvExp_RxHis_HeaderRptInfo", usize::from(status))
@@ -283,7 +293,7 @@ pub fn format_field(
         0x166 => {
             let pair: [u8; 2] = source
                 .try_into()
-                .map_err(|_| Error::Invalid("native Rx SSID requires raw2"))?;
+                .map_err(|_| Error::Invalid("native Rx SSID requires raw2".into()))?;
             Ok(if pair == [255; 2] {
                 b"---".to_vec()
             } else {
@@ -355,7 +365,7 @@ pub fn format_field(
         }
         0x16f => {
             if source.len() != 9 {
-                return Err(Error::Invalid("native Rx object name requires raw9"));
+                return Err(Error::Invalid("native Rx object name requires raw9".into()));
             }
             Ok(csv::export_call(source, 9))
         }
@@ -460,7 +470,7 @@ pub fn format_field(
                 b"%",
             ))
         }
-        _ => Err(Error::Invalid("unknown native Rx finite field key")),
+        _ => Err(Error::Invalid("unknown native Rx finite field key".into())),
     }
 }
 
@@ -610,9 +620,9 @@ mod tests {
         assert_eq!(calls, 5);
         assert_eq!(
             format(request(A::HistoryDate, &[255; 6], 0), &context, || Err(
-                Error::Operation("clock failure")
+                Error::Operation("clock failure".into())
             )),
-            Err(Error::Operation("clock failure"))
+            Err(Error::Operation("clock failure".into()))
         );
         assert_eq!(
             render(A::Timestamp, &[0x24, 0, 0], i16::MIN, &Context::default()).unwrap(),
@@ -742,9 +752,9 @@ mod tests {
         }
         assert_eq!(
             format_field(0x15f, &[0], &[], &context, None, |_, _| Err(
-                Error::Operation("resource failure")
+                Error::Operation("resource failure".into())
             )),
-            Err(Error::Operation("resource failure"))
+            Err(Error::Operation("resource failure".into()))
         );
         for key in [0x161, 0x162] {
             assert_eq!(

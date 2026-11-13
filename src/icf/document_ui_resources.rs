@@ -218,7 +218,7 @@ impl UiState {
                     if command.node.group != 0x19 {
                         return Err(invalid("native main command has a different context group"));
                     }
-                    let query: MenuQuery = query_main;
+                    let query = MenuQuery::new(query_main);
                     (
                         Some(MenuDescriptor {
                             group: command.node.group,

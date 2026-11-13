@@ -58,7 +58,7 @@ pub fn sanitize(bytes: &mut [u8], replacement: u8) -> bool {
 /// clipping, so even an exact-width isolated lead is repaired here.
 pub fn name_candidate(shared: &mut [u8], maximum: usize) -> Result<Vec<u8>, Error> {
     if shared.len() > 1024 * 1024 {
-        return Err(Error::Limit("name source exceeds 1 MiB"));
+        return Err(Error::Limit("name source exceeds 1 MiB".into()));
     }
     sanitize(shared, b' ');
     let candidate = trim_candidate(shared);
@@ -76,7 +76,7 @@ pub fn map_copy_back(
         return Ok(None);
     }
     if shared.len() > 1024 * 1024 {
-        return Err(Error::Limit("ANSI mapping source exceeds 1 MiB"));
+        return Err(Error::Limit("ANSI mapping source exceeds 1 MiB".into()));
     }
     let n = shared.len();
     let mut source = vec![b' '; 2 * n];
@@ -88,7 +88,7 @@ pub fn map_copy_back(
         if is_lead(destination[at]) {
             if at + 1 == destination.len() {
                 return Err(Error::SourceUnavailable(
-                    "ANSI destination trailing lead requires native boundary byte",
+                    "ANSI destination trailing lead requires native boundary byte".into(),
                 ));
             }
             destination[at] = 0;
@@ -120,7 +120,7 @@ pub fn uppercase_copy(
     mut native: impl FnMut(&mut [u8]) -> Result<u32, Error>,
 ) -> Result<Vec<u8>, Error> {
     if source.len() > 1024 * 1024 {
-        return Err(Error::Limit("ANSI uppercase source exceeds 1 MiB"));
+        return Err(Error::Limit("ANSI uppercase source exceeds 1 MiB".into()));
     }
     let mut destination = source.to_vec();
     let _ignored = native(&mut destination)?;
@@ -178,14 +178,14 @@ pub fn callsign_fixed(
 pub fn ascii_map(source: &[u8], destination: &mut [u8]) -> Result<i32, Error> {
     if !source.is_ascii() {
         return Err(Error::SourceUnavailable(
-            "callsign NLS mapping for non-ASCII bytes",
+            "callsign NLS mapping for non-ASCII bytes".into(),
         ));
     }
     if destination.len() < source.len() {
-        return Err(Error::Invalid("callsign mapping destination width"));
+        return Err(Error::Invalid("callsign mapping destination width".into()));
     }
     destination[..source.len()].copy_from_slice(source);
-    i32::try_from(source.len()).map_err(|_| Error::Limit("callsign NLS result length"))
+    i32::try_from(source.len()).map_err(|_| Error::Limit("callsign NLS result length".into()))
 }
 
 /// Default native producer on Windows, portable ASCII elsewhere. The Windows
@@ -216,11 +216,11 @@ pub fn platform_uppercase(bytes: &mut [u8]) -> Result<u32, Error> {
     {
         if !bytes.is_ascii() {
             return Err(Error::SourceUnavailable(
-                "non-ASCII CharUpperBuffA output required",
+                "non-ASCII CharUpperBuffA output required".into(),
             ));
         }
         let count = u32::try_from(bytes.len())
-            .map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD"))?;
+            .map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD".into()))?;
         bytes.make_ascii_uppercase();
         Ok(count)
     }
@@ -231,15 +231,15 @@ pub fn platform_uppercase(bytes: &mut [u8]) -> Result<u32, Error> {
 fn native_map_count(source_bytes: usize, destination_bytes: usize) -> Result<i32, Error> {
     if source_bytes == 0 || !source_bytes.is_multiple_of(2) || source_bytes != destination_bytes {
         return Err(Error::Invalid(
-            "ANSI mapping requires distinct equal nonempty2n buffers",
+            "ANSI mapping requires distinct equal nonempty2n buffers".into(),
         ));
     }
-    i32::try_from(source_bytes).map_err(|_| Error::Limit("ANSI mapping count exceeds INT"))
+    i32::try_from(source_bytes).map_err(|_| Error::Limit("ANSI mapping count exceeds INT".into()))
 }
 
 #[cfg(any(windows, test))]
 fn native_uppercase_count(bytes: usize) -> Result<u32, Error> {
-    u32::try_from(bytes).map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD"))
+    u32::try_from(bytes).map_err(|_| Error::Limit("ANSI uppercase count exceeds DWORD".into()))
 }
 
 /// Captured descriptor flags relevant to 96308, not keyboard/acceptance gates.
@@ -292,7 +292,7 @@ pub fn whole_text(
     upper: impl FnMut(&mut [u8]) -> Result<u32, Error>,
 ) -> Result<Vec<u8>, Error> {
     if shared.len() > 1024 * 1024 {
-        return Err(Error::Limit("whole text source exceeds 1 MiB"));
+        return Err(Error::Limit("whole text source exceeds 1 MiB".into()));
     }
     let replacement = if profile.keep_spaces { b' ' } else { 0 };
     sanitize(shared, replacement);
@@ -399,7 +399,7 @@ mod tests {
         let original = shared.clone();
         assert!(
             map_copy_back(&mut shared, |_, _| Err(Error::Operation(
-                "injected native failure"
+                "injected native failure".into()
             )))
             .is_err()
         );
@@ -472,7 +472,7 @@ mod tests {
             whole_text(
                 &mut shared,
                 profile,
-                |_, _| Err(Error::Operation("injected map failure")),
+                |_, _| Err(Error::Operation("injected map failure".into())),
                 |_| panic!()
             )
             .is_err()

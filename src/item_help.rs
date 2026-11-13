@@ -2,6 +2,7 @@
 //! Requests/effects are headless calculations, not native window delivery.
 
 use crate::csv::{self, Error, history::pe_tail};
+use std::borrow::Cow;
 
 const NAMES: u32 = 0x3f2b44;
 const TOPICS: u32 = 0x3db93f;
@@ -37,7 +38,7 @@ fn c_string(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
         .take(65537)
         .position(|b| *b == 0)
         .ok_or(Error::SourceUnavailable(
-            "item-help bounded source NUL unavailable",
+            "item-help bounded source NUL unavailable".into(),
         ))?;
     Ok((&bytes[..end], &bytes[end + 1..]))
 }
@@ -46,7 +47,7 @@ fn named<'a>(pe: &'a [u8], rva: u32, name: &[u8]) -> Result<&'a [u8], Error> {
     let (actual, data) = c_string(pe_tail(pe, rva)?)?;
     if actual != name {
         return Err(Error::SourceUnavailable(
-            "item-help named resource unavailable",
+            "item-help named resource unavailable".into(),
         ));
     }
     Ok(data)
@@ -59,12 +60,12 @@ fn key_name(pe: &[u8], key: i32) -> Result<Vec<u8>, Error> {
     let pointer = pe_tail(pe, NAMES + 4 * key as u32)?
         .get(..4)
         .ok_or(Error::SourceUnavailable(
-            "item-help key pointer unavailable",
+            "item-help key pointer unavailable".into(),
         ))?;
     let rva = u32::from_le_bytes(pointer.try_into().unwrap())
         .checked_sub(0x400000)
         .ok_or(Error::SourceUnavailable(
-            "item-help key pointer outside image",
+            "item-help key pointer outside image".into(),
         ))?;
     Ok(c_string(pe_tail(pe, rva)?)?.0.to_vec())
 }
@@ -113,7 +114,7 @@ fn topic(mut data: &[u8], name: &[u8]) -> Result<i32, Error> {
     for _ in 0..4096 {
         let (line, tail) = c_string(data)?;
         if start - tail.len() > 65536 {
-            return Err(Error::Limit("item-help resource size"));
+            return Err(Error::Limit("item-help resource size".into()));
         }
         data = tail;
         if line == b"#" {
@@ -124,7 +125,7 @@ fn topic(mut data: &[u8], name: &[u8]) -> Result<i32, Error> {
             return decimal_topic(tokens.next().unwrap_or_default());
         }
     }
-    Err(Error::Limit("item-help resource row count"))
+    Err(Error::Limit("item-help resource row count".into()))
 }
 
 /// The original asset supplies key names, topic rows and the two CHM filenames.
@@ -137,7 +138,7 @@ pub fn resolve(
 ) -> Result<Request, Error> {
     if application_dir.contains(&0) {
         return Err(Error::Invalid(
-            "application directory must be a native NUL-free path",
+            "application directory must be a native NUL-free path".into(),
         ));
     }
     let (key, index, group, original_name, name, number) = match input {
@@ -163,7 +164,7 @@ pub fn resolve(
     };
     if filename == b"#" {
         return Err(Error::SourceUnavailable(
-            "item-help CHM resource row unavailable",
+            "item-help CHM resource row unavailable".into(),
         ));
     }
     let mut chm = application_dir.to_vec();
@@ -212,9 +213,10 @@ pub struct Api {
     pub style: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Call {
-    pub api: &'static str,
+    /// Native observations borrow literals; callers may own arbitrary API names.
+    pub api: Cow<'static, str>,
     pub command: Option<u32>,
 }
 
@@ -238,11 +240,14 @@ pub struct Effects {
 }
 impl Effects {
     fn call(&mut self, api: &'static str, command: Option<u32>) {
-        self.calls.push(Call { api, command });
+        self.calls.push(Call {
+            api: api.into(),
+            command,
+        });
     }
 }
 fn observed<T: Copy>(value: Option<T>, name: &'static str) -> Result<T, Error> {
-    value.ok_or(Error::SourceUnavailable(name))
+    value.ok_or(Error::SourceUnavailable(name.into()))
 }
 
 fn position(api: &Api, rect: [i32; 4], effects: &mut Effects) -> Result<(), Error> {
@@ -259,7 +264,7 @@ fn position(api: &Api, rect: [i32; 4], effects: &mut Effects) -> Result<(), Erro
         )? == 0
         {
             return Err(Error::Operation(
-                "native HtmlHelp window-info NULL dereference",
+                "native HtmlHelp window-info NULL dereference".into(),
             ));
         }
         observed(
@@ -316,7 +321,7 @@ pub fn drive(
     *effects = Effects::default();
     if state.module == 0 && state.procedure != 0 {
         return Err(Error::Invalid(
-            "inconsistent native module/procedure snapshot",
+            "inconsistent native module/procedure snapshot".into(),
         ));
     }
     if state.module == 0 {

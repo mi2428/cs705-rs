@@ -1,6 +1,7 @@
 # CS-705
 
 [![Library](https://github.com/mi2428/cs705-rs/actions/workflows/library.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/library.yml)
+[![PyO3](https://github.com/mi2428/cs705-rs/actions/workflows/pyo3.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/pyo3.yml)
 [![Examples](https://github.com/mi2428/cs705-rs/actions/workflows/examples.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/examples.yml)
 [![Releases](https://github.com/mi2428/cs705-rs/actions/workflows/release.yml/badge.svg)](https://github.com/mi2428/cs705-rs/actions/workflows/release.yml)
 
@@ -9,11 +10,12 @@ Use it to build your own configuration tools without running the CS-705 Windows 
 
 - Refer to the [API documentation](https://docs.rs/cs705) for public interfaces and their contracts.
 - Read [`NOTES.md`](https://github.com/mi2428/cs705-rs/blob/main/NOTES.md) for technical details of the recovered formats, editing behavior, and clone protocol.
-- The [`examples/cli`](https://github.com/mi2428/cs705-rs/tree/main/examples/cli) and [`example/tui`](https://github.com/mi2428/cs705-rs/tree/main/examples/tui) folders contain separate applications built on the library.
+- See [`examples/cli`](https://github.com/mi2428/cs705-rs/tree/main/examples/cli) and [`example/tui`](https://github.com/mi2428/cs705-rs/tree/main/examples/tui) for applications built on the library, and [`example/jupyter`](examples/jupyter) for interactive tables and plots.
 
 ## Features
 
-- ICF parsing, serialization, and explicit layout conversion. Typed editing of memories, radio settings, repeater lists, GPS memories, and callsigns.
+- ICF parsing, serialization, and explicit layout conversion.
+  Typed editing of memories, radio settings, repeater lists, GPS memories, and callsigns.
 - Clone protocol frames and transfer sessions over caller-owned transports.
 - CS-705 CSV import and export with explicit locale and byte-string handling.
 
@@ -120,7 +122,7 @@ fn check_clone_result(outcome: Outcome) -> Result<Outcome, Box<dyn Error>> {
 fn read_raw(transport: &mut impl Transport, profile: Profile) -> Result<Outcome, Box<dyn Error>> {
     // Query the identity, check the profile, then read the raw image.
     let session = Session::read(SessionConfig::default(), profile)?;
-    let outcome = check_clone_result(session.run(transport, || false))?;
+    let outcome = check_clone_result(session.run(transport, || Ok(false)))?;
 
     // Keep image and coverage together; the buffer can contain an unacquired tail.
     let required = clone::read_range(profile.selector())?;
@@ -145,7 +147,7 @@ fn write_raw(
         return Err("raw write was not approved".into());
     }
     let session = Session::write(SessionConfig::default(), profile, mask, image)?;
-    let outcome = check_clone_result(session.run(transport, || false))?;
+    let outcome = check_clone_result(session.run(transport, || Ok(false)))?;
 
     // Protocol acknowledgement does not verify the resulting radio settings.
     if outcome.write_disposition != WriteDisposition::Acknowledged {
@@ -159,6 +161,44 @@ fn write_raw(
 `write_raw` takes a full internal image for the selected profile; `mask` selects optional regions and does not remove permanent write exclusions.
 Raw writes skip Document validation and normalization, so use only a verified image for the intended radio and keep a fresh backup.
 Never retry a failed or unconfirmed write automatically; acknowledgement is not a readback or persistence check.
+
+### Case: List Memory Channels with Python
+
+Use a Python interpreter supported by [`bindings/python/pyproject.toml`](bindings/python/pyproject.toml) and the Rust toolchain declared in [`rust-toolchain.toml`](rust-toolchain.toml).
+From the repository root, build and install the bindings into a virtual environment:
+
+```sh
+python3 -m venv bindings/python/target/venv
+PYTHON="$PWD/bindings/python/target/venv/bin/python"
+"$PYTHON" -m pip install ./bindings/python
+```
+
+List the saved logical channels in a canonical MapRev 6 ICF file without radio I/O.
+Names remain bytes; no text encoding is assumed.
+
+```python
+from pathlib import Path
+from cs705 import Icf
+from cs705.icf import MemorySide
+
+image = Icf.parse(Path("settings.icf").read_bytes())
+for group, bank in enumerate(image.memory_groups()):
+    for row, slot in enumerate(bank.slots()):
+        if slot is not None:
+            hz = image.physical_memory_frequency_hz(slot, MemorySide.Main)
+            name = image.physical_memory_name_raw(slot)
+            print(f"{group:02}/{row:02} {hz} Hz {name!r}")
+```
+
+To check the native bindings and the installed package, run:
+
+```sh
+make quality TARGETS=python PYTHON="$PYTHON"
+make test TARGETS=python TESTS=wheel PYTHON="$PYTHON"
+```
+
+The Makefile defaults to the Rust library; use `TARGETS=rust,python` to check both components.
+If Cargo's offline checks lack dependencies, run `cargo fetch --locked --manifest-path bindings/python/Cargo.toml` first.
 
 ## License
 

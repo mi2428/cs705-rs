@@ -142,6 +142,43 @@ fn session_document() -> (Session, Document) {
 }
 
 #[test]
+fn borrowed_lifecycle_keeps_the_same_ui_mru_and_failed_save_prefix() {
+    let (mut session, mut doc) = session_document();
+    let mut recent = RecentFiles::default();
+    let mut ui = UiState::headless();
+    let baseline = doc.baseline().to_vec();
+    doc.patch_current(&[(0x37158, b"a")]).unwrap();
+    let mut files = FileSystem {
+        fail: true,
+        ..FileSystem::default()
+    };
+    let flow = Lifecycle {
+        recent: &mut recent,
+        ui: &mut ui,
+    }
+    .save(
+        &mut doc,
+        &mut session,
+        SaveMode::Save,
+        &mut SaveOptions {
+            validation: ValidationSource::NoTree,
+            reset: None,
+        },
+        &mut Input::empty(),
+        &mut files,
+        &mut Compare,
+    )
+    .unwrap();
+    assert_eq!(flow.outcome, SaveOutcome::NotSaved);
+    assert!(flow.attempts[0].publication_error.is_some());
+    assert_eq!(doc.current()[0x37158], b'A');
+    assert_eq!(doc.baseline(), baseline);
+    assert_eq!(doc.path(), b"OLD");
+    assert!(recent.paths().is_empty());
+    assert!(ui.form.is_some());
+}
+
+#[test]
 fn lifecycle_drives_real_document_publication_mru_and_owned_close_state() {
     let mut compare = Compare;
     let mut store = Store(std::array::from_fn(|_| Vec::new()));
@@ -347,7 +384,7 @@ fn lifecycle_drives_real_document_publication_mru_and_owned_close_state() {
             flags1e: 0,
             shortcut18: 0,
         }),
-        query: Some(query),
+        query: Some(MenuQuery::new(query)),
         property19a: false,
         property1ae: false,
         property1a1: true,

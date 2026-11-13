@@ -224,7 +224,7 @@ pub fn run(args: Args) -> Result<u8> {
                 if let Some(outputs) = &outputs {
                     if stage.get() != 0 || to.len() != outputs.map.bytes.len() {
                         return Err(cs705::csv::Error::Invalid(
-                            "LCMap output stage/width mismatch",
+                            "LCMap output stage/width mismatch".into(),
                         ));
                     }
                     to.copy_from_slice(&outputs.map.bytes);
@@ -241,11 +241,11 @@ pub fn run(args: Args) -> Result<u8> {
                             .upper
                             .as_ref()
                             .ok_or(cs705::csv::Error::SourceUnavailable(
-                                "actual CharUpperBuffA output required",
+                                "actual CharUpperBuffA output required".into(),
                             ))?;
                     if stage.get() != 1 || to.len() != upper.bytes.len() {
                         return Err(cs705::csv::Error::Invalid(
-                            "Upper output stage/width mismatch",
+                            "Upper output stage/width mismatch".into(),
                         ));
                     }
                     to.copy_from_slice(&upper.bytes);

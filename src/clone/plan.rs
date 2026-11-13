@@ -58,7 +58,7 @@ fn selector_index(selector: u8) -> Result<usize, Error> {
     match selector {
         1..=3 => Ok(usize::from(selector - 1)),
         4..=6 => Ok(3), // These three raw selectors share the same table.
-        _ => Err(Error::Invalid("selector outside 1..=6")),
+        _ => Err(Error::Invalid("selector outside 1..=6".into())),
     }
 }
 
@@ -111,10 +111,10 @@ pub fn write_blocks(selector: u8, mask: u8) -> Result<Vec<Range<u32>>, Error> {
 pub fn write_blocks_with_cap(selector: u8, mask: u8, cap: u32) -> Result<Vec<Range<u32>>, Error> {
     let index = selector_index(selector)?;
     if !(1..=255).contains(&cap) {
-        return Err(Error::Invalid("chunk cap outside 1..=255"));
+        return Err(Error::Invalid("chunk cap outside 1..=255".into()));
     }
     if mask > 0x1f {
-        return Err(Error::Invalid("write mask outside 0..=31"));
+        return Err(Error::Invalid("write mask outside 0..=31".into()));
     }
     let mut blocks = Vec::new();
     let mut address = 0;
@@ -197,11 +197,11 @@ mod tests {
     fn rejects_every_unknown_selector_and_extra_mask_bit() {
         for selector in 0..=255 {
             if !(1..=6).contains(&selector) {
-                let expected = Err(Error::Invalid("selector outside 1..=6"));
+                let expected = Err(Error::Invalid("selector outside 1..=6".into()));
                 assert_eq!(read_range(selector), expected);
                 assert_eq!(
                     write_blocks(selector, 0),
-                    Err(Error::Invalid("selector outside 1..=6"))
+                    Err(Error::Invalid("selector outside 1..=6".into()))
                 );
             }
         }
@@ -209,7 +209,7 @@ mod tests {
             for mask in 32..=255 {
                 assert_eq!(
                     write_blocks(selector, mask),
-                    Err(Error::Invalid("write mask outside 0..=31"))
+                    Err(Error::Invalid("write mask outside 0..=31".into()))
                 );
             }
         }

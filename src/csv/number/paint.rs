@@ -5,12 +5,13 @@ use super::{Error, native_decimal_fraction, native_dms};
 /// Shared 48B28 degree byte. Only the non-Japanese-GUI branch reads SYSTEM LANGID.
 pub fn degree(gui_language: Option<u32>, system_langid: Option<u16>) -> Result<u8, Error> {
     let japanese = gui_language.ok_or(Error::SourceUnavailable(
-        "native coordinate GUI language C00",
+        "native coordinate GUI language C00".into(),
     ))? == 1;
     Ok(
         if japanese
-            || system_langid.ok_or(Error::SourceUnavailable("native coordinate SYSTEM LANGID"))?
-                & 0x3ff
+            || system_langid.ok_or(Error::SourceUnavailable(
+                "native coordinate SYSTEM LANGID".into(),
+            ))? & 0x3ff
                 == 0x11
         {
             0xdf
@@ -36,7 +37,11 @@ pub fn format(
     let area = match mode {
         5..=10 => false,
         11..=13 => true,
-        _ => return Err(Error::Invalid("native coordinate paint mode outside5..13")),
+        _ => {
+            return Err(Error::Invalid(
+                "native coordinate paint mode outside5..13".into(),
+            ));
+        }
     };
     let unit = if area {
         match mode {
@@ -46,7 +51,7 @@ pub fn format(
         }
     } else {
         *current.get(0x396b4).ok_or(Error::SourceUnavailable(
-            "native coordinate current DMSType byte unavailable",
+            "native coordinate current DMSType byte unavailable".into(),
         ))?
     };
     if unit > 2 {

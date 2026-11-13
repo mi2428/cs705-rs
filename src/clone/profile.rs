@@ -19,7 +19,7 @@ impl TryFrom<u8> for Profile {
         if (1..=6).contains(&value) {
             Ok(Self(value))
         } else {
-            Err(Error::Invalid("selector outside 1..=6"))
+            Err(Error::Invalid("selector outside 1..=6".into()))
         }
     }
 }
@@ -39,13 +39,13 @@ impl Identity {
     /// adoption. Extended tails up to 255 bytes are kept, not silently trimmed.
     pub fn validate(&self) -> Result<Profile, Error> {
         if self.model != 0x4075 {
-            return Err(Error::Invalid("identity model"));
+            return Err(Error::Invalid("identity model".into()));
         }
         if self.revision != 1 {
-            return Err(Error::Invalid("identity revision"));
+            return Err(Error::Invalid("identity revision".into()));
         }
         if self.tail.len() < 33 || self.tail.len() != usize::from(self.tail[0]) {
-            return Err(Error::Invalid("identity tail length"));
+            return Err(Error::Invalid("identity tail length".into()));
         }
         Profile::try_from(self.tail[1])
     }
@@ -66,7 +66,7 @@ pub struct ContextFields(pub [u32; 12]);
 impl ContextFields {
     pub fn from_tail(tail: &[u8]) -> Result<Self, Error> {
         if tail.len() < 33 {
-            return Err(Error::Invalid("context tail length"));
+            return Err(Error::Invalid("context tail length".into()));
         }
         let mut v = 0u32;
         for (i, &b) in tail[0x12..0x18].iter().enumerate() {

@@ -134,7 +134,7 @@ impl Runtime {
             .format_context
             .as_ref()
             .ok_or(cs705::csv::Error::SourceUnavailable(
-                "native format context unavailable",
+                "native format context unavailable".into(),
             ))?;
         let mut cursor = self.date_cursor.get();
         let result = context.native_date(&mut cursor, request);
@@ -1622,7 +1622,10 @@ fn native_channel_callsign_text_edit(
         }
         let mut at = 0;
         let mut native_upper = |source: i32| {
-            let error = |reason| cs705::icf::Error::Invalid { line: 5, reason };
+            let error = |reason: &'static str| cs705::icf::Error::Invalid {
+                line: 5,
+                reason: reason.into(),
+            };
             if let Some(calls) = &upper {
                 let [expected, result] = calls[at];
                 at += 1;
@@ -2094,7 +2097,7 @@ fn native_tone_source(text: &str) -> Result<(String, bool, Option<u8>)> {
 fn tone_ascii_upper(bytes: &mut [u8]) -> std::result::Result<(), cs705::csv::Error> {
     if !bytes.is_ascii() {
         return Err(cs705::csv::Error::SourceUnavailable(
-            "actual non-ASCII tone uppercase output required",
+            "actual non-ASCII tone uppercase output required".into(),
         ));
     }
     bytes.make_ascii_uppercase();
@@ -2696,7 +2699,7 @@ impl Runtime {
             .as_deref()
             .ok_or(cs705::icf::Error::Invalid {
                 line: 5,
-                reason: "explicit global G reset source unavailable",
+                reason: "explicit global G reset source unavailable".into(),
             })?;
         record::repeater_reset_word(generation, which)
     }
@@ -2909,7 +2912,7 @@ pub fn normal_row(input: &str, sheet: Sheet, action: RowAction, options: &Option
             declined = true;
             Err(cs705::icf::Error::Invalid {
                 line: 0,
-                reason: "native row confirmation declined",
+                reason: "native row confirmation declined".into(),
             })
         }
     };
@@ -3079,7 +3082,7 @@ pub fn call_row(input: &str, action: RowAction, options: &Options) -> Result<u8>
                             declined = true;
                             Err(cs705::icf::Error::Invalid {
                                 line: 0,
-                                reason: "native row confirmation declined; use --yes",
+                                reason: "native row confirmation declined; use --yes".into(),
                             })
                         }
                     },

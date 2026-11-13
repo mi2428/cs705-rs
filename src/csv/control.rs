@@ -158,7 +158,7 @@ pub fn export_memory<S>(
                     .checked_add(bytes.len())
                     .is_none_or(|n| n > 16 * 1024 * 1024)
                 {
-                    return Err(Error::Limit("memory pair buffer exceeds 16 MiB"));
+                    return Err(Error::Limit("memory pair buffer exceeds 16 MiB".into()));
                 }
                 buffer.extend_from_slice(&bytes);
             }
@@ -297,7 +297,7 @@ mod tests {
                 ImportGate::Header(1),
                 |s| {
                     s.push(b'R');
-                    Err::<(), _>(Error::Operation("injected row failure"))
+                    Err::<(), _>(Error::Operation("injected row failure".into()))
                 },
                 |_| -> Result<(), Error> { panic!("exception skips stage9") },
             )
@@ -311,7 +311,7 @@ mod tests {
                 |_| -> Result<(), Error> { panic!("cancel skips rows") },
                 |s| {
                     s.push(b'N');
-                    Err::<(), _>(Error::Operation("injected stage9 failure"))
+                    Err::<(), _>(Error::Operation("injected stage9 failure".into()))
                 },
             )
             .is_err()
@@ -427,7 +427,7 @@ mod tests {
         assert!(
             scan_row(&mut counts, row, range, |relative| {
                 assert_eq!(relative, 1);
-                Err(Error::Operation("injected writer failure"))
+                Err(Error::Operation("injected writer failure".into()))
             })
             .is_err()
         );

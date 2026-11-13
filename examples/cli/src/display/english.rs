@@ -249,9 +249,9 @@ mod tests {
         let path = format!("setting/{}/0", keying.name);
         assert_eq!(keying.feature_id, "A2-H56399-16");
         assert!(choices(&path, None).is_err());
-        assert!(choices(keying.feature_id, None).is_err());
+        assert!(choices(&keying.feature_id, None).is_err());
         let by_path = choices(&path, Some(&image)).unwrap();
-        let by_id = choices(keying.feature_id, Some(&image)).unwrap();
+        let by_id = choices(&keying.feature_id, Some(&image)).unwrap();
         assert_eq!(by_id, by_path);
         assert_eq!(by_path["current"], 255);
         assert!(

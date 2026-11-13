@@ -268,7 +268,7 @@ pub fn entries(editor: &Editor, selected: Category) -> Result<Vec<Entry>> {
     {
         for index in 0..s.count {
             let name = indexed(label(s.key)?, index, s.count);
-            let help = match s.kind {
+            let help = match &s.kind {
                 settings::Kind::Selector => format!(
                     "Choose a value with Left/Right or Space. Stored codes {}..{}. Known semantic captions are shown; other codes are left explicit. Unknown current values are retained until an explicit edit.",
                     s.domain.min, s.domain.max
@@ -433,7 +433,7 @@ fn gps_resources() -> settings::gps::Resources {
 
 pub fn value(image: &Icf<'_>, target: Target, encoding: TextEncoding) -> Result<String> {
     Ok(match target {
-        Target::Setting(s, i) => match s.kind {
+        Target::Setting(s, i) => match &s.kind {
             settings::Kind::Selector => selection_text(s.key, number(image, s, i)?),
             settings::Kind::Integer(unit) => format!("{} {unit}", number(image, s, i)?),
         },
@@ -506,7 +506,7 @@ fn ur(image: &Icf<'_>, p: usize) -> Result<record::DecodedRecord> {
 
 pub fn fields(image: &Icf<'_>, target: Target, encoding: TextEncoding) -> Result<Vec<Field>> {
     Ok(match target {
-        Target::Setting(s, i) => vec![match s.kind {
+        Target::Setting(s, i) => vec![match &s.kind {
             settings::Kind::Selector => Field::choice(
                 s.key,
                 "Selection",

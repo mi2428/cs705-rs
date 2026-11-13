@@ -67,12 +67,13 @@ fn read_mode(value: Option<&Value>) -> lib::ReadMode {
             values
                 .iter()
                 .map(|v| {
-                    i32::parse(v).map_err(|_| clone::Error::Invalid("invalid captured read value"))
+                    i32::parse(v)
+                        .map_err(|_| clone::Error::Invalid("invalid captured read value".into()))
                 })
                 .collect(),
         ),
         Some(_) => lib::ReadMode::Captured(vec![Err(clone::Error::Invalid(
-            "captured reads require an array",
+            "captured reads require an array".into(),
         ))]),
     }
 }
@@ -264,7 +265,7 @@ impl RegistryData {
                 object(entry, &["name", "opened", "exists", "text", "exception"])?;
                 if entry.get("exception") == Some(&Value::Bool(true)) {
                     values.push(Err(clone::Error::Invalid(
-                        "captured registry read exception",
+                        "captured registry read exception".into(),
                     )));
                     continue;
                 }
@@ -499,7 +500,7 @@ impl Software {
             .query_document(
                 clone::SessionConfig::default(),
                 &mut transport,
-                || false,
+                || Ok(false),
                 &mut self.receiver(),
             )
             .map_err(|e| invalid(&e.to_string()))?;

@@ -12,7 +12,10 @@ pub(crate) const WORKING_BYTES: usize = 0x4997a;
 pub(crate) const ORDER: usize = 0x3ab82;
 pub(crate) const STARTS: usize = 0x3bf0a;
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 pub(crate) fn working_counts(memory: &[u8]) -> Result<[u16; 50], Error> {

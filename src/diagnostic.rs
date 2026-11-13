@@ -140,9 +140,12 @@ impl<'a> Diagnostic<'a> {
 impl<'a> From<&'a icf::Error> for Diagnostic<'a> {
     fn from(error: &'a icf::Error) -> Self {
         let (kind, line, detail) = match error {
-            icf::Error::Invalid { line, reason } => (Kind::Invalid, *line, Some(*reason)),
-            icf::Error::Unsupported { line, reason } => (Kind::Unsupported, *line, Some(*reason)),
+            icf::Error::Invalid { line, reason } => (Kind::Invalid, *line, Some(reason.as_ref())),
+            icf::Error::Unsupported { line, reason } => {
+                (Kind::Unsupported, *line, Some(reason.as_ref()))
+            }
             icf::Error::ChecksumMismatch { line } => (Kind::ChecksumMismatch, *line, None),
+            icf::Error::Operation(reason) => (Kind::Operation, 0, Some(reason.as_ref())),
         };
         Self {
             line: (line != 0).then_some(line),
@@ -155,11 +158,11 @@ impl<'a> From<&'a icf::Error> for Diagnostic<'a> {
 impl<'a> From<&'a csv::Error> for Diagnostic<'a> {
     fn from(error: &'a csv::Error) -> Self {
         let (kind, detail) = match error {
-            csv::Error::Limit(s) => (Kind::Limit, *s),
-            csv::Error::Invalid(s) => (Kind::Invalid, *s),
-            csv::Error::Conversion(s) => (Kind::Conversion, *s),
-            csv::Error::SourceUnavailable(s) => (Kind::SourceUnavailable, *s),
-            csv::Error::Operation(s) => (Kind::Operation, *s),
+            csv::Error::Limit(s) => (Kind::Limit, s.as_ref()),
+            csv::Error::Invalid(s) => (Kind::Invalid, s.as_ref()),
+            csv::Error::Conversion(s) => (Kind::Conversion, s.as_ref()),
+            csv::Error::SourceUnavailable(s) => (Kind::SourceUnavailable, s.as_ref()),
+            csv::Error::Operation(s) => (Kind::Operation, s.as_ref()),
         };
         Self {
             technical_detail: Some(detail),
@@ -176,12 +179,12 @@ macro_rules! csv_error {
                 match error {
                     E::Invalid { line, reason } => Self {
                         line: (*line != 0).then_some(*line),
-                        technical_detail: Some(reason),
+                        technical_detail: Some(reason.as_ref()),
                         ..Self::new($domain, Kind::Invalid)
                     },
                     E::Unsupported { line, reason } => Self {
                         line: (*line != 0).then_some(*line),
-                        technical_detail: Some(reason),
+                        technical_detail: Some(reason.as_ref()),
                         ..Self::new($domain, Kind::Unsupported)
                     },
                     E::RowIndexOutOfBounds { index } => Self {
@@ -200,7 +203,7 @@ impl<'a> From<&'a clone::Error> for Diagnostic<'a> {
     fn from(error: &'a clone::Error) -> Self {
         let mut diagnostic = Self::new(Domain::Clone, Kind::Invalid);
         match error {
-            clone::Error::Invalid(reason) => diagnostic.technical_detail = Some(reason),
+            clone::Error::Invalid(reason) => diagnostic.technical_detail = Some(reason.as_ref()),
             clone::Error::UnsupportedCommand(value) => {
                 diagnostic.kind = Kind::UnsupportedCommand;
                 diagnostic.value = Some(u32::from(*value));
@@ -247,12 +250,106 @@ impl Presenter {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn owned_error_reasons_preserve_native_borrows_and_runtime_text() {
+        use super::*;
+        use std::{borrow::Cow, fmt::Display};
+        const TEXT: &str = "runtime \u{7406}\u{7531}\0\u{e9}";
+        fn check<E: Clone + Display>(error: E, domain: Domain, kind: Kind)
+        where
+            for<'a> Diagnostic<'a>: From<&'a E>,
+        {
+            let cloned = error.clone();
+            drop(error);
+            let diagnostic = Diagnostic::from(&cloned);
+            assert_eq!((diagnostic.domain, diagnostic.kind), (domain, kind));
+            assert_eq!(diagnostic.technical_detail(), Some(TEXT));
+            assert!(cloned.to_string().ends_with(TEXT));
+        }
+        let native = csv::number::decimal(b"bad", b'.').unwrap_err();
+        let csv::Error::Conversion(Cow::Borrowed(reason)) = &native else {
+            panic!("native literal reason must remain borrowed");
+        };
+        let detail = Diagnostic::from(&native).technical_detail().unwrap();
+        assert_eq!(detail.as_ptr(), reason.as_ptr());
+        check(
+            icf::Error::Invalid {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::Icf,
+            Kind::Invalid,
+        );
+        check(
+            icf::Error::Unsupported {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::Icf,
+            Kind::Unsupported,
+        );
+        check(
+            icf::Error::Operation(TEXT.to_owned().into()),
+            Domain::Icf,
+            Kind::Operation,
+        );
+        for (error, kind) in [
+            (csv::Error::Limit(TEXT.to_owned().into()), Kind::Limit),
+            (csv::Error::Invalid(TEXT.to_owned().into()), Kind::Invalid),
+            (
+                csv::Error::Conversion(TEXT.to_owned().into()),
+                Kind::Conversion,
+            ),
+            (
+                csv::Error::SourceUnavailable(TEXT.to_owned().into()),
+                Kind::SourceUnavailable,
+            ),
+            (
+                csv::Error::Operation(TEXT.to_owned().into()),
+                Kind::Operation,
+            ),
+        ] {
+            check(error, Domain::Csv, kind);
+        }
+        check(
+            gps::Error::Invalid {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::GpsCsv,
+            Kind::Invalid,
+        );
+        check(
+            gps::Error::Unsupported {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::GpsCsv,
+            Kind::Unsupported,
+        );
+        check(
+            repeater::Error::Invalid {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::RepeaterCsv,
+            Kind::Invalid,
+        );
+        check(
+            repeater::Error::Unsupported {
+                line: 7,
+                reason: TEXT.to_owned().into(),
+            },
+            Domain::RepeaterCsv,
+            Kind::Unsupported,
+        );
+    }
     use super::*;
     #[test]
     fn summaries_preserve_locations_and_do_not_mix_english_details() {
         let error = icf::Error::Invalid {
             line: 37,
-            reason: "original technical invariant",
+            reason: "original technical invariant".into(),
         };
         let diagnostic = Diagnostic::from(&error);
         assert_eq!(
@@ -298,9 +395,14 @@ mod tests {
         }
         let zero = icf::Error::Invalid {
             line: 0,
-            reason: "not a line location",
+            reason: "not a line location".into(),
         };
         assert_eq!(Diagnostic::from(&zero).line, None);
+        let operation = icf::Error::Operation("producer failed".into());
+        let diagnostic = Diagnostic::from(&operation);
+        assert_eq!(diagnostic.kind, Kind::Operation);
+        assert_eq!(diagnostic.line, None);
+        assert_eq!(diagnostic.technical_detail(), Some("producer failed"));
         let row = gps::Error::RowIndexOutOfBounds { index: 0 };
         assert_eq!(Diagnostic::from(&row).index, Some(0));
         let rejected = clone::Error::Rejected(255);

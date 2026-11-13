@@ -19,11 +19,13 @@ pub fn scalar(
 ) -> Result<Vec<u8>, Error> {
     if scale != fractional_digits || !matches!(scale, 0 | 1 | 3 | 6) {
         return Err(Error::Invalid(
-            "native scalar requires scale=digits=0/1/3/6",
+            "native scalar requires scale=digits=0/1/3/6".into(),
         ));
     }
     if integer_width > 4096 {
-        return Err(Error::Limit("native scalar padding exceeds 4096 bytes"));
+        return Err(Error::Limit(
+            "native scalar padding exceeds 4096 bytes".into(),
+        ));
     }
     let divisor = 10_i32.pow(scale);
     let integer = (value / divisor).wrapping_abs();
@@ -149,7 +151,9 @@ mod tests {
             history(1, b'.', |_| {
                 reads += 1;
                 if reads == 3 {
-                    Err(Error::SourceUnavailable("copied decimal read unavailable"))
+                    Err(Error::SourceUnavailable(
+                        "copied decimal read unavailable".into(),
+                    ))
                 } else {
                     Ok(b'.')
                 }

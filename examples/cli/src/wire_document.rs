@@ -239,9 +239,9 @@ fn drive(
                 break operation
                     .finalize(&mut live_controls, |operation, _| {
                         let identity = operation.outcomes.last().and_then(|o| o.identity.as_ref())
-                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone identity is unavailable" })?;
+                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone identity is unavailable".into() })?;
                         let label = identity.tail.get(2..18)
-                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone label is unavailable" })?;
+                            .ok_or(cs705::icf::Error::Invalid { line: 0, reason: "completed clone label is unavailable".into() })?;
                         information = Some(json!({"heading":"Device information","model":identity.model,"revision":identity.revision,"stored_label":io::bytes_value(label.split(|b|*b==0).next().unwrap())}));
                         Ok(())
                     })
@@ -420,8 +420,8 @@ mod transport_tests {
         }
     }
     impl Transport for Endpoint {
-        fn now_ms(&self) -> u64 {
-            self.now
+        fn now_ms(&self) -> std::io::Result<u64> {
+            Ok(self.now)
         }
         fn wait_ms(&mut self, ms: u64) -> stdio::Result<()> {
             self.now += ms;
@@ -510,7 +510,7 @@ mod transport_tests {
             }
             let out = clone::Session::query(config.clone()).unwrap().run(
                 &mut transport::SequenceLease::new(&mut endpoint, false),
-                || false,
+                || Ok(false),
             );
             assert_eq!(out.result_code(), 0);
             assert_eq!(out.identity_gate.cached_tail.unwrap()[1], selector);

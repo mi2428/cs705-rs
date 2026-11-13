@@ -6,7 +6,9 @@ use super::{
     SaveStatus, Session, ValidationSource, invalid, resolve_prompt,
 };
 use crate::icf::normalizer::ResetState;
+use std::borrow::BorrowMut;
 use std::io::{self, Write};
+use std::{fmt, sync::Arc};
 
 #[path = "document_lifecycle/native.rs"]
 mod native;
@@ -242,9 +244,36 @@ pub struct MenuContext<'a> {
     pub active: Option<&'a NativeView>,
     pub recent: &'a RecentFiles,
 }
+type MenuQueryFn =
+    dyn for<'a> Fn(&mut MenuContext<'a>, &mut MenuDescriptor) -> Result<(), Error> + Send + Sync;
+
 /// Registered software code receives the SAME live objects, not snapshots or
 /// caller-completed menu flags or caption packets.
-pub type MenuQuery = fn(&mut MenuContext<'_>, &mut MenuDescriptor) -> Result<(), Error>;
+#[derive(Clone)]
+pub struct MenuQuery(Arc<MenuQueryFn>);
+impl MenuQuery {
+    pub fn new(
+        query: impl for<'a> Fn(&mut MenuContext<'a>, &mut MenuDescriptor) -> Result<(), Error>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(query))
+    }
+
+    pub fn call(
+        &self,
+        context: &mut MenuContext<'_>,
+        descriptor: &mut MenuDescriptor,
+    ) -> Result<(), Error> {
+        (self.0)(context, descriptor)
+    }
+}
+impl fmt::Debug for MenuQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MenuQuery(..)")
+    }
+}
 #[derive(Debug, Clone)]
 pub struct MenuItem {
     pub descriptor: Option<MenuDescriptor>,
@@ -378,7 +407,7 @@ impl UiState {
                 item.property1a1 = false;
                 continue;
             };
-            let query = item.query.ok_or(invalid(
+            let query = item.query.as_ref().ok_or(invalid(
                 "native menu descriptor has no registered software query",
             ))?;
             let settings = self.display_settings.as_ref().ok_or(invalid(
@@ -388,7 +417,7 @@ impl UiState {
                 .native
                 .as_ref()
                 .and_then(|native| native.active.as_ref());
-            query(
+            query.call(
                 &mut MenuContext {
                     document,
                     session,
@@ -534,14 +563,77 @@ impl UiState {
     }
 }
 
-#[derive(Debug)]
-pub struct Lifecycle {
-    pub recent: RecentFiles,
-    pub ui: UiState,
+#[cfg(test)]
+mod capturing_query_tests {
+    use super::*;
+
+    #[test]
+    fn cloned_query_captures_state_and_updates_the_live_document() {
+        let pending = b"CAPTURED".to_vec();
+        let query = MenuQuery::new(move |context, descriptor| {
+            context.document.begin_pending_name(7, pending.clone());
+            context.session.document_flags[0] = 9;
+            descriptor.caption = context.document.path().to_vec();
+            Err(Error::Operation("query failed".into()))
+        });
+        let mut document = Document::from_current(vec![1], b"LIVE".to_vec(), 6);
+        let mut session = Session::new(
+            crate::icf::context::Context::before_registry(),
+            None,
+            0,
+            [0; 2],
+        );
+        let settings = crate::display::Settings {
+            language: 0,
+            system_language: 0,
+            font_percent: 100,
+            toolbar: 1,
+            split: 0,
+            callsign_dialog: 1,
+            auto_correct: 1,
+            fixed_name: 0,
+            column_bits: 0,
+            column_bits_high: 0,
+        };
+        let recent = RecentFiles::default();
+        let mut descriptor = MenuDescriptor {
+            group: 0,
+            key: 0,
+            index: 0,
+            name: vec![],
+            caption: vec![],
+            flags1d: 0,
+            flags1e: 0,
+            shortcut18: 0,
+        };
+        let result = query.clone().call(
+            &mut MenuContext {
+                document: &mut document,
+                session: &mut session,
+                settings: &settings,
+                active: None,
+                recent: &recent,
+            },
+            &mut descriptor,
+        );
+        assert!(result.is_err());
+        assert_eq!(document.pending_name().unwrap().name, b"CAPTURED");
+        assert_eq!(session.document_flags, [9, 0]);
+        assert_eq!(descriptor.caption, b"LIVE");
+        assert_eq!(format!("{query:?}"), "MenuQuery(..)");
+    }
 }
-impl Lifecycle {
+
+#[derive(Debug)]
+pub struct Lifecycle<R = RecentFiles, U = UiState> {
+    pub recent: R,
+    pub ui: U,
+}
+impl<R: BorrowMut<RecentFiles>, U: BorrowMut<UiState>> Lifecycle<R, U> {
     pub fn sync02(&mut self, document: &mut Document, session: &mut Session) -> Result<(), Error> {
-        self.ui.sync02(document, session, &self.recent)
+        self.ui
+            .borrow_mut()
+            .sync02(document, session, self.recent.borrow_mut())
     }
 
     pub fn initial_boundary(
@@ -553,7 +645,9 @@ impl Lifecycle {
         if boundary == super::InitialBoundary::Sync(2) {
             self.sync02(document, session)
         } else {
-            self.ui.initial_boundary(boundary, document, session)
+            self.ui
+                .borrow_mut()
+                .initial_boundary(boundary, document, session)
         }
     }
 
@@ -571,7 +665,9 @@ impl Lifecycle {
         files: &mut impl Files,
         compare: &mut impl PathComparison,
     ) -> Result<SaveFlow, FileError> {
-        if self.ui.native.is_some() && matches!(options.validation, ValidationSource::NoTree) {
+        if self.ui.borrow_mut().native.is_some()
+            && matches!(options.validation, ValidationSource::NoTree)
+        {
             return Err(
                 invalid("native Save requires generated tree validation descriptors").into(),
             );
@@ -658,13 +754,16 @@ impl Lifecycle {
                 }
                 Some(SaveStatus::Saved) => {
                     if target != 6 {
-                        self.ui.sync25(document, session)?;
+                        self.ui.borrow_mut().sync25(document, session)?;
                     }
                     document.path = selection.path.clone();
-                    self.recent.insert(selection.path, compare)?;
+                    self.recent.borrow_mut().insert(selection.path, compare)?;
                     document.accept_saved(document.path.clone(), target);
-                    self.ui
-                        .initial_boundary(super::InitialBoundary::Title, document, session)?;
+                    self.ui.borrow_mut().initial_boundary(
+                        super::InitialBoundary::Title,
+                        document,
+                        session,
+                    )?;
                     session.document_flags = [0, 0];
                     flow.outcome = SaveOutcome::Saved;
                     return Ok(flow);
@@ -721,12 +820,18 @@ impl Lifecycle {
     ) -> Result<DirtyPrompt, FileError> {
         let prompt = self.dirty_prompt(document, session, options, dialogs, files, compare)?;
         if document.new_file(session, prompt.result)? {
-            self.ui
-                .initial_boundary(super::InitialBoundary::Title, document, session)?;
-            self.ui
-                .initial_boundary(super::InitialBoundary::Rebuild, document, session)?;
-            self.ui.destroy_view(document);
-            self.ui.sync25(document, session)?;
+            self.ui.borrow_mut().initial_boundary(
+                super::InitialBoundary::Title,
+                document,
+                session,
+            )?;
+            self.ui.borrow_mut().initial_boundary(
+                super::InitialBoundary::Rebuild,
+                document,
+                session,
+            )?;
+            self.ui.borrow_mut().destroy_view(document);
+            self.ui.borrow_mut().sync25(document, session)?;
         }
         Ok(prompt)
     }
@@ -791,11 +896,14 @@ impl Lifecycle {
             defaults,
         )?;
         if matches!(status, OpenStatus::Opened { .. }) {
-            self.recent.insert(path, compare)?;
-            self.ui.destroy_view(document);
-            self.ui.sync25(document, session)?;
-            self.ui
-                .initial_boundary(super::InitialBoundary::Title, document, session)?;
+            self.recent.borrow_mut().insert(path, compare)?;
+            self.ui.borrow_mut().destroy_view(document);
+            self.ui.borrow_mut().sync25(document, session)?;
+            self.ui.borrow_mut().initial_boundary(
+                super::InitialBoundary::Title,
+                document,
+                session,
+            )?;
         }
         Ok((prompt, status))
     }
@@ -815,7 +923,7 @@ impl Lifecycle {
         files: &mut impl Files,
         compare: &mut impl PathComparison,
     ) -> Result<(DirtyPrompt, OpenStatus), FileError> {
-        let path = self.recent.selected(index)?.to_vec();
+        let path = self.recent.borrow_mut().selected(index)?.to_vec();
         self.open(
             document,
             session,
@@ -845,6 +953,7 @@ impl Lifecycle {
     ) -> Result<Option<DirtyPrompt>, FileError> {
         let form = self
             .ui
+            .borrow_mut()
             .form
             .as_ref()
             .ok_or(invalid("main form is absent"))?;
@@ -858,7 +967,7 @@ impl Lifecycle {
             return Ok(Some(prompt));
         }
         if let Some(value) = placement.placement()? {
-            self.ui.saved_placement = Some(value);
+            self.ui.borrow_mut().saved_placement = Some(value);
         }
         Ok(Some(prompt))
     }
@@ -881,7 +990,7 @@ impl Lifecycle {
             document, session, incoming, options, dialogs, files, compare, placement,
         )?;
         if *incoming {
-            self.ui.finish_close(document);
+            self.ui.borrow_mut().finish_close(document);
         }
         Ok(prompt)
     }

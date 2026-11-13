@@ -304,18 +304,30 @@ pub struct Toolbar {
     pub visible: bool,
     /// Explicit control placement (left, top, width, height), not window pixels.
     pub placement: [i32; 4],
+    /// Library count of committed visibility changes, including failed notifications.
+    /// Exhaustion rejects a change before modifying the control or calling notify.
     pub visible_changes: u64,
 }
 impl Toolbar {
+    fn change_count(&self, visible: bool) -> io::Result<u64> {
+        if self.visible == visible {
+            return Ok(self.visible_changes);
+        }
+        self.visible_changes
+            .checked_add(1)
+            .ok_or_else(|| invalid("toolbar change counter exhausted"))
+    }
+
     pub fn set_visible(
         &mut self,
         visible: bool,
         notify: impl FnOnce(&Self) -> io::Result<()>,
     ) -> io::Result<()> {
+        let changes = self.change_count(visible)?;
         if self.visible != visible {
             // 14FF98 writes 57 before B00B/virtual 5C, including their failure.
             self.visible = visible;
-            self.visible_changes += 1;
+            self.visible_changes = changes;
             notify(self)?;
         }
         Ok(())
@@ -334,6 +346,8 @@ pub struct State {
     pub queue: VecDeque<Queued>,
     pub font_changed: bool,
     pub resource_language: u32,
+    /// Library refresh serial; later rebuild failure does not undo an advance.
+    /// Exhaustion rejects the refresh before consuming its queue event.
     pub resource_generation: u64,
     pub metrics: FontMetrics,
     saved: Option<(ViewKind, i32, i32, usize)>,
@@ -519,7 +533,9 @@ impl State {
                         }
                     }
                     0x38 => {
-                        self.settings.toolbar = u32::from(self.settings.toolbar == 0);
+                        let toolbar = u32::from(self.settings.toolbar == 0);
+                        self.toolbar.change_count(toolbar != 0)?;
+                        self.settings.toolbar = toolbar;
                         self.toolbar
                             .set_visible(self.settings.toolbar != 0, |_| Ok(()))?;
                     }
@@ -538,11 +554,21 @@ impl State {
     }
     /// Drain reads current NOW, not an enqueue-time image/mask snapshot.
     pub fn drain(&mut self, current: &[u8], q: Option<&Context>) -> io::Result<()> {
-        while let Some(message) = self.queue.pop_front() {
+        while let Some(&message) = self.queue.front() {
+            // Reserve this event's bookkeeping before consuming it. Earlier
+            // events and normal refresh failure prefixes are not rolled back.
+            let generation = match message.event {
+                0x26 => self
+                    .resource_generation
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("resource generation counter exhausted"))?,
+                _ => self.resource_generation,
+            };
+            self.queue.pop_front();
             match message.event {
                 0x26 => {
                     self.resource_language = self.settings.language;
-                    self.resource_generation += 1;
+                    self.resource_generation = generation;
                     self.invalidate();
                     self.show(current, q)?;
                 }
@@ -591,5 +617,101 @@ impl State {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bookkeeping_exhaustion_precedes_changes_but_keeps_normal_failure_prefixes() {
+        let mut toolbar = Toolbar {
+            visible: false,
+            placement: [0, 0, 1, 1],
+            visible_changes: u64::MAX,
+        };
+        let before = toolbar.clone();
+        assert!(
+            toolbar
+                .set_visible(true, |_| panic!("counter exhausted before callback"))
+                .is_err()
+        );
+        assert_eq!(toolbar, before);
+        toolbar
+            .set_visible(false, |_| panic!("unchanged visibility must not notify"))
+            .unwrap();
+        toolbar.visible_changes -= 1;
+        assert!(
+            toolbar
+                .set_visible(true, |_| Err(io::Error::other("callback failed")))
+                .is_err()
+        );
+        assert!(toolbar.visible);
+        assert_eq!(toolbar.visible_changes, u64::MAX);
+
+        let mut state = State::new(
+            Settings {
+                language: 7,
+                system_language: 0,
+                font_percent: 100,
+                toolbar: 0,
+                split: 0,
+                callsign_dialog: 1,
+                auto_correct: 1,
+                fixed_name: 0,
+                column_bits: 0,
+                column_bits_high: 0,
+            },
+            FontMetrics {
+                em: 16,
+                advance: 8,
+                line: 16,
+                dpi: 96,
+                padding: 1,
+                explicit_height: 0,
+            },
+            [0, 0, 1, 1],
+        )
+        .unwrap();
+        state.toolbar.visible_changes = u64::MAX;
+        let (mut flags, mut disabled) = (0x25, 0x42);
+        assert!(
+            state
+                .menu(b"", 0x38, 0x0d, 0, &mut flags, &mut disabled, None)
+                .is_err()
+        );
+        assert_eq!((state.settings.toolbar, state.toolbar.visible), (0, false));
+        assert_eq!((flags, disabled), (0x25, 0x42));
+        state.resource_generation = u64::MAX;
+        state.resource_language = 3;
+        state.queue = [
+            Queued {
+                event: 0x19,
+                argument: 0,
+                value: 0,
+            },
+            Queued {
+                event: 0x26,
+                argument: 0,
+                value: 0,
+            },
+        ]
+        .into();
+        assert!(state.drain(b"", None).is_err());
+        assert_eq!(
+            (state.resource_language, state.resource_generation),
+            (3, u64::MAX)
+        );
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.queue[0].event, 0x26);
+        state.resource_generation -= 1;
+        state.saved = Some((ViewKind::Call, 0, 0, 0));
+        assert!(state.drain(b"", None).is_err());
+        assert_eq!(
+            (state.resource_language, state.resource_generation),
+            (7, u64::MAX)
+        );
+        assert!(state.queue.is_empty());
     }
 }

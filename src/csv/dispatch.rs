@@ -94,7 +94,9 @@ impl Binding {
                 labels
                     .iter()
                     .position(|label| label == required)
-                    .ok_or(Error::Invalid("required import label absent from schema"))
+                    .ok_or(Error::Invalid(
+                        "required import label absent from schema".into(),
+                    ))
             })
             .collect();
         Self::ascii(header, separator, labels, &required?)
@@ -109,7 +111,7 @@ impl Binding {
         mut lower: impl FnMut(&[u8]) -> Result<Vec<u8>, Error>,
     ) -> Result<Self, Error> {
         if labels.len() > 256 || required.iter().any(|i| *i >= labels.len()) {
-            return Err(Error::Invalid("header label schema"));
+            return Err(Error::Invalid("header label schema".into()));
         }
         let mut binding = Self {
             positions: vec![None; labels.len()],
@@ -129,7 +131,7 @@ impl Binding {
         mut lower: impl FnMut(&[u8]) -> Result<Vec<u8>, Error>,
     ) -> Result<bool, Error> {
         if labels.len() != self.positions.len() || required.iter().any(|i| *i >= labels.len()) {
-            return Err(Error::Invalid("header rebind schema"));
+            return Err(Error::Invalid("header rebind schema".into()));
         }
         for (position, label) in self.positions.iter_mut().zip(labels) {
             *position = find_column_with(header, label, self.separator, &mut lower)?;
@@ -152,7 +154,7 @@ impl Binding {
             .positions
             .get(field)
             .copied()
-            .ok_or(Error::Invalid("header field index"))?;
+            .ok_or(Error::Invalid("header field index".into()))?;
         Ok(column(line, index, self.separator))
     }
 }
@@ -197,7 +199,7 @@ mod tests {
                 .rebind(b"Latitude", &labels, &[0, 1], |bytes| {
                     calls += 1;
                     if calls == 5 {
-                        return Err(Error::Operation("injected header native failure"));
+                        return Err(Error::Operation("injected header native failure".into()));
                     }
                     Ok(bytes.iter().map(u8::to_ascii_lowercase).collect())
                 })

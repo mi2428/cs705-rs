@@ -106,7 +106,7 @@ impl Radio {
         };
         let started = Instant::now();
         let outcome = session.run(&mut serial, || {
-            cancelled.load(Ordering::Relaxed) || started.elapsed() >= Duration::from_secs(90)
+            Ok(cancelled.load(Ordering::Relaxed) || started.elapsed() >= Duration::from_secs(90))
         });
         activity::report(
             log,
@@ -415,8 +415,8 @@ impl Transport for Serial {
         // pretending it was applied or selecting another endpoint.
         Err(io::ErrorKind::Unsupported.into())
     }
-    fn now_ms(&self) -> u64 {
-        self.start.elapsed().as_millis().min(u64::MAX as u128) as u64
+    fn now_ms(&self) -> io::Result<u64> {
+        Ok(self.start.elapsed().as_millis().min(u64::MAX as u128) as u64)
     }
     fn wait_ms(&mut self, ms: u64) -> io::Result<()> {
         std::thread::sleep(Duration::from_millis(ms));

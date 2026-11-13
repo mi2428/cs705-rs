@@ -159,7 +159,7 @@ fn assignments(
                 document.finish_action(&mut action.context, true, action.flags, |_, _, _| {
                     Err(icf::Error::Invalid {
                         line: 0,
-                        reason: "native callback receiver unavailable in headless edit",
+                        reason: "native callback receiver unavailable in headless edit".into(),
                     })
                 })?;
             io::report(&json!({

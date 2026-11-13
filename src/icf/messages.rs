@@ -10,7 +10,7 @@ fn record(channel: usize, count: usize, base: usize, width: usize) -> Result<usi
     if channel >= count {
         return Err(Error::Unsupported {
             line: 5,
-            reason: "message channel outside supported storage range",
+            reason: "message channel outside supported storage range".into(),
         });
     }
     Ok(base + width * channel)
@@ -19,7 +19,7 @@ fn record(channel: usize, count: usize, base: usize, width: usize) -> Result<usi
 fn invalid(at: usize, reason: &'static str) -> Error {
     Error::Invalid {
         line: 5 + at / RECORD_BYTES,
-        reason,
+        reason: reason.into(),
     }
 }
 

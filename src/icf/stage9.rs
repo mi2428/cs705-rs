@@ -29,7 +29,10 @@ pub struct Report {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 fn raw<const N: usize>(image: &[u8], at: usize) -> Result<[u8; N], Error> {
     image
@@ -193,8 +196,8 @@ fn central(
             true,
             true,
             true,
-            |f| r.ranges.eb64(r.context, f),
-        );
+            |f| Ok(r.ranges.eb64(r.context, f)),
+        )?;
     let reset_scan = no_valid || !suitable;
     copy_field(image, defaults, 0x37818, 1)?;
     normalizer::stage9_filter_bits(image, defaults, r.context)?;

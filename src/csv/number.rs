@@ -13,7 +13,7 @@ pub mod paint;
 /// Safe API rejects nonfinite/overlong input instead of invoking x87 overflow.
 pub fn decimal(source: &[u8], point: u8) -> Result<f64, Error> {
     if source.len() > 4096 {
-        return Err(Error::Limit("decimal exceeds 4096 bytes"));
+        return Err(Error::Limit("decimal exceeds 4096 bytes".into()));
     }
     let (negative, digits) = if let Some(tail) = source.strip_prefix(b"-") {
         (true, tail)
@@ -21,14 +21,14 @@ pub fn decimal(source: &[u8], point: u8) -> Result<f64, Error> {
         (false, source)
     };
     if digits.is_empty() {
-        return Err(Error::Conversion("empty decimal"));
+        return Err(Error::Conversion("empty decimal".into()));
     }
     let mut dot = false;
     for &byte in digits {
         if byte == point && !dot {
             dot = true;
         } else if !byte.is_ascii_digit() {
-            return Err(Error::Conversion("decimal grammar"));
+            return Err(Error::Conversion("decimal grammar".into()));
         }
     }
     if digits == [point] {
@@ -39,11 +39,11 @@ pub fn decimal(source: &[u8], point: u8) -> Result<f64, Error> {
         .map(|b| if *b == point { b'.' } else { *b })
         .collect();
     let value: f64 = std::str::from_utf8(&bytes)
-        .map_err(|_| Error::Conversion("decimal encoding"))?
+        .map_err(|_| Error::Conversion("decimal encoding".into()))?
         .parse()
-        .map_err(|_| Error::Conversion("decimal value"))?;
+        .map_err(|_| Error::Conversion("decimal value".into()))?;
     if !value.is_finite() {
-        return Err(Error::Conversion("nonfinite decimal"));
+        return Err(Error::Conversion("nonfinite decimal".into()));
     }
     Ok(value)
 }
@@ -53,7 +53,7 @@ pub fn decimal(source: &[u8], point: u8) -> Result<f64, Error> {
 pub fn int32(source: &[u8]) -> Result<i32, Error> {
     let source = source.split(|b| *b == 0).next().unwrap_or(b"");
     if source.len() > 4096 {
-        return Err(Error::Limit("integer exceeds 4096 bytes"));
+        return Err(Error::Limit("integer exceeds 4096 bytes".into()));
     }
     let source = &source[source
         .iter()
@@ -74,7 +74,7 @@ pub fn int32(source: &[u8]) -> Result<i32, Error> {
         (10, digits)
     };
     if digits.is_empty() {
-        return Err(Error::Conversion("empty integer"));
+        return Err(Error::Conversion("empty integer".into()));
     }
     let maximum = if radix == 16 {
         u32::MAX
@@ -89,16 +89,16 @@ pub fn int32(source: &[u8]) -> Result<i32, Error> {
             b'0'..=b'9' => u32::from(b - b'0'),
             b'a'..=b'f' => u32::from(b - b'a' + 10),
             b'A'..=b'F' => u32::from(b - b'A' + 10),
-            _ => return Err(Error::Conversion("integer grammar")),
+            _ => return Err(Error::Conversion("integer grammar".into())),
         };
         if d >= radix {
-            return Err(Error::Conversion("integer digit"));
+            return Err(Error::Conversion("integer digit".into()));
         }
         value = value
             .checked_mul(radix)
             .and_then(|v| v.checked_add(d))
             .filter(|v| *v <= maximum)
-            .ok_or(Error::Conversion("integer overflow"))?;
+            .ok_or(Error::Conversion("integer overflow".into()))?;
     }
     Ok(if negative {
         0_u32.wrapping_sub(value)
@@ -161,7 +161,7 @@ pub(crate) fn native_integer(text: &[u8]) -> Result<i32, Error> {
 fn native_seconds(seconds: &[u8]) -> Result<u32, Error> {
     let first = *seconds
         .first()
-        .ok_or(Error::Invalid("coordinate seconds logical index1"))?;
+        .ok_or(Error::Invalid("coordinate seconds logical index1".into()))?;
     let tail = *seconds.get(1).unwrap_or(&0);
     let n = first
         .wrapping_sub(b'0')
@@ -186,7 +186,7 @@ pub fn coordinate_native_phase2(
     let substring = |start, len| native_substring(source, start, len);
     destination[0] = native_integer(substring(0, 3))? as u8;
     let unit = *current.get(0x396b4).ok_or(Error::SourceUnavailable(
-        "native coordinate current DMSType byte unavailable",
+        "native coordinate current DMSType byte unavailable".into(),
     ))?;
     let (fraction, direction) = match unit {
         1 => {
@@ -215,7 +215,7 @@ pub fn area_native_mode(current: &[u8]) -> Result<u8, Error> {
         Some(_) => 12,
         None => {
             return Err(Error::SourceUnavailable(
-                "native area current DMSType byte unavailable",
+                "native area current DMSType byte unavailable".into(),
             ));
         }
     })
@@ -237,7 +237,7 @@ pub fn area_native_phase2(destination: &mut [u8; 4], source: &[u8], mode: u8) ->
             native_integer(&digits)? as u16
         }
         13 => (native_integer(substring(2, 4))? as u16).wrapping_mul(6),
-        _ => return Err(Error::Invalid("native area mode outside11..13")),
+        _ => return Err(Error::Invalid("native area mode outside11..13".into())),
     };
     destination[0] = 0;
     destination[1..3].copy_from_slice(&fraction.to_be_bytes());
@@ -291,7 +291,7 @@ pub enum CoordinateEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoordinateDialog {
     pub mode: u8,
-    pub mask: &'static [u8],
+    pub mask: std::borrow::Cow<'static, [u8]>,
     pub seed: Vec<u8>,
     pub control: Vec<u8>,
     pub phase2: Option<Vec<u8>>,
@@ -312,7 +312,7 @@ impl CoordinateDialog {
         first: Option<u8>,
     ) -> Result<Self, Error> {
         let unit = *current.get(0x396b4).ok_or(Error::SourceUnavailable(
-            "native coordinate current DMSType byte unavailable",
+            "native coordinate current DMSType byte unavailable".into(),
         ))?;
         let mode = match unit {
             1 => 5,
@@ -407,7 +407,7 @@ impl CoordinateDialog {
             .collect();
         let mut dialog = Self {
             mode,
-            mask,
+            mask: std::borrow::Cow::Borrowed(mask),
             seed,
             control,
             phase2: None,
@@ -439,7 +439,7 @@ impl CoordinateDialog {
     /// Field validators still own date ranges, coordinates and direction rules.
     pub(crate) fn replace_masked(&mut self, source: &[u8]) -> Result<(), Error> {
         if source.len() != self.control.len() {
-            return Err(Error::Conversion("native mask width"));
+            return Err(Error::Conversion("native mask width".into()));
         }
         for (at, &slot) in self.slots.iter().enumerate() {
             if !matches!(slot, b'9' | b'l') {
@@ -454,7 +454,7 @@ impl CoordinateDialog {
                 && !(slot == b'9' && value.is_ascii_digit())
                 && !(slot == b'l' && value.is_ascii_alphabetic())
             {
-                return Err(Error::Conversion("native mask field character"));
+                return Err(Error::Conversion("native mask field character".into()));
             }
             self.control[at] = value;
         }
@@ -628,12 +628,12 @@ pub fn altitude(source: &[u8], point: u8) -> Result<i32, Error> {
     let value = decimal(source, point)?;
     let tenths_metres = (value * 10.0 + 0.5).trunc();
     if tenths_metres < f64::from(i32::MIN) || tenths_metres > f64::from(i32::MAX) {
-        return Err(Error::Conversion("altitude intermediate overflow"));
+        return Err(Error::Conversion("altitude intermediate overflow".into()));
     }
     let n = tenths_metres as i32;
     let magnitude = (u64::from(n.unsigned_abs()) * 10000 + 1524) / 3048;
     if magnitude > i32::MAX as u64 {
-        return Err(Error::Conversion("altitude result overflow"));
+        return Err(Error::Conversion("altitude result overflow".into()));
     }
     Ok(if n < 0 {
         -(magnitude as i32)
@@ -704,7 +704,7 @@ fn mhz_hz(source: &[u8], point: u8, invalid: u32) -> Result<u32, Error> {
 /// are explicitly outside this helper, not silently modeled as the full CRT.
 pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
     if source.len() > 4096 {
-        return Err(Error::Limit("CRT finite prefix exceeds 4096 bytes"));
+        return Err(Error::Limit("CRT finite prefix exceeds 4096 bytes".into()));
     }
     let source = source.split(|b| *b == 0).next().unwrap_or(b"");
     let mut at = 0;
@@ -729,7 +729,7 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
     }
     if matches!(source.get(at), Some(b'e' | b'E' | b'x' | b'X')) {
         return Err(Error::SourceUnavailable(
-            "CRT exponent or hex profile requires explicit conversion output",
+            "CRT exponent or hex profile requires explicit conversion output".into(),
         ));
     }
     if digits == 0 {
@@ -740,11 +740,11 @@ pub fn crt_decimal_prefix(source: &[u8], point: u8) -> Result<f64, Error> {
         .map(|b| if *b == point { b'.' } else { *b })
         .collect();
     let value: f64 = std::str::from_utf8(&bytes)
-        .map_err(|_| Error::Conversion("CRT prefix bytes"))?
+        .map_err(|_| Error::Conversion("CRT prefix bytes".into()))?
         .parse()
-        .map_err(|_| Error::Conversion("CRT prefix number"))?;
+        .map_err(|_| Error::Conversion("CRT prefix number".into()))?;
     if !value.is_finite() {
-        return Err(Error::Conversion("CRT prefix nonfinite"));
+        return Err(Error::Conversion("CRT prefix nonfinite".into()));
     }
     Ok(value)
 }
@@ -968,7 +968,7 @@ mod tests {
         let result = (|| {
             let wrapper_return = (|| {
                 area_native_phase2(&mut temporary, &text, area_native_mode(&current)?)?;
-                Err::<(), _>(Error::Operation("later display failed"))
+                Err::<(), _>(Error::Operation("later display failed".into()))
             })();
             wrapper_return?;
             word = u16::from_be_bytes([temporary[1], temporary[2]]);

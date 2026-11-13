@@ -462,8 +462,8 @@ impl Document {
                 .ok_or(invalid("current storage prefix unavailable"))?
                 .to_vec(),
         )?;
-        image.source = &self.original;
-        image.comment = &self.comment;
+        image.source = self.original.as_slice().into();
+        image.comment = self.comment.as_slice().into();
         image.extra_data = self.extra_data;
         Ok(image)
     }
@@ -956,7 +956,7 @@ mod tests {
                 CloneStep::Sync(_) => reply = CloneReply::Continue,
                 CloneStep::Query(query) => {
                     let mut transport = wire_for_session();
-                    let outcome = query.run(&mut transport, || false);
+                    let outcome = query.run(&mut transport, || Ok(false));
                     assert_eq!(outcome.failure, None);
                     assert_eq!(transport.commands, [0xe0]);
                     assert_eq!(transport.closes, 1);
@@ -970,7 +970,7 @@ mod tests {
                 }
                 CloneStep::Write(write) => {
                     let mut transport = wire_for_session();
-                    let outcome = write.run(&mut transport, || false);
+                    let outcome = write.run(&mut transport, || Ok(false));
                     assert_eq!(outcome.failure, None);
                     assert_eq!(
                         outcome.write_disposition,
@@ -1039,7 +1039,7 @@ mod tests {
                         if reprobe && probes != 0 {
                             transport.query_response.as_mut().unwrap()[10] = 5;
                         }
-                        let outcome = query.run(&mut transport, || false);
+                        let outcome = query.run(&mut transport, || Ok(false));
                         assert_eq!(outcome.failure, None);
                         assert_eq!(transport.commands, [0xe0]);
                         if reprobe && probes == 0 {
@@ -1063,7 +1063,7 @@ mod tests {
                                 .extend(packet((block * 64) as u32, bytes));
                         }
                         transport.read_data.extend(end(length.div_ceil(64)));
-                        let outcome = read.run(&mut transport, || false);
+                        let outcome = read.run(&mut transport, || Ok(false));
                         assert_eq!(
                             outcome.failure,
                             fail.then_some(clone::Failure::MissingCoverage)
@@ -1162,7 +1162,7 @@ mod tests {
         assert_eq!(receiver.ui.form.as_ref().unwrap().enabled58, 0);
         let mut transport = wire_for_session();
         let outcome = controller
-            .query_document(config(), &mut transport, || false, &mut receiver)
+            .query_document(config(), &mut transport, || Ok(false), &mut receiver)
             .unwrap();
         assert_eq!(outcome.failure, None);
         assert_eq!(transport.commands, [0xe0]);

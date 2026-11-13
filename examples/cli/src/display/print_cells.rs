@@ -60,7 +60,7 @@ fn history_number(hz: u32, runtime: &crate::records::Runtime) -> Result<Vec<u8>>
         context.native_byte("rtl_decimal")?,
         |index| {
             context.native_decimal_copy(index).map_err(|_| {
-                cs705::csv::Error::SourceUnavailable("native copied decimal byte input")
+                cs705::csv::Error::SourceUnavailable("native copied decimal byte input".into())
             })
         },
     )?)
@@ -651,7 +651,9 @@ fn receive_history(
                         .resource_line(name, index, context.gui_language, context.system_langid)
                         .map(|caption| caption.to_vec())
                         .map_err(|_| {
-                            cs705::csv::Error::SourceUnavailable("native Rx named resource source")
+                            cs705::csv::Error::SourceUnavailable(
+                                "native Rx named resource source".into(),
+                            )
                         })
                 },
             )?);
@@ -686,14 +688,14 @@ fn receive_history(
         &context,
         || {
             let source = runtime.display_format_context().map_err(|_| {
-                cs705::csv::Error::SourceUnavailable("native Rx actual Now context")
+                cs705::csv::Error::SourceUnavailable("native Rx actual Now context".into())
             })?;
-            let date = source
-                .native_clock_date()
-                .map_err(|_| cs705::csv::Error::Invalid("native Rx actual Now calendar fields"))?;
-            let time = source
-                .clock()
-                .map_err(|_| cs705::csv::Error::Invalid("native Rx actual Now time fields"))?;
+            let date = source.native_clock_date().map_err(|_| {
+                cs705::csv::Error::Invalid("native Rx actual Now calendar fields".into())
+            })?;
+            let time = source.clock().map_err(|_| {
+                cs705::csv::Error::Invalid("native Rx actual Now time fields".into())
+            })?;
             Ok((date, time))
         },
     )?)
@@ -847,7 +849,7 @@ fn settings_cell(
                     )
                     .map_err(|_| icf::Error::Invalid {
                         line: 0,
-                        reason: "native GPS alarm selector source unavailable",
+                        reason: "native GPS alarm selector source unavailable".into(),
                     })
             })?);
         }
@@ -871,7 +873,7 @@ fn settings_cell(
                 .map(<[u8]>::to_vec)
                 .map_err(|_| icf::Error::Invalid {
                     line: 0,
-                    reason: "native GPS sentence resource source unavailable",
+                    reason: "native GPS sentence resource source unavailable".into(),
                 })
         })?);
     }

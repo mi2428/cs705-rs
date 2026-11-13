@@ -112,7 +112,7 @@ pub fn edit_non_channel(
                     side,
                     input,
                     reset,
-                    |frequency| ranges.eb64(q, frequency),
+                    |frequency| Ok(ranges.eb64(q, frequency)),
                 )?
             } else {
                 icf::special::edit_user_frequency(
@@ -120,8 +120,8 @@ pub fn edit_non_channel(
                     index,
                     side,
                     input,
-                    |frequency| ranges.f32c(q, frequency),
-                    |frequency| ranges.ed70(frequency),
+                    |frequency| Ok(ranges.f32c(q, frequency)),
+                    |frequency| Ok(ranges.ed70(frequency)),
                 )?
             };
             Ok((effect.writes != 0, effect.callback_flags))
@@ -376,7 +376,7 @@ pub fn edit_non_channel(
     {
         let effect = e::edit_number_at(
             image,
-            field.name,
+            &field.name,
             index,
             e::NumberInput::Text(&source),
             if key == 0x307 {
@@ -608,11 +608,11 @@ fn gps_record(image: &mut Icf<'_>, frame: &InlineFrame, runtime: &Runtime) -> Re
             |image| {
                 let q = runtime.display_context().map_err(|_| icf::Error::Invalid {
                     line: 0,
-                    reason: "native GPS initializer Q source unavailable",
+                    reason: "native GPS initializer Q source unavailable".into(),
                 })?;
                 let clock = runtime.inline_clock().map_err(|_| icf::Error::Invalid {
                     line: 0,
-                    reason: "native GPS initializer clock source unavailable",
+                    reason: "native GPS initializer clock source unavailable".into(),
                 })?;
                 record::gps_initial::seed(image, q, runtime.display_system_langid(), clock)
             },
@@ -621,7 +621,7 @@ fn gps_record(image: &mut Icf<'_>, frame: &InlineFrame, runtime: &Runtime) -> Re
                     .inline_notification(event.id, event.synchronous)
                     .map_err(|_| icf::Error::Invalid {
                         line: 0,
-                        reason: "GPS initial notification request failed",
+                        reason: "GPS initial notification request failed".into(),
                     })
             },
         )?;

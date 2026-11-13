@@ -165,7 +165,7 @@ fn effect(e: &lib::Effect) -> Value {
     "helper_accepted":e.helper_accepted,"candidate":e.candidate,"shared_input":io::bytes_value(&e.shared_input),
     "group_label":e.group_label.as_ref().map(|(node,text)|json!({"node":node,"text":io::bytes_value(text),"delivery":"request-only"})),
     "refresh_if_binding_matches":e.refresh_if_binding_matches,
-    "coordinate_dialog":e.coordinate_dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),"valid":d.valid(),"phase2":d.phase2.as_ref().map(|text|io::bytes_value(text)),"cancel":d.cancel,"done":d.done,"release_requested":d.release_requested,"delivery":"request-only"})),
+    "coordinate_dialog":e.coordinate_dialog.as_ref().map(|d|json!({"mode":d.mode,"mask":io::bytes_value(&d.mask),"seed":io::bytes_value(&d.seed),"control":io::bytes_value(&d.control),"valid":d.valid(),"phase2":d.phase2.as_ref().map(|text|io::bytes_value(text)),"cancel":d.cancel,"done":d.done,"release_requested":d.release_requested,"delivery":"request-only"})),
     "notifications":e.notifications.iter().map(|&(id,synchronous)|json!({"id":id,"synchronous":synchronous,"delivery":"request-only"})).collect::<Vec<_>>()})
 }
 
@@ -349,23 +349,27 @@ impl NlsSource {
             return Ok(None);
         };
         let e = events.pop_front().ok_or(csv::Error::SourceUnavailable(
-            "captured NLS event exhausted",
+            "captured NLS event exhausted".into(),
         ))?;
         self.used += 1;
         if e["api"] != api {
-            return Err(csv::Error::Invalid("captured NLS API order mismatch"));
+            return Err(csv::Error::Invalid(
+                "captured NLS API order mismatch".into(),
+            ));
         }
         let decode = |key| {
             io::decode_hex(e[key].as_str().expect("validated source"))
-                .map_err(|_| csv::Error::Invalid("captured NLS hex"))
+                .map_err(|_| csv::Error::Invalid("captured NLS hex".into()))
         };
         if decode("input_hex")? != input {
-            return Err(csv::Error::Invalid("captured NLS actual input mismatch"));
+            return Err(csv::Error::Invalid(
+                "captured NLS actual input mismatch".into(),
+            ));
         }
         let written = decode("written_hex")?;
         if written.len() > out.len() {
             return Err(csv::Error::Invalid(
-                "captured NLS output exceeds actual capacity",
+                "captured NLS output exceeds actual capacity".into(),
             ));
         }
         out[..written.len()].copy_from_slice(&written);
@@ -374,7 +378,7 @@ impl NlsSource {
     fn map(&mut self, input: &[u8], out: &mut [u8]) -> std::result::Result<i32, csv::Error> {
         match self.captured("lcmap", input, out)? {
             Some(n) => {
-                i32::try_from(n).map_err(|_| csv::Error::Invalid("LCMap return outside i32"))
+                i32::try_from(n).map_err(|_| csv::Error::Invalid("LCMap return outside i32".into()))
             }
             None => csv::nls::ascii_map(input, out),
         }
@@ -382,13 +386,12 @@ impl NlsSource {
     fn upper(&mut self, out: &mut [u8]) -> std::result::Result<u32, csv::Error> {
         let input = out.to_vec();
         match self.captured("upper", &input, out)? {
-            Some(n) => {
-                u32::try_from(n).map_err(|_| csv::Error::Invalid("CharUpper return outside u32"))
-            }
+            Some(n) => u32::try_from(n)
+                .map_err(|_| csv::Error::Invalid("CharUpper return outside u32".into())),
             None => {
                 if !out.is_ascii() {
                     return Err(csv::Error::SourceUnavailable(
-                        "actual non-ASCII CharUpper source unavailable",
+                        "actual non-ASCII CharUpper source unavailable".into(),
                     ));
                 }
                 out.make_ascii_uppercase();

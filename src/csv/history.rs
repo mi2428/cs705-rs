@@ -16,7 +16,9 @@ pub fn format(
     context: &datetime::Context<'_>,
 ) -> Result<Vec<u8>, Error> {
     format_with_date(request, context, |_| {
-        Err(Error::SourceUnavailable("Rx native calendar token output"))
+        Err(Error::SourceUnavailable(
+            "Rx native calendar token output".into(),
+        ))
     })
 }
 
@@ -30,14 +32,14 @@ pub fn format_with_date(
     match request.adapter {
         A::RxType | A::RxStatus | A::Directivity | A::DataType => {
             table::portable_label(payload::Kind::ReceiveHistory, &request, b'.')?
-                .ok_or(Error::SourceUnavailable("Rx static label adapter"))
+                .ok_or(Error::SourceUnavailable("Rx static label adapter".into()))
         }
         A::Symbol => symbol(request.source, true),
         A::HistoryDate => {
             let raw = request
                 .source
                 .try_into()
-                .map_err(|_| Error::Invalid("Rx date requires raw6"))?;
+                .map_err(|_| Error::Invalid("Rx date requires raw6".into()))?;
             let (date, time) = datetime::decode_raw(raw);
             // A11A7 calls the throwing offset encoder BEFORE both valid gates.
             let offset = datetime::effective_offset(request.utc_offset_minutes)?;
@@ -55,7 +57,7 @@ pub fn format_with_date(
             let raw = request
                 .source
                 .try_into()
-                .map_err(|_| Error::Invalid("Rx timestamp requires raw3"))?;
+                .map_err(|_| Error::Invalid("Rx timestamp requires raw3".into()))?;
             Ok(datetime::timestamp(
                 raw,
                 request.utc_offset_minutes,
@@ -73,7 +75,9 @@ pub fn format_with_date(
             let text = message(request.source, width, false)?;
             Ok(super::export_text(&text, width))
         }
-        _ => Err(Error::Invalid("request is not an Rx history formatter")),
+        _ => Err(Error::Invalid(
+            "request is not an Rx history formatter".into(),
+        )),
     }
 }
 
@@ -81,7 +85,9 @@ pub fn format_with_date(
 // existing Rx primitive shared; 478C8 is a separate, later half-width-kana pass.
 fn message(source: &[u8], width: usize, extra: bool) -> Result<Vec<u8>, Error> {
     if source.len() != width {
-        return Err(Error::Invalid("Rx message requires exact raw20/raw43"));
+        return Err(Error::Invalid(
+            "Rx message requires exact raw20/raw43".into(),
+        ));
     }
     let mut text = super::export_call(source, width);
     for byte in &mut text {
@@ -102,10 +108,10 @@ fn message(source: &[u8], width: usize, extra: bool) -> Result<Vec<u8>, Error> {
 fn span(source: &[u8], at: usize, len: usize) -> Result<&[u8], Error> {
     let end = at
         .checked_add(len)
-        .ok_or(Error::Invalid("PE source offset overflow"))?;
+        .ok_or(Error::Invalid("PE source offset overflow".into()))?;
     source
         .get(at..end)
-        .ok_or(Error::SourceUnavailable("truncated PE source asset"))
+        .ok_or(Error::SourceUnavailable("truncated PE source asset".into()))
 }
 fn word(source: &[u8], at: usize) -> Result<u16, Error> {
     Ok(u16::from_le_bytes(span(source, at, 2)?.try_into().unwrap()))
@@ -118,22 +124,22 @@ fn dword(source: &[u8], at: usize) -> Result<u32, Error> {
 // section headers and the actual file-backed tail; virtual/BSS bytes are not 0.
 pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
     if span(source, 0, 2)? != b"MZ" {
-        return Err(Error::Invalid("symbol source is not PE"));
+        return Err(Error::Invalid("symbol source is not PE".into()));
     }
     let pe = dword(source, 0x3c)? as usize;
     let header = span(source, pe, 24)?;
     if &header[..4] != b"PE\0\0" || word(header, 4)? != 0x14c {
-        return Err(Error::Invalid("symbol source requires x86 PE"));
+        return Err(Error::Invalid("symbol source requires x86 PE".into()));
     }
     let count = usize::from(word(header, 6)?);
     let optional_size = usize::from(word(header, 20)?);
     if !(1..=96).contains(&count) || optional_size < 96 {
-        return Err(Error::Invalid("symbol PE header schema"));
+        return Err(Error::Invalid("symbol PE header schema".into()));
     }
     let optional = span(source, pe + 24, optional_size)?;
     if word(optional, 0)? != 0x10b || dword(optional, 28)? != 0x400000 {
         return Err(Error::Invalid(
-            "symbol source requires PE32 ImageBase400000",
+            "symbol source requires PE32 ImageBase400000".into(),
         ));
     }
     let sections = span(source, pe + 24 + optional_size, count * 40)?;
@@ -145,18 +151,20 @@ pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
             && delta < raw_size
         {
             if found.is_some() {
-                return Err(Error::Invalid("overlapping PE symbol sections"));
+                return Err(Error::Invalid("overlapping PE symbol sections".into()));
             }
             let at = (dword(section, 20)? as usize)
                 .checked_add(delta as usize)
-                .ok_or(Error::Invalid("PE symbol file offset overflow"))?;
+                .ok_or(Error::Invalid("PE symbol file offset overflow".into()))?;
             let tail = source.get(at..).ok_or(Error::SourceUnavailable(
-                "PE symbol RVA has no source bytes",
+                "PE symbol RVA has no source bytes".into(),
             ))?;
             found = Some(&tail[..tail.len().min((raw_size - delta) as usize)]);
         }
     }
-    found.ok_or(Error::SourceUnavailable("PE symbol RVA is not file-backed"))
+    found.ok_or(Error::SourceUnavailable(
+        "PE symbol RVA is not file-backed".into(),
+    ))
 }
 
 /// Independent display contract, not the original caption table or a fallback.
@@ -165,7 +173,7 @@ pub(crate) fn pe_tail(source: &[u8], rva: u32) -> Result<&[u8], Error> {
 pub fn symbol(raw: &[u8], compact: bool) -> Result<Vec<u8>, Error> {
     let [first, second]: [u8; 2] = raw
         .try_into()
-        .map_err(|_| Error::Invalid("Rx symbol requires raw2"))?;
+        .map_err(|_| Error::Invalid("Rx symbol requires raw2".into()))?;
     Ok(if first == 255 {
         if compact {
             Vec::new()
@@ -188,7 +196,7 @@ pub fn symbol_from_source(
 ) -> Result<Vec<u8>, Error> {
     let [first, second]: [u8; 2] = raw
         .try_into()
-        .map_err(|_| Error::Invalid("Rx symbol requires raw2"))?;
+        .map_err(|_| Error::Invalid("Rx symbol requires raw2".into()))?;
     if first == 255 {
         return Ok(if compact { Vec::new() } else { b"---".to_vec() });
     }
@@ -219,7 +227,7 @@ pub fn symbol_from_source(
     let rva = pointer
         .checked_sub(0x400000)
         .ok_or(Error::SourceUnavailable(
-            "Rx symbol caption pointer outside source image",
+            "Rx symbol caption pointer outside source image".into(),
         ))?;
     let tail = pe_tail(source, rva)?;
     let end = tail
@@ -227,7 +235,7 @@ pub fn symbol_from_source(
         .take(39)
         .position(|b| *b == 0)
         .ok_or(Error::SourceUnavailable(
-            "Rx symbol caption has no bounded NUL",
+            "Rx symbol caption has no bounded NUL".into(),
         ))?;
     if end == 0 && !special {
         return Ok(direct());
@@ -238,7 +246,7 @@ pub fn symbol_from_source(
     }
     if out.len() > 38 {
         return Err(Error::SourceUnavailable(
-            "Rx symbol exceeds native38-byte buffer",
+            "Rx symbol exceeds native38-byte buffer".into(),
         ));
     }
     Ok(finish(&out, 38))
@@ -638,9 +646,9 @@ mod tests {
         ));
         assert_eq!(
             format_with_date(request(A::HistoryDate, &raw, 0), &c, |_| {
-                Err(Error::Operation("native date failure"))
+                Err(Error::Operation("native date failure".into()))
             }),
-            Err(Error::Operation("native date failure"))
+            Err(Error::Operation("native date failure".into()))
         );
         assert_eq!(
             format_with_date(request(A::HistoryDate, &raw, 0), &c, |token| {

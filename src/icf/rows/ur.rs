@@ -64,13 +64,16 @@ pub struct Effect {
 
 fn text_error(error: crate::csv::Error) -> Error {
     use crate::csv::Error::*;
-    invalid(match error {
-        Limit(reason)
-        | Invalid(reason)
-        | Conversion(reason)
-        | SourceUnavailable(reason)
-        | Operation(reason) => reason,
-    })
+    Error::Invalid {
+        line: 0,
+        reason: match error {
+            Limit(reason)
+            | Invalid(reason)
+            | Conversion(reason)
+            | SourceUnavailable(reason)
+            | Operation(reason) => reason,
+        },
+    }
 }
 
 fn prefix(bytes: &[u8]) -> Vec<u8> {
@@ -543,14 +546,18 @@ mod tests {
                             assert_eq!(src, b"x y   ");
                             assert_eq!(src.len(), dst.len());
                             if !fail_upper {
-                                return Err(crate::csv::Error::Operation("injected map failure"));
+                                return Err(crate::csv::Error::Operation(
+                                    "injected map failure".into(),
+                                ));
                             }
                             dst.copy_from_slice(src);
                             Ok(0)
                         },
                         |bytes| {
                             bytes[0] = b'Z';
-                            Err(crate::csv::Error::Operation("injected upper failure"))
+                            Err(crate::csv::Error::Operation(
+                                "injected upper failure".into(),
+                            ))
                         },
                     )
                     .is_err()

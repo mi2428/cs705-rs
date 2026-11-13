@@ -468,7 +468,10 @@ pub fn row(input: &str, sheet: Sheet, action: RowAction, end_index: Option<usize
 }
 
 fn gps_source_error(reason: &'static str) -> cs705::icf::Error {
-    cs705::icf::Error::Invalid { line: 0, reason }
+    cs705::icf::Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 fn gps_notify(event: cs705::gps::operations::Event) -> std::result::Result<(), cs705::icf::Error> {

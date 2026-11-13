@@ -493,8 +493,8 @@ impl WorkingUr {
         rebuild_ur_metadata(&mut memory)?;
         memory.truncate(0x3c9c0);
         let mut image = Icf::from_memory(memory)?;
-        image.source = &self.original;
-        image.comment = &self.comment;
+        image.source = self.original.as_slice().into();
+        image.comment = self.comment.as_slice().into();
         image.extra_data = self.extra_data;
         Ok(image)
     }
@@ -904,8 +904,8 @@ impl NormalMemory {
         rebuild_metadata(&mut memory)?;
         memory.truncate(0x3c9c0);
         let mut image: Icf<'a> = Icf::from_memory(memory)?;
-        image.source = &self.original;
-        image.comment = &self.comment;
+        image.source = self.original.as_slice().into();
+        image.comment = self.comment.as_slice().into();
         image.extra_data = self.extra_data;
         Ok(image)
     }
@@ -966,7 +966,10 @@ impl NormalMemory {
 }
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 #[cfg(test)]
@@ -1115,7 +1118,7 @@ mod tests {
         memory[0x2eda3..0x2edab].copy_from_slice(b"ZERO    ");
         memory[0x2edb3..0x2edbb].copy_from_slice(b"TWO     ");
         let mut storage = Icf::from_memory(memory).unwrap();
-        storage.comment = b"UR METADATA";
+        storage.comment = b"UR METADATA".as_slice().into();
         storage.extra_data = 0x12345639;
         let file = storage.to_bytes();
         let parsed = Icf::parse(&file).unwrap();

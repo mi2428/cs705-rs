@@ -6,9 +6,13 @@ use super::{
     extended::{ChoiceEffect, ChoiceInput},
 };
 use crate::icf::{Error, Icf};
+use std::borrow::Cow;
 
 fn invalid(reason: &'static str) -> Error {
-    Error::Invalid { line: 0, reason }
+    Error::Invalid {
+        line: 0,
+        reason: reason.into(),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -17,6 +21,7 @@ pub struct Resources {
     pub language_descriptor: Option<u32>,
 }
 
+#[derive(Clone)]
 pub struct ChoiceField {
     pub setting: Setting,
     selector: &'static str,
@@ -34,8 +39,8 @@ const fn choice(
 ) -> ChoiceField {
     ChoiceField {
         setting: Setting {
-            feature_id: id,
-            name,
+            feature_id: Cow::Borrowed(id),
+            name: Cow::Borrowed(name),
             key,
             selection_key: 1,
             domain: Domain {
@@ -637,6 +642,7 @@ enum NumberKind {
     Speed,
     AlarmRow,
 }
+#[derive(Clone)]
 pub struct NumberField {
     pub setting: Setting,
     kind: NumberKind,
@@ -650,8 +656,8 @@ const fn gps_number(
 ) -> NumberField {
     NumberField {
         setting: Setting {
-            feature_id: id,
-            name,
+            feature_id: Cow::Borrowed(id),
+            name: Cow::Borrowed(name),
             key,
             selection_key: 1,
             domain: Domain {
@@ -660,7 +666,7 @@ const fn gps_number(
                 step: 1,
             },
             count: 1,
-            kind: Kind::Integer("native GPS wrapper"),
+            kind: Kind::Integer(Cow::Borrowed("native GPS wrapper")),
             offset: at,
             width: if matches!(kind, NumberKind::Altitude) {
                 4
@@ -1126,38 +1132,39 @@ impl<'a> NativeSymbolPairs<'a> {
             .map_or(74, |i| i as i64)
     }
 }
+#[derive(Clone)]
 pub struct SymbolField {
-    pub feature_id: &'static str,
-    pub name: &'static str,
+    pub feature_id: Cow<'static, str>,
+    pub name: Cow<'static, str>,
     pub count: usize,
     pub key: u16,
     at: usize,
 }
 static SYMBOLS: &[SymbolField] = &[
     SymbolField {
-        feature_id: "A2-H55075-20",
-        name: "position-symbol",
+        feature_id: Cow::Borrowed("A2-H55075-20"),
+        name: Cow::Borrowed("position-symbol"),
         count: 4,
         key: 0x1d1,
         at: 0x3c677,
     },
     SymbolField {
-        feature_id: "A2-H55075-33",
-        name: "object-symbol",
+        feature_id: Cow::Borrowed("A2-H55075-33"),
+        name: Cow::Borrowed("object-symbol"),
         count: 1,
         key: 0x1e8,
         at: 0x3c73d,
     },
     SymbolField {
-        feature_id: "A2-H55075-49",
-        name: "item-symbol",
+        feature_id: Cow::Borrowed("A2-H55075-49"),
+        name: Cow::Borrowed("item-symbol"),
         count: 1,
         key: 0x1f9,
         at: 0x3c78b,
     },
     SymbolField {
-        feature_id: "A2-H55075-62",
-        name: "weather-symbol",
+        feature_id: Cow::Borrowed("A2-H55075-62"),
+        name: Cow::Borrowed("weather-symbol"),
         count: 1,
         key: 0x207,
         at: 0x3c7d0,
@@ -1177,7 +1184,7 @@ impl SymbolField {
         if index >= self.count {
             return Err(invalid("GPS symbol index outside native axis"));
         }
-        Ok(self.at + 2 * index)
+        super::storage_address(self.at, 2, 2, index)
     }
     pub fn read(&self, image: &Icf<'_>, index: usize) -> Result<[u8; 2], Error> {
         let at = self.address(index)?;
@@ -1234,7 +1241,7 @@ impl SymbolField {
         use crate::csv::{Error, nls};
         let at = self
             .address(index)
-            .map_err(|_| Error::Invalid("GPS symbol index outside native axis"))?;
+            .map_err(|_| Error::Invalid("GPS symbol index outside native axis".into()))?;
         let mut stored = false;
         let state_out = if matches!(input, FixedTextInput::Begin) {
             2
@@ -1243,7 +1250,7 @@ impl SymbolField {
         };
         if let FixedTextInput::Text { source, phase } = input {
             if !matches!(phase, 1 | 2) {
-                return Err(Error::Invalid("GPS symbol text phase must be1or2"));
+                return Err(Error::Invalid("GPS symbol text phase must be1or2".into()));
             }
             let candidate = nls::whole_text(
                 source,
@@ -1264,7 +1271,7 @@ impl SymbolField {
                 {
                     image
                         .patch_memory(&[(at, &[first, candidate[1]])])
-                        .map_err(|_| Error::Operation("GPS symbol direct store"))?;
+                        .map_err(|_| Error::Operation("GPS symbol direct store".into()))?;
                     stored = true;
                 }
             }
@@ -1278,9 +1285,10 @@ impl SymbolField {
     }
 }
 
+#[derive(Clone)]
 pub struct CoordinateField {
-    pub feature_id: &'static str,
-    pub name: &'static str,
+    pub feature_id: Cow<'static, str>,
+    pub name: Cow<'static, str>,
     pub key: u16,
     pub longitude: bool,
     pub area: bool,
@@ -1288,8 +1296,8 @@ pub struct CoordinateField {
     manual: bool,
 }
 pub static ALARM_AREA: CoordinateField = CoordinateField {
-    feature_id: "A2-H55075-10",
-    name: "alarm-area-group",
+    feature_id: Cow::Borrowed("A2-H55075-10"),
+    name: Cow::Borrowed("alarm-area-group"),
     key: 0x1c7,
     longitude: false,
     area: true,
@@ -1298,8 +1306,8 @@ pub static ALARM_AREA: CoordinateField = CoordinateField {
 };
 static COORDINATES: &[CoordinateField] = &[
     CoordinateField {
-        feature_id: "A2-H55075-02",
-        name: "manual-latitude",
+        feature_id: Cow::Borrowed("A2-H55075-02"),
+        name: Cow::Borrowed("manual-latitude"),
         key: 0x1c2,
         longitude: false,
         area: false,
@@ -1307,8 +1315,8 @@ static COORDINATES: &[CoordinateField] = &[
         manual: true,
     },
     CoordinateField {
-        feature_id: "A2-H55075-03",
-        name: "manual-longitude",
+        feature_id: Cow::Borrowed("A2-H55075-03"),
+        name: Cow::Borrowed("manual-longitude"),
         key: 0x1c3,
         longitude: true,
         area: false,
@@ -1316,8 +1324,8 @@ static COORDINATES: &[CoordinateField] = &[
         manual: true,
     },
     CoordinateField {
-        feature_id: "A2-H55075-35",
-        name: "object-latitude",
+        feature_id: Cow::Borrowed("A2-H55075-35"),
+        name: Cow::Borrowed("object-latitude"),
         key: 0x1eb,
         longitude: false,
         area: false,
@@ -1325,8 +1333,8 @@ static COORDINATES: &[CoordinateField] = &[
         manual: false,
     },
     CoordinateField {
-        feature_id: "A2-H55075-36",
-        name: "object-longitude",
+        feature_id: Cow::Borrowed("A2-H55075-36"),
+        name: Cow::Borrowed("object-longitude"),
         key: 0x1ec,
         longitude: true,
         area: false,
@@ -1334,8 +1342,8 @@ static COORDINATES: &[CoordinateField] = &[
         manual: false,
     },
     CoordinateField {
-        feature_id: "A2-H55075-51",
-        name: "item-latitude",
+        feature_id: Cow::Borrowed("A2-H55075-51"),
+        name: Cow::Borrowed("item-latitude"),
         key: 0x1fc,
         longitude: false,
         area: false,
@@ -1343,8 +1351,8 @@ static COORDINATES: &[CoordinateField] = &[
         manual: false,
     },
     CoordinateField {
-        feature_id: "A2-H55075-52",
-        name: "item-longitude",
+        feature_id: Cow::Borrowed("A2-H55075-52"),
+        name: Cow::Borrowed("item-longitude"),
         key: 0x1fd,
         longitude: true,
         area: false,
@@ -1409,7 +1417,7 @@ impl CoordinateField {
             let word = u16::from_be_bytes([temporary[1], temporary[2]]);
             image
                 .patch_memory(&[(self.at, &word.to_le_bytes())])
-                .map_err(|_| crate::csv::Error::Operation("GPS area word store"))?;
+                .map_err(|_| crate::csv::Error::Operation("GPS area word store".into()))?;
         } else {
             crate::csv::number::coordinate_native_phase2(
                 (&mut image.memory[self.at..self.at + 4])
@@ -1447,9 +1455,10 @@ impl CoordinateField {
     }
 }
 
+#[derive(Clone)]
 pub struct TextField {
-    pub feature_id: &'static str,
-    pub name: &'static str,
+    pub feature_id: Cow<'static, str>,
+    pub name: Cow<'static, str>,
     pub key: u16,
     pub count: usize,
     pub width: usize,
@@ -1460,8 +1469,8 @@ pub struct TextField {
 }
 static TEXT: &[TextField] = &[
     TextField {
-        feature_id: "A2-H55075-17",
-        name: "unproto-address",
+        feature_id: Cow::Borrowed("A2-H55075-17"),
+        name: Cow::Borrowed("unproto-address"),
         key: 0x1ce,
         count: 1,
         width: 56,
@@ -1471,8 +1480,8 @@ static TEXT: &[TextField] = &[
         altitude: 0,
     },
     TextField {
-        feature_id: "A2-H55075-23",
-        name: "position-comment",
+        feature_id: Cow::Borrowed("A2-H55075-23"),
+        name: Cow::Borrowed("position-comment"),
         key: 0x1da,
         count: 4,
         width: 43,
@@ -1482,8 +1491,8 @@ static TEXT: &[TextField] = &[
         altitude: 0x3c732,
     },
     TextField {
-        feature_id: "A2-H55075-31",
-        name: "object-name",
+        feature_id: Cow::Borrowed("A2-H55075-31"),
+        name: Cow::Borrowed("object-name"),
         key: 0x1e6,
         count: 1,
         width: 9,
@@ -1493,8 +1502,8 @@ static TEXT: &[TextField] = &[
         altitude: 0,
     },
     TextField {
-        feature_id: "A2-H55075-34",
-        name: "object-comment",
+        feature_id: Cow::Borrowed("A2-H55075-34"),
+        name: Cow::Borrowed("object-comment"),
         key: 0x1ea,
         count: 1,
         width: 43,
@@ -1504,8 +1513,8 @@ static TEXT: &[TextField] = &[
         altitude: 0x3c772,
     },
     TextField {
-        feature_id: "A2-H55075-47",
-        name: "item-name",
+        feature_id: Cow::Borrowed("A2-H55075-47"),
+        name: Cow::Borrowed("item-name"),
         key: 0x1f7,
         count: 1,
         width: 9,
@@ -1515,8 +1524,8 @@ static TEXT: &[TextField] = &[
         altitude: 0,
     },
     TextField {
-        feature_id: "A2-H55075-50",
-        name: "item-comment",
+        feature_id: Cow::Borrowed("A2-H55075-50"),
+        name: Cow::Borrowed("item-comment"),
         key: 0x1fb,
         count: 1,
         width: 43,
@@ -1526,8 +1535,8 @@ static TEXT: &[TextField] = &[
         altitude: 0x3c7c0,
     },
     TextField {
-        feature_id: "A2-H55075-64",
-        name: "weather-comment",
+        feature_id: Cow::Borrowed("A2-H55075-64"),
+        name: Cow::Borrowed("weather-comment"),
         key: 0x20a,
         count: 1,
         width: 43,
@@ -1537,8 +1546,8 @@ static TEXT: &[TextField] = &[
         altitude: 0,
     },
     TextField {
-        feature_id: "A2-H55075-67",
-        name: "gps-message",
+        feature_id: Cow::Borrowed("A2-H55075-67"),
+        name: Cow::Borrowed("gps-message"),
         key: 0x20d,
         count: 1,
         width: 20,
@@ -1747,7 +1756,7 @@ impl TextField {
         if index >= self.count {
             return Err(invalid("GPS text index outside native axis"));
         }
-        Ok(self.at + self.width * index)
+        super::storage_address(self.at, self.width, self.width, index)
     }
     pub fn read(&self, image: &Icf<'_>, index: usize) -> Result<Vec<u8>, Error> {
         let at = self.address(index)?;
@@ -1788,7 +1797,7 @@ impl TextField {
         use crate::csv::{self, nls};
         let at = self
             .address(index)
-            .map_err(|_| csv::Error::Invalid("GPS text index outside native axis"))?;
+            .map_err(|_| csv::Error::Invalid("GPS text index outside native axis".into()))?;
         let mut stored = false;
         let state_out = if matches!(input, super::extended::FixedTextInput::Begin) {
             2
@@ -1797,7 +1806,9 @@ impl TextField {
         };
         if let super::extended::FixedTextInput::Text { source, phase } = input {
             if !matches!(phase, 1 | 2) {
-                return Err(csv::Error::Invalid("GPS fixed text phase must be1or2"));
+                return Err(csv::Error::Invalid(
+                    "GPS fixed text phase must be1or2".into(),
+                ));
             }
             let profile = nls::Profile {
                 uppercase: false,
@@ -1813,7 +1824,7 @@ impl TextField {
             bytes[..candidate.len()].copy_from_slice(&candidate);
             image
                 .patch_memory(&[(at, &bytes)])
-                .map_err(|_| csv::Error::Operation("GPS fixed text store"))?;
+                .map_err(|_| csv::Error::Operation("GPS fixed text store".into()))?;
             stored = true;
         }
         Ok(super::extended::TextEffect {
@@ -1822,7 +1833,7 @@ impl TextField {
             notify_flags: 0,
             display: self
                 .read(image, index)
-                .map_err(|_| csv::Error::Operation("GPS fixed text read"))?,
+                .map_err(|_| csv::Error::Operation("GPS fixed text read".into()))?,
         })
     }
 }
@@ -1830,6 +1841,75 @@ impl TextField {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutable_descriptor_counts_reject_overflow_and_outside_image_before_callbacks() {
+        use super::super::extended::FixedTextInput;
+        let mut image = image();
+        let before = image.memory().to_vec();
+        let mut symbol = SYMBOLS[0].clone();
+        let mut text = TEXT[0].clone();
+        symbol.count = usize::MAX;
+        text.count = usize::MAX;
+        for index in [usize::MAX - 1, 0x3c9c0] {
+            assert!(symbol.read(&image, index).is_err());
+            assert!(text.read(&image, index).is_err());
+            let mut source = *b"abc";
+            assert!(
+                symbol
+                    .edit_with_nls(
+                        &mut image,
+                        index,
+                        FixedTextInput::Text {
+                            source: &mut source,
+                            phase: 1
+                        },
+                        |_, _| panic!("invalid symbol index reached callback"),
+                    )
+                    .is_err()
+            );
+            assert!(
+                text.edit_with_nls(
+                    &mut image,
+                    index,
+                    FixedTextInput::Text {
+                        source: &mut source,
+                        phase: 1
+                    },
+                    |_, _| panic!("invalid text index reached callback"),
+                )
+                .is_err()
+            );
+            assert_eq!(&source, b"abc");
+            assert_eq!(image.memory(), before);
+        }
+    }
+
+    #[test]
+    fn owned_descriptor_names_preserve_private_coordinates() {
+        let image = image();
+        let mut symbol = SYMBOLS[0].clone();
+        symbol.name = Cow::Owned("custom symbol".to_owned());
+        symbol.feature_id = Cow::Owned("custom symbol ID".to_owned());
+        assert_eq!(
+            symbol.read(&image, 0).unwrap(),
+            SYMBOLS[0].read(&image, 0).unwrap()
+        );
+        let mut coordinate = COORDINATES[0].clone();
+        coordinate.name = Cow::Owned("custom coordinate".to_owned());
+        coordinate.feature_id = Cow::Owned("custom coordinate ID".to_owned());
+        assert_eq!(coordinate.read(&image), COORDINATES[0].read(&image));
+        let mut text = TEXT[0].clone();
+        text.name = Cow::Owned("custom text".to_owned());
+        text.feature_id = Cow::Owned("custom text ID".to_owned());
+        assert_eq!(
+            text.read(&image, 0).unwrap(),
+            TEXT[0].read(&image, 0).unwrap()
+        );
+        assert!(matches!(SYMBOLS[0].name, Cow::Borrowed(_)));
+        assert!(matches!(COORDINATES[0].feature_id, Cow::Borrowed(_)));
+        assert!(matches!(TEXT[0].name, Cow::Borrowed(_)));
+    }
     use crate::icf::settings::Selection;
     fn image() -> Icf<'static> {
         let mut bytes = vec![0xa5; 0x3c9c0];
@@ -2231,7 +2311,7 @@ mod tests {
                         phase: 1
                     },
                     |_, _| Err(crate::csv::Error::SourceUnavailable(
-                        "actual LCMap output missing"
+                        "actual LCMap output missing".into()
                     ))
                 )
                 .is_err()
