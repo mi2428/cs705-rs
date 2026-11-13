@@ -5,9 +5,14 @@ build-backend = "maturin"
 [project]
 name = "cs705"
 version = "1.0.0"
+description = "Native bindings for reading and editing IC-705 configuration files and handling clone protocols"
+readme = { text = "See the [project README](https://github.com/mi2428/cs705-rs#case-list-memory-channels-with-python) for installation and usage.", content-type = "text/markdown" }
 requires-python = ">=3.15"
 license = "MIT OR Apache-2.0"
 license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+
+[project.urls]
+Repository = "https://github.com/mi2428/cs705-rs"
 
 [tool.maturin]
 bindings = "pyo3"
