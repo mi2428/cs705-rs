@@ -52,8 +52,12 @@ jobs:
         run: |
           venv="$RUNNER_TEMP/python-venv"
           python -m venv "$venv"
-          printf 'PYTHON=%s\nPYO3_PYTHON=%s\n' "$venv/bin/python" "$venv/bin/python" >> "$GITHUB_ENV"
-          printf 'PYTHON_TARGET_DIR=%s\n' "$RUNNER_TEMP/python-target" >> "$GITHUB_ENV"
+          {
+            printf 'PYTHON=%s\nPYO3_PYTHON=%s\n' "$venv/bin/python" "$venv/bin/python"
+            printf 'PYTHON_TARGET_DIR=%s\n' "$RUNNER_TEMP/python-target"
+            # Native tests embed CPython; link against its actual install directory.
+            printf 'LIBRARY_PATH=%s/lib%s\n' "$pythonLocation" "${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          } >> "$GITHUB_ENV"
       - name: Install the declared build backend
         run: |
           "$PYTHON" - <<'PY'
