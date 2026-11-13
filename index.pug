@@ -42,6 +42,7 @@ html(lang="ja")
           li CSV import and export for memories, repeaters, GPS entries, callsigns and scan edges. Frequencies, offsets, tones, coordinates and fixed-width names follow CS-705 conversion rules, with explicit separator and locale inputs. Text remains byte-oriented, separating the encoding of stored data from Unicode conversion for display.
           li Clone-frame encoding and decoding, identity/profile checks, read/write sessions, transfer-range selection, packet checksums, coverage validation and completion or failure results. A caller-supplied #[code Transport] provides reads, writes, timing, waits, pending-output counts, reconfiguration and close over an already opened connection, keeping OS serial I/O outside the protocol engine.
         p The core library depends only on #[code md5], with no GUI toolkit or serial driver dependencies. #[a(href="https://github.com/mi2428/cs705-rs/blob/main/NOTES.md") NOTES.md] documents the data structures, operation sequences and wire formats recovered through reverse engineering.
+        p #[code PyO3] bindings expose the same Rust core as an in-process #[code cs705] CPython extension, preserving byte-oriented data and native error reporting for use with Jupyter, Pandas and Matplotlib without a subprocess or a separate format implementation.
 
       img(src="screenshot.png" width="1626" height="1030" alt="A terminal settings interface built with cs705")
 
