@@ -9,15 +9,14 @@ Use it to build your own configuration tools without running the CS-705 Windows 
 
 - Refer to the [API documentation](https://docs.rs/cs705) for public interfaces and their contracts.
 - Read [`NOTES.md`](https://github.com/mi2428/cs705-rs/blob/main/NOTES.md) for technical details of the recovered formats, editing behavior, and clone protocol.
-- The [`examples/cli`](https://github.com/mi2428/cs705-rs/tree/main/examples/cli) and [`example/tui`](https://github.com/mi2428/cs705-rs/tree/main/examples/tui) folders contain separate applications built on the library.
-- The [Python bindings](bindings/python/README.md) provide an in-process CPython 3.15+ package, with source-build and test instructions.
+- See [`examples/cli`](https://github.com/mi2428/cs705-rs/tree/main/examples/cli) and [`example/tui`](https://github.com/mi2428/cs705-rs/tree/main/examples/tui) for applications built on the library, and [`example/jupyter`](examples/jupyter) for interactive tables and plots.
 
 ## Features
 
-- ICF parsing, serialization, and explicit layout conversion. Typed editing of memories, radio settings, repeater lists, GPS memories, and callsigns.
+- ICF parsing, serialization, and explicit layout conversion.
+  Typed editing of memories, radio settings, repeater lists, GPS memories, and callsigns.
 - Clone protocol frames and transfer sessions over caller-owned transports.
 - CS-705 CSV import and export with explicit locale and byte-string handling.
-- In-process Python 3.15+ bindings, including [small, scriptable tools](examples/python).
 
 ### Case: List Memory Channels and Rename the First One
 
@@ -164,8 +163,17 @@ Never retry a failed or unconfirmed write automatically; acknowledgement is not 
 
 ### Case: List Memory Channels with Python
 
-With the [Python bindings installed](bindings/python/README.md#build-and-install-from-this-checkout), list the saved logical channels in a canonical MapRev 6 file without radio I/O.
-Names remain opaque bytes rather than being decoded with an assumed text encoding.
+Use a Python interpreter supported by [`bindings/python/pyproject.toml`](bindings/python/pyproject.toml) and the Rust toolchain declared in [`rust-toolchain.toml`](rust-toolchain.toml).
+From the repository root, build and install the bindings into a virtual environment:
+
+```sh
+python3 -m venv bindings/python/target/venv
+PYTHON="$PWD/bindings/python/target/venv/bin/python"
+"$PYTHON" -m pip install ./bindings/python
+```
+
+List the saved logical channels in a canonical MapRev 6 ICF file without radio I/O.
+Names remain bytes; no text encoding is assumed.
 
 ```python
 from pathlib import Path
@@ -181,7 +189,15 @@ for group, bank in enumerate(image.memory_groups()):
             print(f"{group:02}/{row:02} {hz} Hz {name!r}")
 ```
 
-For a reusable comparison tool rather than a snippet, see [the Python memory-backup diff example](examples/python).
+To check the native bindings and the installed package, run:
+
+```sh
+make quality TARGETS=python PYTHON="$PYTHON"
+make test TARGETS=python TESTS=wheel PYTHON="$PYTHON"
+```
+
+The Makefile defaults to the Rust library; use `TARGETS=rust,python` to check both components.
+If Cargo's offline checks lack dependencies, run `cargo fetch --locked --manifest-path bindings/python/Cargo.toml` first.
 
 ## License
 
