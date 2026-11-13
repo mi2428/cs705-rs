@@ -5,8 +5,10 @@ edition = "2024"
 rust-version = "1.99"
 description = "Native Rust library for reading and editing IC-705 configuration files and handling clone protocols"
 license = "MIT OR Apache-2.0"
-publish = false
+repository = "https://github.com/mi2428/cs705-rs"
+publish = ["crates-io"]
 autoexamples = false
+exclude = ["examples/**"]
 
 [dependencies]
 md5 = "=0.8.1"
