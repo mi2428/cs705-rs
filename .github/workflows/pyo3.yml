@@ -17,7 +17,7 @@ name: PyO3
       - '.rustfmt.toml'
       - 'clippy.toml'
       - '.clippy.toml'
-      - '.github/workflows/python.yml'
+      - '.github/workflows/pyo3.yml'
       - '.github/workflows/actions.lock'
   pull_request:
     paths: *paths

@@ -9,7 +9,7 @@ workflows:
     '.github/workflows/library.yml':
         - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/checkout@v6.1.0'
-    '.github/workflows/python.yml':
+    '.github/workflows/pyo3.yml':
         - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/checkout@v6.1.0'
         - 'actions/setup-python@v7.1.0'
