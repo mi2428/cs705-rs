@@ -1,6 +1,7 @@
 # CS-705
 
 [![Library](https://github.com/mi2428/cs705-rs/actions/workflows/library.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/library.yml)
+[![PyO3](https://github.com/mi2428/cs705-rs/actions/workflows/python.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/python.yml)
 [![Examples](https://github.com/mi2428/cs705-rs/actions/workflows/examples.yml/badge.svg?branch=main)](https://github.com/mi2428/cs705-rs/actions/workflows/examples.yml)
 [![Releases](https://github.com/mi2428/cs705-rs/actions/workflows/release.yml/badge.svg)](https://github.com/mi2428/cs705-rs/actions/workflows/release.yml)
 
